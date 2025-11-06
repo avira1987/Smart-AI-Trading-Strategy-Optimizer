@@ -141,7 +141,7 @@ class FinancialModelingPrepProvider:
     def get_price() -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         """دریافت قیمت لحظه‌ای طلا از Financial Modeling Prep"""
         try:
-            # Get API key from environment variable (required)
+            # Get API key from environment variable (optional - can be set via APIConfiguration for data providers)
             api_key = os.getenv('FINANCIALMODELINGPREP_API_KEY')
             if not api_key:
                 return None, "Financial Modeling Prep API key not configured. Please set FINANCIALMODELINGPREP_API_KEY environment variable."
@@ -208,7 +208,7 @@ class FinancialModelingPrepProvider:
     def get_from_commodities() -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         """دریافت قیمت طلا از endpoint commodities"""
         try:
-            # Get API key from environment variable (required)
+            # Get API key from environment variable (optional - can be set via APIConfiguration for data providers)
             api_key = os.getenv('FINANCIALMODELINGPREP_API_KEY')
             if not api_key:
                 return None, "Financial Modeling Prep API key not configured. Please set FINANCIALMODELINGPREP_API_KEY environment variable."

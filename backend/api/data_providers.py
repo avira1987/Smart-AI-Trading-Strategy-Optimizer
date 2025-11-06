@@ -308,10 +308,10 @@ class FinancialModelingPrepProvider:
     """Financial Modeling Prep API provider for historical data"""
     
     def __init__(self):
-        # Get API key from environment variable (required)
+        # Get API key from environment variable (optional - can be set later via APIConfiguration)
         self.api_key = os.getenv('FINANCIALMODELINGPREP_API_KEY')
         if not self.api_key:
-            raise ValueError("FINANCIALMODELINGPREP_API_KEY environment variable is required")
+            logger.warning("FINANCIALMODELINGPREP_API_KEY not set. Please set it via environment variable or APIConfiguration model.")
         self.base_url = 'https://financialmodelingprep.com/api/v3'
     
     def get_historical_data(self, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
