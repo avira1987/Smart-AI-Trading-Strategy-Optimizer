@@ -6,11 +6,16 @@ import requests
 import sys
 import io
 import json
+import os
 
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-API_KEY = "KKpWyVfgSpg8cu5dbDiENhvTtcpLgCL-uenJG24M1_c="
+# API key should be set via environment variable
+# For testing, set NERKH_API_KEY in your .env file
+API_KEY = os.getenv('NERKH_API_KEY', '')
+if not API_KEY:
+    print("⚠️  Warning: NERKH_API_KEY not set. Please set it in your .env file.")
 
 def test_docs_page():
     """بررسی صفحه مستندات"""

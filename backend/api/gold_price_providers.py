@@ -141,10 +141,10 @@ class FinancialModelingPrepProvider:
     def get_price() -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         """دریافت قیمت لحظه‌ای طلا از Financial Modeling Prep"""
         try:
-            # Try environment variable first, then default key
-            api_key = os.getenv('FINANCIALMODELINGPREP_API_KEY') or 'CrFA9qczl3MRwERIiCGcmqloOilqkOBY'
+            # Get API key from environment variable (required)
+            api_key = os.getenv('FINANCIALMODELINGPREP_API_KEY')
             if not api_key:
-                return None, "Financial Modeling Prep API key not configured"
+                return None, "Financial Modeling Prep API key not configured. Please set FINANCIALMODELINGPREP_API_KEY environment variable."
             
             # Financial Modeling Prep برای طلا از endpoint commodities استفاده می‌کند
             # یا از quote endpoint برای XAU/USD
@@ -208,10 +208,10 @@ class FinancialModelingPrepProvider:
     def get_from_commodities() -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         """دریافت قیمت طلا از endpoint commodities"""
         try:
-            # Try environment variable first, then default key
-            api_key = os.getenv('FINANCIALMODELINGPREP_API_KEY') or 'CrFA9qczl3MRwERIiCGcmqloOilqkOBY'
+            # Get API key from environment variable (required)
+            api_key = os.getenv('FINANCIALMODELINGPREP_API_KEY')
             if not api_key:
-                return None, "Financial Modeling Prep API key not configured"
+                return None, "Financial Modeling Prep API key not configured. Please set FINANCIALMODELINGPREP_API_KEY environment variable."
             
             # برخی از plan ها از endpoint commodities استفاده می‌کنند
             url = 'https://financialmodelingprep.com/api/v3/commodities'

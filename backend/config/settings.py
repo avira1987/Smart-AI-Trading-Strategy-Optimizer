@@ -30,7 +30,11 @@ GEMINI_MAX_OUTPUT_TOKENS = int(os.environ.get('GEMINI_MAX_OUTPUT_TOKENS', '2048'
 GEMINI_ENABLED = os.environ.get('GEMINI_ENABLED', 'True') == 'True'
 
 # Zarinpal Payment Gateway Settings
-ZARINPAL_MERCHANT_ID = os.environ.get('ZARINPAL_MERCHANT_ID', 'c1245d85-cc41-45fd-a5c6-d071d6b96dc4')
+ZARINPAL_MERCHANT_ID = os.environ.get('ZARINPAL_MERCHANT_ID', '')
+if not ZARINPAL_MERCHANT_ID:
+    # Only raise error in production, allow empty in development
+    if ENV != 'LOCAL' and not DEBUG:
+        raise ValueError("ZARINPAL_MERCHANT_ID environment variable is required in production")
 ZARINPAL_SANDBOX = os.environ.get('ZARINPAL_SANDBOX', 'False') == 'True'  # Set to 'True' for sandbox, 'False' for production
 
 # Frontend URL for payment callbacks

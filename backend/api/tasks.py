@@ -113,15 +113,10 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
         available_providers = data_manager.get_available_providers()
         detailed_logger.info(f"ارائه‌دهندگان داده موجود: {available_providers}")
         
-        # If no providers found, try to set default Financial Modeling Prep key
+        # If no providers found, API key should be set via environment variable or APIConfiguration
+        # Do not set default API keys here for security reasons
         if not available_providers:
-            # Set default API key if not already set
-            if not os.getenv('FINANCIALMODELINGPREP_API_KEY'):
-                os.environ['FINANCIALMODELINGPREP_API_KEY'] = 'CrFA9qczl3MRwERIiCGcmqloOilqkOBY'
-                # Reinitialize data manager to pick up the new key
-                data_manager = DataProviderManager()
-                available_providers = data_manager.get_available_providers()
-                detailed_logger.info(f"استفاده از API key پیش‌فرض. ارائه‌دهندگان موجود: {available_providers}")
+            pass  # Provider configuration should be done via APIConfiguration model
         
         if not available_providers:
             error_msg = (

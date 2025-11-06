@@ -383,14 +383,10 @@ class BacktestPrecheckView(APIView):
             data_manager = DataProviderManager()
             available = data_manager.get_available_providers()
             
-            # If no providers found, try to set default Financial Modeling Prep key
+            # If no providers found, API key should be set via environment variable or APIConfiguration
+            # Do not set default API keys here for security reasons
             if not available:
-                import os
-                if not os.getenv('FINANCIALMODELINGPREP_API_KEY'):
-                    os.environ['FINANCIALMODELINGPREP_API_KEY'] = 'CrFA9qczl3MRwERIiCGcmqloOilqkOBY'
-                    # Reinitialize to pick up the new key
-                    data_manager = DataProviderManager()
-                    available = data_manager.get_available_providers()
+                pass  # Provider configuration should be done via APIConfiguration model
 
             details = {
                 'symbol': symbol,

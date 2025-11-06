@@ -22,9 +22,12 @@ def test_financialmodelingprep():
     print("تست Financial Modeling Prep Provider")
     print("=" * 70)
     
-    # تنظیم API key
-    api_key = "CrFA9qczl3MRwERIiCGcmqloOilqkOBY"
-    os.environ['FINANCIALMODELINGPREP_API_KEY'] = api_key
+    # API key should be set via environment variable
+    # For testing, set FINANCIALMODELINGPREP_API_KEY in your .env file
+    api_key = os.getenv('FINANCIALMODELINGPREP_API_KEY')
+    if not api_key:
+        print("⚠️  Warning: FINANCIALMODELINGPREP_API_KEY not set. Please set it in your .env file.")
+        return
     
     provider = FinancialModelingPrepProvider()
     
@@ -53,9 +56,12 @@ def test_gold_price_manager():
     print("تست GoldPriceManager با Financial Modeling Prep")
     print("=" * 70)
     
-    # تنظیم API key
-    api_key = "CrFA9qczl3MRwERIiCGcmqloOilqkOBY"
-    os.environ['FINANCIALMODELINGPREP_API_KEY'] = api_key
+    # API key should be set via environment variable
+    # For testing, set FINANCIALMODELINGPREP_API_KEY in your .env file
+    api_key = os.getenv('FINANCIALMODELINGPREP_API_KEY')
+    if not api_key:
+        print("⚠️  Warning: FINANCIALMODELINGPREP_API_KEY not set. Please set it in your .env file.")
+        return
     
     manager = GoldPriceManager()
     

@@ -29,10 +29,10 @@ def test_data_providers():
     print("تست ارائه‌دهندگان داده (بدون MT5)")
     print("=" * 70)
     
-    # تنظیم API key پیش‌فرض
+    # API key should be set via environment variable
+    # For testing, set FINANCIALMODELINGPREP_API_KEY in your .env file
     if not os.getenv('FINANCIALMODELINGPREP_API_KEY'):
-        os.environ['FINANCIALMODELINGPREP_API_KEY'] = 'CrFA9qczl3MRwERIiCGcmqloOilqkOBY'
-        print("\n✅ API key پیش‌فرض تنظیم شد")
+        print("\n⚠️  Warning: FINANCIALMODELINGPREP_API_KEY not set. Please set it in your .env file.")
     
     manager = DataProviderManager()
     available = manager.get_available_providers()
@@ -82,9 +82,10 @@ def test_gold_price():
     print("تست دریافت قیمت لحظه‌ای طلا")
     print("=" * 70)
     
-    # تنظیم API key پیش‌فرض
+    # API key should be set via environment variable
+    # For testing, set FINANCIALMODELINGPREP_API_KEY in your .env file
     if not os.getenv('FINANCIALMODELINGPREP_API_KEY'):
-        os.environ['FINANCIALMODELINGPREP_API_KEY'] = 'CrFA9qczl3MRwERIiCGcmqloOilqkOBY'
+        print("\n⚠️  Warning: FINANCIALMODELINGPREP_API_KEY not set. Please set it in your .env file.")
     
     manager = GoldPriceManager()
     
@@ -111,9 +112,10 @@ def test_full_backtest_flow():
     print("تست جریان کامل بک‌تست (بدون MT5)")
     print("=" * 70)
     
-    # تنظیم API key پیش‌فرض
+    # API key should be set via environment variable
+    # For testing, set FINANCIALMODELINGPREP_API_KEY in your .env file
     if not os.getenv('FINANCIALMODELINGPREP_API_KEY'):
-        os.environ['FINANCIALMODELINGPREP_API_KEY'] = 'CrFA9qczl3MRwERIiCGcmqloOilqkOBY'
+        print("\n⚠️  Warning: FINANCIALMODELINGPREP_API_KEY not set. Please set it in your .env file.")
     
     manager = DataProviderManager()
     

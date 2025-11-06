@@ -15,7 +15,7 @@
 #### Financial Modeling Prep (توصیه می‌شود)
 ```bash
 # در فایل .env
-FINANCIALMODELINGPREP_API_KEY=CrFA9qczl3MRwERIiCGcmqloOilqkOBY
+FINANCIALMODELINGPREP_API_KEY=YOUR_API_KEY_HERE
 ```
 
 #### Twelve Data (جایگزین)
@@ -122,7 +122,7 @@ MT5 در دسترس نیست.
 
 ```bash
 # در فایل .env
-FINANCIALMODELINGPREP_API_KEY=CrFA9qczl3MRwERIiCGcmqloOilqkOBY
+FINANCIALMODELINGPREP_API_KEY=YOUR_API_KEY_HERE
 ```
 
 ### 2. راه‌اندازی مجدد Backend (اگر نیاز باشد):

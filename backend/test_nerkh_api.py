@@ -15,7 +15,12 @@ if sys.platform == 'win32':
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # کلید API
-API_KEY = "KKpWyVfgSpg8cu5dbDiENhvTtcpLgCL-uenJG24M1_c="
+# API key should be set via environment variable
+# For testing, set NERKH_API_KEY in your .env file
+import os
+API_KEY = os.getenv('NERKH_API_KEY', '')
+if not API_KEY:
+    print("⚠️  Warning: NERKH_API_KEY not set. Please set it in your .env file.")
 
 # آدرس Proxy (IP محلی کلاینت)
 # مثال: http://192.168.100.9:8080 یا socks5://192.168.100.9:1080
