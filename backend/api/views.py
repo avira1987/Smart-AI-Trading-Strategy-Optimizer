@@ -2,8 +2,12 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.views import APIView
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from datetime import timedelta
 from .permissions import IsAdminOrStaff
+from .api_usage_tracker import get_api_usage_stats
 from core.models import APIConfiguration, TradingStrategy, Job, Result, LiveTrade, AutoTradingSettings, Ticket, TicketMessage, StrategyOptimization
 from core.models import Wallet, Transaction, AIRecommendation, DDNSConfiguration
 from .serializers import (
@@ -2311,4 +2315,36 @@ class StrategyOptimizationViewSet(viewsets.ModelViewSet):
             )
         
         return super().destroy(request, *args, **kwargs)
+
+
+class APIUsageStatsView(APIView):
+    """View برای نمایش آمار استفاده از API و هزینه"""
+    permission_classes = [IsAdminOrStaff]
+    
+    def get(self, request):
+        """دریافت آمار استفاده از API"""
+        # دریافت پارامترهای فیلتر
+        provider = request.query_params.get('provider', None)
+        days = request.query_params.get('days', None)
+        
+        # محاسبه تاریخ شروع و پایان
+        start_date = None
+        end_date = None
+        
+        if days:
+            try:
+                days = int(days)
+                start_date = timezone.now() - timedelta(days=days)
+                end_date = timezone.now()
+            except ValueError:
+                pass
+        
+        # دریافت آمار
+        stats = get_api_usage_stats(
+            provider=provider,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        return Response(stats)
 

@@ -5,6 +5,7 @@ import { checkProfileCompletion, updateProfile } from '../api/auth'
 import { useToast } from '../components/ToastProvider'
 import APIConfigurations from '../components/APIConfigurations'
 import DDNSConfiguration from '../components/DDNSConfiguration'
+import APIUsageStats from '../components/APIUsageStats'
 import SymbolSelector from '../components/SymbolSelector'
 import { getWalletBalance, chargeWallet } from '../api/client'
 
@@ -445,6 +446,13 @@ export default function Profile() {
         {isAdmin && (
           <div className="bg-gray-800 rounded-lg overflow-hidden mt-6">
             <DDNSConfiguration />
+          </div>
+        )}
+
+        {/* API Usage Stats - Admin Only */}
+        {isAdmin && (
+          <div className="bg-gray-800 rounded-lg overflow-hidden mt-6">
+            <APIUsageStats />
           </div>
         )}
       </div>

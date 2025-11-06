@@ -4,7 +4,8 @@ from .views import (
     APIConfigurationViewSet, TradingStrategyViewSet, JobViewSet, 
     ResultViewSet, MarketDataView, BacktestPrecheckView, LiveTradeViewSet,
     AutoTradingSettingsViewSet, StrategyQuestionViewSet, TicketViewSet,
-    WalletViewSet, AIRecommendationViewSet, PaymentViewSet, StrategyOptimizationViewSet
+    WalletViewSet, AIRecommendationViewSet, PaymentViewSet, StrategyOptimizationViewSet,
+    APIUsageStatsView
 )
 from .ddns_views import DDNSConfigurationViewSet
 from .auth_views import SendOTPView, VerifyOTPView, GoogleOAuthView, check_auth, logout, get_csrf_token, check_profile_completion, update_profile, check_ip_location, check_google_auth_status
@@ -55,5 +56,7 @@ urlpatterns = [
     path('demo/trades/', DemoTradeView.as_view(), name='demo_trades'),
     path('demo/trades/<int:trade_id>/close/', DemoCloseTradeView.as_view(), name='demo_close_trade'),
     path('demo/update-prices/', DemoUpdatePricesView.as_view(), name='demo_update_prices'),
+    # API usage statistics (admin only)
+    path('api-usage-stats/', APIUsageStatsView.as_view(), name='api_usage_stats'),
 ]
 

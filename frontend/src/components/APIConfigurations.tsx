@@ -456,11 +456,12 @@ export default function APIConfigurations() {
                     </div>
                   </div>
                 ))}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        )
+      })()}
 
       {/* Add/Edit Modal */}
       {showModal && (

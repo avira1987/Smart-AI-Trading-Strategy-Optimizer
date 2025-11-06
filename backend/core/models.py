@@ -925,3 +925,33 @@ class SystemSettings(models.Model):
     def __str__(self):
         return "تنظیمات سیستم"
 
+
+class APIUsageLog(models.Model):
+    """ردیابی استفاده از API ها و محاسبه هزینه"""
+    
+    provider = models.CharField(max_length=50, help_text="نام ارائه‌دهنده API")
+    endpoint = models.CharField(max_length=255, blank=True, help_text="آدرس endpoint فراخوانی شده")
+    request_type = models.CharField(max_length=10, default='GET', help_text="نوع درخواست (GET, POST, etc.)")
+    status_code = models.IntegerField(null=True, blank=True, help_text="کد وضعیت پاسخ")
+    success = models.BooleanField(default=True, help_text="آیا درخواست موفق بود؟")
+    cost = models.DecimalField(max_digits=12, decimal_places=6, default=0.0, help_text="هزینه به دلار")
+    cost_toman = models.DecimalField(max_digits=12, decimal_places=2, default=0.0, help_text="هزینه به تومان")
+    response_time_ms = models.FloatField(null=True, blank=True, help_text="زمان پاسخ به میلی‌ثانیه")
+    error_message = models.TextField(blank=True, help_text="پیام خطا در صورت وجود")
+    metadata = models.JSONField(default=dict, blank=True, help_text="اطلاعات اضافی")
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = "لاگ استفاده از API"
+        verbose_name_plural = "لاگ‌های استفاده از API"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['provider', 'created_at']),
+            models.Index(fields=['created_at']),
+            models.Index(fields=['provider', 'success']),
+        ]
+    
+    def __str__(self):
+        status = "موفق" if self.success else "ناموفق"
+        return f"{self.provider} - {status} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+

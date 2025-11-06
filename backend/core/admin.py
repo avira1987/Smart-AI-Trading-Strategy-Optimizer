@@ -2,6 +2,7 @@ from django.contrib import admin
 from .models import APIConfiguration, TradingStrategy, Job, Result, LiveTrade, AutoTradingSettings
 from .models import UserProfile, OTPCode, Device, Ticket, TicketMessage, StrategyOptimization
 from .models import Wallet, Transaction, AIRecommendation, DDNSConfiguration, SystemSettings, GoldPriceSubscription
+from .models import APIUsageLog
 
 
 @admin.register(APIConfiguration)
@@ -275,4 +276,45 @@ class SystemSettingsAdmin(admin.ModelAdmin):
         # اگر رکوردی وجود ندارد، آن را ایجاد کنیم
         SystemSettings.load()
         return super().changelist_view(request, extra_context)
+
+
+@admin.register(APIUsageLog)
+class APIUsageLogAdmin(admin.ModelAdmin):
+    """Admin برای لاگ استفاده از API"""
+    list_display = ['id', 'provider', 'endpoint', 'request_type', 'status_code', 'success', 'cost_toman', 'response_time_ms', 'created_at']
+    list_filter = ['provider', 'success', 'request_type', 'created_at']
+    search_fields = ['provider', 'endpoint', 'error_message']
+    readonly_fields = ['created_at']
+    ordering = ['-created_at']
+    fieldsets = (
+        ('اطلاعات درخواست', {
+            'fields': ('provider', 'endpoint', 'request_type', 'status_code', 'success')
+        }),
+        ('هزینه', {
+            'fields': ('cost', 'cost_toman')
+        }),
+        ('عملکرد', {
+            'fields': ('response_time_ms',)
+        }),
+        ('خطا', {
+            'fields': ('error_message',),
+            'classes': ('collapse',)
+        }),
+        ('اطلاعات اضافی', {
+            'fields': ('metadata',),
+            'classes': ('collapse',)
+        }),
+        ('زمان', {
+            'fields': ('created_at',),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def has_add_permission(self, request):
+        # جلوگیری از افزودن دستی لاگ‌ها
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        # جلوگیری از ویرایش لاگ‌ها
+        return False
 
