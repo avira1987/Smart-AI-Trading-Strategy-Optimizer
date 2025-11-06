@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: ai-forex-backend
+    env: python
+    buildCommand: pip install -r backend/requirements.txt && python backend/manage.py migrate && python backend/manage.py collectstatic --noinput
+    startCommand: cd backend && gunicorn config.wsgi:application --bind 0.0.0.0:$PORT
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: False
+      - key: ENV
+        value: PRODUCTION
+      - key: CELERY_BROKER_URL
+        fromService:
+          name: redis
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: redis
+          property: connectionString
+      - key: DATABASE_URL
+        fromDatabase:
+          name: postgres
+          property: connectionString
+    healthCheckPath: /api/
+
+databases:
+  - name: postgres
+    databaseName: forex_db
+    user: postgres
+
+services:
+  - type: redis
+    name: redis
+
