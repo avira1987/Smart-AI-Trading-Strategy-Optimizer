@@ -19,7 +19,12 @@ export default function APIConfigurations() {
     { value: 'alphavantage', label: 'Alpha Vantage' },
     { value: 'oanda', label: 'OANDA' },
     { value: 'metalsapi', label: 'MetalsAPI' },
-    { value: 'gemini', label: 'Gemini AI (Google AI Studio)' }
+    { value: 'financialmodelingprep', label: 'Financial Modeling Prep' },
+    { value: 'nerkh', label: 'Nerkh.io (قیمت طلا)' },
+    { value: 'gemini', label: 'Gemini AI (Google AI Studio)' },
+    { value: 'kavenegar', label: 'Kavenegar (SMS)' },
+    { value: 'google_oauth', label: 'Google OAuth (Client ID)' },
+    { value: 'zarinpal', label: 'Zarinpal (Merchant ID)' }
   ]
   const { showToast } = useToast()
 
@@ -383,7 +388,14 @@ export default function APIConfigurations() {
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   className="input-standard"
-                  placeholder={provider === 'gemini' ? 'کلید API Gemini خود را از aistudio.google.com دریافت کنید' : 'کلید API خود را وارد کنید'}
+                  placeholder={
+                    provider === 'gemini' ? 'کلید API Gemini خود را از aistudio.google.com دریافت کنید' :
+                    provider === 'kavenegar' ? 'کلید API Kavenegar خود را از panel.kavenegar.com دریافت کنید' :
+                    provider === 'google_oauth' ? 'Google OAuth Client ID خود را از console.cloud.google.com دریافت کنید' :
+                    provider === 'zarinpal' ? 'Merchant ID خود را از zarinpal.com دریافت کنید' :
+                    provider === 'nerkh' ? 'کلید API Nerkh.io خود را وارد کنید' :
+                    'کلید API خود را وارد کنید'
+                  }
                   required
                 />
                 {provider === 'gemini' && (
@@ -404,6 +416,51 @@ export default function APIConfigurations() {
                       6. کلید API تولید شده را کپی کرده و اینجا وارد کنید
                       <br />
                       <span className="text-yellow-300 mt-1 block">⚠️ توجه: کلید API را در جای امن نگه دارید و به اشتراک نگذارید</span>
+                    </p>
+                  </div>
+                )}
+                {provider === 'kavenegar' && (
+                  <div className="mt-2 p-3 bg-blue-900/30 rounded-lg border border-blue-700">
+                    <p className="text-blue-300 text-xs">
+                      <strong>💡 راهنمای دریافت کلید Kavenegar:</strong>
+                      <br />
+                      1. به <a href="https://panel.kavenegar.com" target="_blank" rel="noopener noreferrer" className="underline font-semibold">پنل Kavenegar</a> بروید
+                      <br />
+                      2. وارد حساب کاربری خود شوید
+                      <br />
+                      3. از منوی API، کلید API خود را کپی کنید
+                      <br />
+                      4. کلید را اینجا وارد کنید
+                    </p>
+                  </div>
+                )}
+                {provider === 'google_oauth' && (
+                  <div className="mt-2 p-3 bg-blue-900/30 rounded-lg border border-blue-700">
+                    <p className="text-blue-300 text-xs">
+                      <strong>💡 راهنمای دریافت Google OAuth Client ID:</strong>
+                      <br />
+                      1. به <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" className="underline font-semibold">Google Cloud Console</a> بروید
+                      <br />
+                      2. یک پروژه جدید بسازید یا پروژه موجود را انتخاب کنید
+                      <br />
+                      3. APIs & Services → Credentials → Create Credentials → OAuth client ID
+                      <br />
+                      4. Client ID را کپی کرده و اینجا وارد کنید
+                    </p>
+                  </div>
+                )}
+                {provider === 'zarinpal' && (
+                  <div className="mt-2 p-3 bg-blue-900/30 rounded-lg border border-blue-700">
+                    <p className="text-blue-300 text-xs">
+                      <strong>💡 راهنمای دریافت Zarinpal Merchant ID:</strong>
+                      <br />
+                      1. به <a href="https://zarinpal.com" target="_blank" rel="noopener noreferrer" className="underline font-semibold">Zarinpal</a> بروید
+                      <br />
+                      2. وارد حساب کاربری خود شوید
+                      <br />
+                      3. از بخش تنظیمات، Merchant ID خود را کپی کنید
+                      <br />
+                      4. Merchant ID را اینجا وارد کنید
                     </p>
                   </div>
                 )}

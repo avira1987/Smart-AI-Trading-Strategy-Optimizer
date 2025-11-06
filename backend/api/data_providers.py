@@ -9,6 +9,12 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
+# Import APIConfiguration to load API keys from database
+try:
+    from core.models import APIConfiguration
+except ImportError:
+    APIConfiguration = None
+
 class TwelveDataProvider:
     """TwelveData API provider for historical data"""
     
@@ -433,6 +439,32 @@ class DataProviderManager:
             'oanda': OANDAProvider(),
             'metalsapi': MetalsAPIProvider(),
         }
+        # Load API keys from APIConfiguration if available
+        self._load_api_keys_from_db()
+    
+    def _load_api_keys_from_db(self):
+        """Load API keys from APIConfiguration model"""
+        if not APIConfiguration:
+            return
+        
+        try:
+            # Get active API configurations
+            api_configs = APIConfiguration.objects.filter(is_active=True)
+            
+            for api_config in api_configs:
+                provider_name = api_config.provider
+                if provider_name in self.providers:
+                    provider_instance = self.providers[provider_name]
+                    if hasattr(provider_instance, 'api_key'):
+                        # Only override if not already set from environment variable
+                        if not provider_instance.api_key:
+                            provider_instance.api_key = api_config.api_key
+                            logger.info(f"Loaded API key for {provider_name} from APIConfiguration")
+                        else:
+                            # Environment variable takes precedence, but log that DB has a key too
+                            logger.debug(f"API key for {provider_name} already set from environment variable")
+        except Exception as e:
+            logger.warning(f"Failed to load API keys from database: {e}")
     
     def get_data(self, provider: str, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
         """Get data from specified provider"""

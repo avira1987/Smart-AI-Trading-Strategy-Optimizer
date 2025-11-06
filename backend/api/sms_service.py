@@ -14,8 +14,26 @@ except ImportError:
     SMS_ENABLED = False
     logger.warning("Warning: Kavenegar module not found. SMS notifications disabled.")
 
-# Get API key from environment or use default
-KAVENEGAR_API_KEY = os.environ.get('KAVENEGAR_API_KEY', '4F5674427065325A59627A704C766F35763661487055377A714F515571336A52')
+# Get API key from environment or APIConfiguration
+def get_kavenegar_api_key():
+    """Get Kavenegar API key from environment variable or APIConfiguration"""
+    # First try environment variable
+    api_key = os.environ.get('KAVENEGAR_API_KEY', '')
+    if api_key:
+        return api_key
+    
+    # Then try APIConfiguration model
+    try:
+        from core.models import APIConfiguration
+        api_config = APIConfiguration.objects.filter(provider='kavenegar', is_active=True).first()
+        if api_config:
+            return api_config.api_key
+    except Exception:
+        pass
+    
+    return ''
+
+KAVENEGAR_API_KEY = get_kavenegar_api_key()
 
 # Get sender number from environment (optional - if not set, will try without sender)
 KAVENEGAR_SENDER = os.environ.get('KAVENEGAR_SENDER', None)

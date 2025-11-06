@@ -11,6 +11,12 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Import APIConfiguration to load API keys from database
+try:
+    from core.models import APIConfiguration
+except ImportError:
+    APIConfiguration = None
+
 
 class NerkhProvider:
     """ارائه‌دهنده قیمت از nerkh.io (نیاز به IP ایران)"""
@@ -448,8 +454,17 @@ class GoldPriceManager:
         self.twelvedata_provider = TwelveDataProvider()
         self.financialmodelingprep_provider = FinancialModelingPrepProvider()
         
-        # سعی کنیم nerkh را تنظیم کنیم
+        # سعی کنیم nerkh را تنظیم کنیم (از environment variable یا APIConfiguration)
         nerkh_key = os.getenv('NERKH_API_KEY')
+        if not nerkh_key and APIConfiguration:
+            try:
+                api_config = APIConfiguration.objects.filter(provider='nerkh', is_active=True).first()
+                if api_config:
+                    nerkh_key = api_config.api_key
+                    logger.info("Loaded Nerkh API key from APIConfiguration")
+            except Exception as e:
+                logger.warning(f"Failed to load Nerkh API key from database: {e}")
+        
         if nerkh_key:
             self.nerkh_provider = NerkhProvider(nerkh_key)
     

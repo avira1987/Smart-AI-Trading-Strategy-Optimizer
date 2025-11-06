@@ -14,7 +14,12 @@ class APIConfiguration(models.Model):
         ('alphavantage', 'Alpha Vantage'),
         ('oanda', 'OANDA'),
         ('metalsapi', 'MetalsAPI'),
+        ('financialmodelingprep', 'Financial Modeling Prep'),
+        ('nerkh', 'Nerkh.io (قیمت طلا)'),
         ('gemini', 'Gemini AI (Google AI Studio)'),
+        ('kavenegar', 'Kavenegar (SMS)'),
+        ('google_oauth', 'Google OAuth (Client ID)'),
+        ('zarinpal', 'Zarinpal (Merchant ID)'),
     ]
     
     provider = models.CharField(max_length=50, choices=PROVIDER_CHOICES)

@@ -309,11 +309,12 @@ class GoogleOAuthView(APIView):
             )
         
         try:
-            # Get Google Client ID from environment
-            GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
+            # Get Google Client ID from settings (which loads from env or APIConfiguration)
+            from django.conf import settings
+            GOOGLE_CLIENT_ID = getattr(settings, 'GOOGLE_CLIENT_ID', '')
             
             if not GOOGLE_CLIENT_ID:
-                logger.error("GOOGLE_CLIENT_ID not configured in environment")
+                logger.error("GOOGLE_CLIENT_ID not configured in environment or APIConfiguration")
                 return Response(
                     {
                         'success': False,

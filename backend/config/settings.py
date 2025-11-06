@@ -23,19 +23,48 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-please-change-in-production')
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 ENV = os.environ.get('ENV', 'LOCAL')
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY', '')
+
+# Helper function to get API key from environment or APIConfiguration
+def get_api_key_from_db_or_env(provider_name: str, env_var_name: str = None) -> str:
+    """Get API key from APIConfiguration model or environment variable"""
+    # First try environment variable
+    if env_var_name:
+        api_key = os.environ.get(env_var_name, '')
+        if api_key:
+            return api_key
+    
+    # Then try APIConfiguration model
+    try:
+        from core.models import APIConfiguration
+        api_config = APIConfiguration.objects.filter(provider=provider_name, is_active=True).first()
+        if api_config:
+            return api_config.api_key
+    except Exception:
+        # If models are not loaded yet (during initial setup), just return empty
+        pass
+    
+    return ''
+
+GEMINI_API_KEY = get_api_key_from_db_or_env('gemini', 'GEMINI_API_KEY')
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash')
 GEMINI_MAX_OUTPUT_TOKENS = int(os.environ.get('GEMINI_MAX_OUTPUT_TOKENS', '2048'))
 # Default to True if not explicitly set to False
 GEMINI_ENABLED = os.environ.get('GEMINI_ENABLED', 'True') == 'True'
 
 # Zarinpal Payment Gateway Settings
-ZARINPAL_MERCHANT_ID = os.environ.get('ZARINPAL_MERCHANT_ID', '')
+ZARINPAL_MERCHANT_ID = get_api_key_from_db_or_env('zarinpal', 'ZARINPAL_MERCHANT_ID')
 if not ZARINPAL_MERCHANT_ID:
     # Only raise error in production, allow empty in development
     if ENV != 'LOCAL' and not DEBUG:
-        raise ValueError("ZARINPAL_MERCHANT_ID environment variable is required in production")
+        raise ValueError("ZARINPAL_MERCHANT_ID environment variable or APIConfiguration is required in production")
 ZARINPAL_SANDBOX = os.environ.get('ZARINPAL_SANDBOX', 'False') == 'True'  # Set to 'True' for sandbox, 'False' for production
+
+# Kavenegar SMS Settings
+KAVENEGAR_API_KEY = get_api_key_from_db_or_env('kavenegar', 'KAVENEGAR_API_KEY')
+KAVENEGAR_SENDER = os.environ.get('KAVENEGAR_SENDER', '')
+
+# Google OAuth Settings
+GOOGLE_CLIENT_ID = get_api_key_from_db_or_env('google_oauth', 'GOOGLE_CLIENT_ID')
 
 # Frontend URL for payment callbacks
 FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3000')
