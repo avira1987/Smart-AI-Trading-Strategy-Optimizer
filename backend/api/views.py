@@ -32,6 +32,62 @@ class APIConfigurationViewSet(viewsets.ModelViewSet):
     serializer_class = APIConfigurationSerializer
     permission_classes = [AllowAny]  # Keep AllowAny for now, can change to IsAuthenticated later
     
+    # Backend/system providers that require admin access
+    BACKEND_PROVIDERS = ['kavenegar', 'google_oauth', 'zarinpal']
+    
+    def get_queryset(self):
+        """Filter queryset based on user permissions"""
+        queryset = super().get_queryset()
+        
+        # If user is not admin, filter out backend providers
+        if not (self.request.user and (self.request.user.is_staff or self.request.user.is_superuser)):
+            queryset = queryset.exclude(provider__in=self.BACKEND_PROVIDERS)
+        
+        return queryset
+    
+    def create(self, request, *args, **kwargs):
+        """Override create to check admin permission for backend providers"""
+        provider = request.data.get('provider', '')
+        
+        # Check if user is trying to create a backend provider
+        if provider in self.BACKEND_PROVIDERS:
+            if not (request.user and (request.user.is_staff or request.user.is_superuser)):
+                return Response(
+                    {'detail': 'فقط ادمین می‌تواند تنظیمات بک‌اند را اضافه کند'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+        return super().create(request, *args, **kwargs)
+    
+    def update(self, request, *args, **kwargs):
+        """Override update to check admin permission for backend providers"""
+        instance = self.get_object()
+        provider = request.data.get('provider', instance.provider)
+        
+        # Check if user is trying to update a backend provider
+        if provider in self.BACKEND_PROVIDERS or instance.provider in self.BACKEND_PROVIDERS:
+            if not (request.user and (request.user.is_staff or request.user.is_superuser)):
+                return Response(
+                    {'detail': 'فقط ادمین می‌تواند تنظیمات بک‌اند را ویرایش کند'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+        return super().update(request, *args, **kwargs)
+    
+    def destroy(self, request, *args, **kwargs):
+        """Override destroy to check admin permission for backend providers"""
+        instance = self.get_object()
+        
+        # Check if user is trying to delete a backend provider
+        if instance.provider in self.BACKEND_PROVIDERS:
+            if not (request.user and (request.user.is_staff or request.user.is_superuser)):
+                return Response(
+                    {'detail': 'فقط ادمین می‌تواند تنظیمات بک‌اند را حذف کند'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+        return super().destroy(request, *args, **kwargs)
+    
     @action(detail=True, methods=['post'])
     def test(self, request, pk=None):
         """Test API connection"""

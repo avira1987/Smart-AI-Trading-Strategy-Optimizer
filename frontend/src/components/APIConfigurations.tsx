@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react'
 import { getAPIConfigurations, addAPIConfiguration, updateAPIConfiguration, deleteAPIConfiguration, testAPIConfiguration, getAvailableProviders, testMT5Connection, type APIConfiguration } from '../api/client'
 import { checkIPLocation } from '../api/auth'
 import { useToast } from './ToastProvider'
+import { useAuth } from '../context/AuthContext'
 
 export default function APIConfigurations() {
+  const { isAdmin } = useAuth()
   const [apis, setApis] = useState<APIConfiguration[]>([])
   const [availableProviders, setAvailableProviders] = useState<string[]>([])
   const [showModal, setShowModal] = useState(false)
@@ -14,24 +16,37 @@ export default function APIConfigurations() {
   const [testingMT5, setTestingMT5] = useState(false)
   const [checkingIP, setCheckingIP] = useState(false)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
-  const supportedProviders = [
+  // API providers for trading data (available to all users)
+  const tradingDataProviders = [
     { value: 'twelvedata', label: 'TwelveData' },
     { value: 'alphavantage', label: 'Alpha Vantage' },
     { value: 'oanda', label: 'OANDA' },
     { value: 'metalsapi', label: 'MetalsAPI' },
     { value: 'financialmodelingprep', label: 'Financial Modeling Prep' },
     { value: 'nerkh', label: 'Nerkh.io (قیمت طلا)' },
-    { value: 'gemini', label: 'Gemini AI (Google AI Studio)' },
+    { value: 'gemini', label: 'Gemini AI (Google AI Studio)' }
+  ]
+  
+  // API providers for backend/system (admin only)
+  const backendProviders = [
     { value: 'kavenegar', label: 'Kavenegar (SMS)' },
     { value: 'google_oauth', label: 'Google OAuth (Client ID)' },
     { value: 'zarinpal', label: 'Zarinpal (Merchant ID)' }
   ]
+  
+  // All providers (for admin) or only trading data providers (for regular users)
+  const supportedProviders = isAdmin 
+    ? [...tradingDataProviders, ...backendProviders]
+    : tradingDataProviders
+  
+  // Backend provider names for filtering
+  const backendProviderNames = ['kavenegar', 'google_oauth', 'zarinpal']
   const { showToast } = useToast()
 
   useEffect(() => {
     loadAPIs()
     loadAvailableProviders()
-  }, [])
+  }, [isAdmin]) // Reload when admin status changes
 
   const loadAPIs = async () => {
     try {
@@ -82,6 +97,12 @@ export default function APIConfigurations() {
     e.preventDefault()
     if (!apiKey.trim()) {
       showToast('Please enter an API key', { type: 'warning' })
+      return
+    }
+
+    // Check if user is trying to add backend provider without admin access
+    if (backendProviderNames.includes(provider) && !isAdmin) {
+      showToast('فقط ادمین می‌تواند تنظیمات بک‌اند را اضافه کند', { type: 'error' })
       return
     }
 
@@ -170,6 +191,12 @@ export default function APIConfigurations() {
       return
     }
 
+    // Check if user is trying to update backend provider without admin access
+    if (backendProviderNames.includes(provider) && !isAdmin) {
+      showToast('فقط ادمین می‌تواند تنظیمات بک‌اند را ویرایش کند', { type: 'error' })
+      return
+    }
+
     try {
       console.log('Updating API configuration:', { id: editingApi.id, provider, apiKey }) // Debug log
       
@@ -198,6 +225,13 @@ export default function APIConfigurations() {
   }
 
   const handleDelete = async (id: number) => {
+    // Find the API config to check if it's a backend provider
+    const apiToDelete = apis.find(api => api.id === id)
+    if (apiToDelete && backendProviderNames.includes(apiToDelete.provider) && !isAdmin) {
+      showToast('فقط ادمین می‌تواند تنظیمات بک‌اند را حذف کند', { type: 'error' })
+      return
+    }
+
     // Remove blocking confirm; proceed and notify
     showToast('Deleting API configuration...', { type: 'info', duration: 1500 })
     try {
@@ -357,7 +391,55 @@ export default function APIConfigurations() {
                 </div>
               </div>
             </div>
-          ))}
+                ))}
+              </div>
+            </div>
+          )}
+          
+          {/* Backend/System APIs (admin only) */}
+          {isAdmin && apis.filter(api => backendProviderNames.includes(api.provider)).length > 0 && (
+            <div className="border-t border-gray-700 pt-6">
+              <h3 className="text-lg font-semibold text-white mb-3">تنظیمات بک‌اند وب‌سایت (فقط ادمین)</h3>
+              <div className="space-y-3">
+                {apis.filter(api => backendProviderNames.includes(api.provider)).map((api) => (
+                  <div key={api.id} className="bg-gray-700 rounded-lg p-4">
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h3 className="text-white font-medium text-lg">{api.provider}</h3>
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            api.is_active ? 'bg-green-700 text-green-200' : 'bg-gray-600 text-gray-300'
+                          }`}>
+                            {api.is_active ? 'فعال' : 'غیرفعال'}
+                          </span>
+                        </div>
+                        <div className="text-gray-300 text-sm mb-2">
+                          کلید: {api.api_key.substring(0, 10)}...
+                        </div>
+                        <div className="text-gray-400 text-xs">
+                          تاریخ ثبت: {new Date(api.created_at).toLocaleDateString('fa-IR')}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleEdit(api)}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition text-sm font-medium"
+                        >
+                          ویرایش
+                        </button>
+                        <button
+                          onClick={() => handleDelete(api.id)}
+                          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm font-medium"
+                        >
+                          حذف
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
