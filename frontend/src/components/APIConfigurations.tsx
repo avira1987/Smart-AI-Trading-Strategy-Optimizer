@@ -67,6 +67,11 @@ export default function APIConfigurations() {
         apisData = []
       }
       
+      // Note: Backend filtering is done on the server side, but we also filter here for safety
+      if (!isAdmin) {
+        apisData = apisData.filter(api => !backendProviderNames.includes(api.provider))
+      }
+      
       console.log('Final API Configurations data:', apisData) // Debug log
       setApis(apisData)
     } catch (error: any) {
@@ -340,68 +345,82 @@ export default function APIConfigurations() {
       )}
 
       {/* API Configurations List */}
-      {apis.length === 0 ? (
-        <div className="text-gray-400 text-center py-8">
-          <p className="text-lg mb-2">هنوز هیچ کلید API تعریف نشده است</p>
-          <p className="text-sm">برای شروع، کلید API اضافه کنید</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {apis.map((api) => (
-            <div key={api.id} className="bg-gray-700 rounded-lg p-4">
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className="text-white font-medium text-lg">{api.provider}</h3>
-                    <span className={`px-2 py-1 rounded text-xs font-medium ${
-                      api.is_active ? 'bg-green-700 text-green-200' : 'bg-gray-600 text-gray-300'
-                    }`}>
-                      {api.is_active ? 'فعال' : 'غیرفعال'}
-                    </span>
-                  </div>
-                  <div className="text-gray-300 text-sm mb-2">
-                    کلید: {api.api_key.substring(0, 10)}...
-                  </div>
-                  <div className="text-gray-400 text-xs">
-                    تاریخ ثبت: {new Date(api.created_at).toLocaleDateString('fa-IR')}
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  {(['twelvedata','alphavantage','oanda','metalsapi','gemini'].includes(api.provider)) && (
-                    <button
-                      onClick={() => handleTest(api.id)}
-                      disabled={testing === api.id}
-                      className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded-lg transition text-sm font-medium"
-                    >
-                      {testing === api.id ? 'در حال تست...' : 'تست' }
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleEdit(api)}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition text-sm font-medium"
-                  >
-                    ویرایش
-                  </button>
-                  <button
-                    onClick={() => handleDelete(api.id)}
-                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm font-medium"
-                  >
-                    حذف
-                  </button>
+      {(() => {
+        const tradingApis = apis.filter(api => !backendProviderNames.includes(api.provider))
+        const backendApis = isAdmin ? apis.filter(api => backendProviderNames.includes(api.provider)) : []
+        const totalApis = tradingApis.length + backendApis.length
+
+        if (totalApis === 0) {
+          return (
+            <div className="text-gray-400 text-center py-8">
+              <p className="text-lg mb-2">هنوز هیچ کلید API تعریف نشده است</p>
+              <p className="text-sm">برای شروع، کلید API اضافه کنید</p>
+            </div>
+          )
+        }
+
+        return (
+          <div className="space-y-6">
+            {/* Trading Data APIs (for all users) */}
+            {tradingApis.length > 0 && (
+              <div>
+                <h3 className="text-lg font-semibold text-white mb-3">کلیدهای API داده‌های معاملاتی</h3>
+                <div className="space-y-3">
+                  {tradingApis.map((api) => (
+                    <div key={api.id} className="bg-gray-700 rounded-lg p-4">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <h3 className="text-white font-medium text-lg">{api.provider}</h3>
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                              api.is_active ? 'bg-green-700 text-green-200' : 'bg-gray-600 text-gray-300'
+                            }`}>
+                              {api.is_active ? 'فعال' : 'غیرفعال'}
+                            </span>
+                          </div>
+                          <div className="text-gray-300 text-sm mb-2">
+                            کلید: {api.api_key.substring(0, 10)}...
+                          </div>
+                          <div className="text-gray-400 text-xs">
+                            تاریخ ثبت: {new Date(api.created_at).toLocaleDateString('fa-IR')}
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          {(['twelvedata','alphavantage','oanda','metalsapi','financialmodelingprep','gemini'].includes(api.provider)) && (
+                            <button
+                              onClick={() => handleTest(api.id)}
+                              disabled={testing === api.id}
+                              className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded-lg transition text-sm font-medium"
+                            >
+                              {testing === api.id ? 'در حال تست...' : 'تست' }
+                            </button>
+                          )}
+                          <button
+                            onClick={() => handleEdit(api)}
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition text-sm font-medium"
+                          >
+                            ویرایش
+                          </button>
+                          <button
+                            onClick={() => handleDelete(api.id)}
+                            className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-sm font-medium"
+                          >
+                            حذف
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
-            </div>
-                ))}
-              </div>
-            </div>
-          )}
-          
-          {/* Backend/System APIs (admin only) */}
-          {isAdmin && apis.filter(api => backendProviderNames.includes(api.provider)).length > 0 && (
-            <div className="border-t border-gray-700 pt-6">
-              <h3 className="text-lg font-semibold text-white mb-3">تنظیمات بک‌اند وب‌سایت (فقط ادمین)</h3>
-              <div className="space-y-3">
-                {apis.filter(api => backendProviderNames.includes(api.provider)).map((api) => (
+            )}
+            
+            {/* Backend/System APIs (admin only) */}
+            {isAdmin && backendApis.length > 0 && (
+              <div className="border-t border-gray-700 pt-6">
+                <h3 className="text-lg font-semibold text-white mb-3">تنظیمات بک‌اند وب‌سایت (فقط ادمین)</h3>
+                <div className="space-y-3">
+                  {backendApis.map((api) => (
                   <div key={api.id} className="bg-gray-700 rounded-lg p-4">
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
