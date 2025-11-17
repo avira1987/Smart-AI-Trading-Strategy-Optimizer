@@ -27,16 +27,40 @@ export const getPageLoadTime = (): number => {
 }
 
 /**
+ * Get API base URL (same logic as client.ts)
+ */
+function getApiBaseUrl(): string {
+  // In development, use Vite proxy which automatically handles local network IPs
+  if (import.meta.env.DEV) {
+    return '/api'
+  }
+  
+  // In production, use the actual API URL
+  const hostname = window.location.hostname
+  const protocol = window.location.protocol
+  
+  // If accessing via localhost or 127.0.0.1, use localhost
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return 'http://localhost:8000/api'
+  }
+  
+  // Otherwise, use the same hostname with port 8000
+  return `${protocol}//${hostname}:8000/api`
+}
+
+/**
  * Get CAPTCHA challenge from backend
  */
 export const getCaptcha = async (action: string = 'default'): Promise<CaptchaData> => {
   try {
-    const response = await fetch('/api/captcha/get/', {
+    const apiBaseUrl = getApiBaseUrl()
+    const response = await fetch(`${apiBaseUrl}/captcha/get/`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ action }),
+      credentials: 'include', // Important for session cookies
     })
 
     if (!response.ok) {
