@@ -1,0 +1,42 @@
+
+=== Deployment Notes for Windows Server 2022 ===
+
+1. Prerequisites
+   - Install Python 3.11+ from https://www.python.org/downloads/windows/
+   - Ensure 'python' and 'pip' are on PATH (check with `python --version`)
+   - Install Git if the project depends on submodules (https://git-scm.com/download/win)
+   - Install any required system packages listed in documentation
+
+2. Unpack the archive
+   - Copy 'D:\Deployments\SmartAITradingStrategyOptimizer.zip' to the server (e.g. via RDP, SMB, or WinSCP)
+   - Extract contents to desired location, e.g. `C:\Apps\SmartAI`
+
+3. Python Environment
+   - Open Windows Terminal (PowerShell) as Administrator if elevated privileges are needed
+   - cd into project directory: `cd C:\Apps\SmartAI`
+   - Create virtual environment: `python -m venv .venv`
+   - Activate it: `.venv\Scripts\Activate`
+   - Upgrade pip: `python -m pip install --upgrade pip`
+   - Install dependencies: `pip install -r requirements.txt`
+
+4. Additional Services (optional)
+   - If there is a Node.js frontend, install Node.js LTS and run `npm install`
+   - For task schedulers or services, use Windows Task Scheduler or NSSM to wrap scripts
+
+5. Configuration
+   - Duplicate `.env.example` to `.env` and adjust values for the server (API keys, DB credentials, etc.)
+   - Ensure any external resources (databases, message brokers) are reachable from the server
+
+6. Running the Application
+   - Follow project README instructions (`python main.py`, `uvicorn app:app`, etc.)
+   - For production, consider using `pip install gunicorn` (if WSL) or `waitress` for Windows services
+
+7. Post-Deployment Checklist
+   - Configure Windows Firewall rules for required ports
+   - Enable backups of the deployment directory and logs
+   - Set up monitoring and logging (e.g. Windows Event Viewer, custom log files)
+
+8. Updating
+   - Repeat copy/zip process on development machine or pull from Git on the server
+   - Re-run dependency installation if requirements changed
+
