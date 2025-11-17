@@ -137,7 +137,7 @@ Start-Sleep -Seconds 2
 # ==========================================
 Write-Host "[3/5] راه‌اندازی Backend (Django)..." -ForegroundColor Cyan
 Write-Host ""
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\backend'; Write-Host '=========================================' -ForegroundColor Green; Write-Host '  Backend Django Server' -ForegroundColor Green; Write-Host '  Port: 8000 (Accessible from local network)' -ForegroundColor Green; Write-Host '=========================================' -ForegroundColor Green; Write-Host ''; python manage.py runserver 0.0.0.0:8000"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\..\backend'; Write-Host '=========================================' -ForegroundColor Green; Write-Host '  Backend Django Server' -ForegroundColor Green; Write-Host '  Port: 8000 (Accessible from local network)' -ForegroundColor Green; Write-Host '=========================================' -ForegroundColor Green; Write-Host ''; python manage.py runserver 0.0.0.0:8000"
 Start-Sleep -Seconds 4
 Write-Host "  ✓ Backend در حال راه‌اندازی..." -ForegroundColor Green
 Write-Host ""
@@ -147,7 +147,7 @@ Write-Host ""
 # ==========================================
 Write-Host "[4/5] راه‌اندازی Frontend (React)..." -ForegroundColor Cyan
 Write-Host ""
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\frontend'; Write-Host '=========================================' -ForegroundColor Cyan; Write-Host '  Frontend React Server' -ForegroundColor Cyan; Write-Host '  Port: 3000' -ForegroundColor Cyan; Write-Host '=========================================' -ForegroundColor Cyan; Write-Host ''; npm run dev"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\..\frontend'; Write-Host '=========================================' -ForegroundColor Cyan; Write-Host '  Frontend React Server' -ForegroundColor Cyan; Write-Host '  Port: 3000' -ForegroundColor Cyan; Write-Host '=========================================' -ForegroundColor Cyan; Write-Host ''; npm run dev"
 Start-Sleep -Seconds 3
 Write-Host "  ✓ Frontend در حال راه‌اندازی..." -ForegroundColor Green
 Write-Host ""
@@ -159,12 +159,12 @@ Write-Host "[5/5] راه‌اندازی Celery Worker و Beat..." -ForegroundCol
 Write-Host ""
 
 # Start Celery Worker
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\backend'; Write-Host '=========================================' -ForegroundColor Yellow; Write-Host '  Celery Worker' -ForegroundColor Yellow; Write-Host '=========================================' -ForegroundColor Yellow; Write-Host ''; celery -A config worker --loglevel=info --pool=solo"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\..\backend'; Write-Host '=========================================' -ForegroundColor Yellow; Write-Host '  Celery Worker' -ForegroundColor Yellow; Write-Host '=========================================' -ForegroundColor Yellow; Write-Host ''; celery -A config worker --loglevel=info --pool=solo"
 Start-Sleep -Seconds 2
 Write-Host "  ✓ Celery Worker در حال راه‌اندازی..." -ForegroundColor Green
 
 # Start Celery Beat
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\backend'; Write-Host '=========================================' -ForegroundColor Magenta; Write-Host '  Celery Beat Scheduler' -ForegroundColor Magenta; Write-Host '  Auto-trading every 5 minutes' -ForegroundColor Magenta; Write-Host '=========================================' -ForegroundColor Magenta; Write-Host ''; celery -A config beat --loglevel=info"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\..\backend'; Write-Host '=========================================' -ForegroundColor Magenta; Write-Host '  Celery Beat Scheduler' -ForegroundColor Magenta; Write-Host '  Auto-trading every 5 minutes' -ForegroundColor Magenta; Write-Host '=========================================' -ForegroundColor Magenta; Write-Host ''; celery -A config beat --loglevel=info"
 Start-Sleep -Seconds 2
 Write-Host "  ✓ Celery Beat در حال راه‌اندازی..." -ForegroundColor Green
 Write-Host ""

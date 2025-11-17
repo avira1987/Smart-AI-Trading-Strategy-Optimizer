@@ -102,6 +102,6 @@ Write-Host ""
 Write-Host "📝 مراحل بعدی:" -ForegroundColor Cyan
 Write-Host "   1. فایل .env.local را برای توسعه محلی ویرایش کنید" -ForegroundColor White
 Write-Host "   2. فایل .env.production را برای VPS ویرایش کنید" -ForegroundColor White
-Write-Host "   3. برای استفاده از .env.local: Copy-Item .env.local .env -Force" -ForegroundColor White
-Write-Host "   4. برای استفاده از .env.production: Copy-Item .env.production .env -Force" -ForegroundColor White
+Write-Host "   3. برای استفاده از .env.local: .\use_local.ps1" -ForegroundColor White
+Write-Host "   4. برای استفاده از .env.production: .\use_production.ps1" -ForegroundColor White
 

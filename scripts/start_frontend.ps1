@@ -1,6 +1,7 @@
 # Start React Frontend Server
 Write-Host "Starting React Frontend Server..." -ForegroundColor Green
-cd frontend
+$scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+cd "$scriptPath\..\frontend"
 npm run dev
-cd ..
+cd "$scriptPath\.."
 

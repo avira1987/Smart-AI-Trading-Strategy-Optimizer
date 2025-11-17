@@ -12,6 +12,30 @@ A complete production-ready system for managing Forex trading strategies with AI
 - **Performance Analytics**: View detailed results with charts and metrics
 - **Cost Optimized**: Designed for low-budget, single-developer use
 
+## Project Structure
+
+```
+SmartAITradingStrategyOptimizer/
+├── backend/              # Django Backend Application
+│   ├── tests/           # All test files
+│   ├── ai_module/       # AI and NLP modules
+│   ├── api/             # API endpoints and views
+│   ├── config/          # Django settings
+│   └── core/            # Core models and migrations
+├── frontend/            # React Frontend Application
+├── docs/                # All documentation files
+├── scripts/             # All executable scripts (.ps1, .bat, .sh)
+├── README.md            # Main documentation
+└── ...
+```
+
+**Note**: The project structure has been reorganized for better maintainability:
+- All documentation files are in `docs/`
+- All scripts are in `scripts/`
+- All test files are in `backend/tests/`
+
+For detailed structure information, see `docs/PROJECT_STRUCTURE.md`.
+
 ## Architecture
 
 ### Backend
@@ -98,6 +122,16 @@ The application will be available at:
 - Admin Panel: http://localhost:8000/admin
 
 ### Local Development without Docker
+
+**Quick Start Scripts** (Windows):
+```powershell
+# Start all services
+.\scripts\START_ALL.ps1
+
+# Or start individually
+.\scripts\start_backend.ps1
+.\scripts\start_frontend.ps1
+```
 
 #### Backend Setup
 
