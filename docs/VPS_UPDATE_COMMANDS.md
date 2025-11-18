@@ -249,7 +249,15 @@ python manage.py check
 
 ### مشکل: سوال امنیتی لود نمی‌شود
 
-1. بررسی CORS در `backend/config/settings.py`:
+**راهنمای کامل عیب‌یابی:** برای جزئیات بیشتر به فایل `docs/CAPTCHA_TROUBLESHOOTING.md` مراجعه کنید.
+
+**راه‌حل‌های سریع:**
+
+1. **بررسی Cache Configuration:**
+   - مطمئن شوید که در `backend/config/settings.py` تنظیمات `CACHES` وجود دارد
+   - برای production، Redis توصیه می‌شود
+
+2. **بررسی CORS در `backend/config/settings.py`:**
 ```python
 CORS_ALLOWED_ORIGINS = [
     "http://YOUR_SERVER_IP:3000",
@@ -257,12 +265,19 @@ CORS_ALLOWED_ORIGINS = [
 ]
 ```
 
-2. بررسی لاگ‌های Backend:
+3. **بررسی لاگ‌های Backend:**
 ```bash
 tail -f backend/logs/api.log
 ```
 
-3. بررسی Console مرورگر برای خطاهای JavaScript
+4. **بررسی Console مرورگر برای خطاهای JavaScript**
+
+5. **تست API endpoint:**
+```bash
+curl -X POST http://YOUR_IP:8000/api/captcha/get/ \
+  -H "Content-Type: application/json" \
+  -d '{"action":"login"}'
+```
 
 ---
 

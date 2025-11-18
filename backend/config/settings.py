@@ -316,6 +316,29 @@ CACHE_DIR = BASE_DIR / 'cache'
 for directory in [STATIC_ROOT, MEDIA_ROOT, CACHE_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
+# Cache configuration for CAPTCHA and other features
+# Using LocMemCache for development, Redis recommended for production
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
+        'OPTIONS': {
+            'MAX_ENTRIES': 10000
+        }
+    }
+}
+
+# For production with Redis (uncomment if Redis is available):
+# CACHES = {
+#     'default': {
+#         'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+#         'LOCATION': os.environ.get('REDIS_URL', 'redis://127.0.0.1:6379/1'),
+#         'OPTIONS': {
+#             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+#         }
+#     }
+# }
+
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 

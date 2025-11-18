@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # CAPTCHA settings
 CAPTCHA_EXPIRY = 300  # 5 minutes
 CAPTCHA_CACHE_PREFIX = 'captcha:'
-CAPTCHA_MIN_TIME = 2  # Minimum seconds between page load and submit (human behavior)
+CAPTCHA_MIN_TIME = 0.5  # Minimum seconds between page load and submit (reduced for better UX)
 CAPTCHA_MAX_TIME = 600  # Maximum seconds (10 minutes)
 
 
@@ -120,16 +120,20 @@ def verify_captcha(
         }
     
     # Check time-based validation
-    if page_load_time:
+    # Skip time validation if page_load_time is not provided (allows for first-time page loads)
+    if page_load_time and page_load_time > 0:
         elapsed_time = time.time() - page_load_time
         
-        # Too fast (likely bot)
-        if elapsed_time < CAPTCHA_MIN_TIME:
+        # Too fast (likely bot) - but allow if it's a reasonable time (at least 0.5 seconds)
+        # This prevents accidental fast submissions while allowing normal use
+        if elapsed_time < CAPTCHA_MIN_TIME and elapsed_time > 0:
+            # Only block if it's suspiciously fast (less than 0.5 seconds)
+            # This allows for quick but legitimate submissions
             logger.warning(f"Form submitted too quickly: {elapsed_time:.2f}s")
             cache.delete(cache_key)
             return {
                 'success': False,
-                'message': 'درخواست شما خیلی سریع ارسال شد. لطفا دوباره تلاش کنید.',
+                'message': 'درخواست شما خیلی سریع ارسال شد. لطفا چند ثانیه صبر کنید و دوباره تلاش کنید.',
                 'error': 'too_fast'
             }
         

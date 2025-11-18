@@ -103,6 +103,14 @@ class RateLimiter:
 # Global rate limiter instance
 rate_limiter = RateLimiter()
 
+# Helper function to clear rate limit for an IP (useful for testing)
+def clear_rate_limit_for_ip(ip: str):
+    """Clear rate limit for a specific IP (useful for testing/debugging)"""
+    if ip in rate_limiter.blocked_ips:
+        del rate_limiter.blocked_ips[ip]
+    if ip in rate_limiter.requests:
+        del rate_limiter.requests[ip]
+
 
 class RateLimitMiddleware(MiddlewareMixin):
     """
@@ -141,6 +149,11 @@ class RateLimitMiddleware(MiddlewareMixin):
             ip = x_forwarded_for.split(',')[0].strip()
         else:
             ip = request.META.get('REMOTE_ADDR', 'unknown')
+        
+        # Skip rate limiting for localhost/127.0.0.1 in DEBUG mode
+        from django.conf import settings
+        if settings.DEBUG and ip in ['127.0.0.1', 'localhost', '::1', '0.0.0.0']:
+            return None
         
         # Get rate limit settings for this path
         max_requests, window_seconds = (10, 60)  # Default

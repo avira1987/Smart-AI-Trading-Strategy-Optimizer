@@ -7,14 +7,15 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   
   // Get backend URL from environment variable, default to localhost
-  let backendUrl = env.VITE_BACKEND_URL || 'http://localhost:8000'
+  // Use 127.0.0.1 instead of localhost to force IPv4 (avoids IPv6 issues)
+  let backendUrl = env.VITE_BACKEND_URL || 'http://127.0.0.1:8000'
   
   // Validate backend URL
   try {
     new URL(backendUrl)
   } catch (e) {
-    console.warn(`Invalid VITE_BACKEND_URL: ${backendUrl}, using default: http://localhost:8000`)
-    backendUrl = 'http://localhost:8000'
+    console.warn(`Invalid VITE_BACKEND_URL: ${backendUrl}, using default: http://127.0.0.1:8000`)
+    backendUrl = 'http://127.0.0.1:8000'
   }
   
   return {

@@ -59,9 +59,29 @@ export default function Login() {
       const captcha = await getCaptcha('login')
       setCaptchaChallenge(captcha.challenge)
       setCaptchaAnswer('') // Clear previous answer
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to load CAPTCHA:', error)
-      // Continue without CAPTCHA - backend will handle it
+      
+      // تشخیص نوع خطا و نمایش پیام مناسب
+      let errorMessage = 'خطا در بارگذاری سوال امنیتی'
+      const errorText = error.message || error.toString() || ''
+      
+      if (errorText.includes('ECONNREFUSED') || errorText.includes('Failed to fetch') || errorText.includes('NetworkError')) {
+        errorMessage = 'Backend در حال اجرا نیست. لطفا مطمئن شوید که Backend روی پورت 8000 در حال اجرا است.'
+      } else if (errorText.includes('CORS')) {
+        errorMessage = 'خطای CORS. لطفا تنظیمات CORS در Backend را بررسی کنید.'
+      } else {
+        errorMessage = errorText || 'خطا در بارگذاری سوال امنیتی'
+      }
+      
+      showToast(`خطا: ${errorMessage}`, { type: 'error', duration: 5000 })
+      
+      // تلاش مجدد فقط اگر خطا مربوط به network نباشد
+      if (!errorText.includes('ECONNREFUSED') && !errorText.includes('Failed to fetch')) {
+        setTimeout(() => {
+          loadCaptcha()
+        }, 2000)
+      }
     }
   }
 
