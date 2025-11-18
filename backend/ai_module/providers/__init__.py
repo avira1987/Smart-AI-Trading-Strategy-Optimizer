@@ -9,9 +9,10 @@ import requests
 from django.conf import settings
 
 try:
-    from core.models import APIConfiguration  # type: ignore
+    from core.models import APIConfiguration, UserProfile  # type: ignore
 except Exception:  # pragma: no cover - during migrations/tests without db
     APIConfiguration = None
+    UserProfile = None
 
 
 LOGGER = logging.getLogger("ai.providers")
@@ -39,7 +40,7 @@ class ProviderResult:
     attempts: List[ProviderAttempt] = field(default_factory=list)
 
 
-def _get_api_key(provider_name: str, env_key: Optional[str]) -> str:
+def _get_api_key(provider_name: str, env_key: Optional[str], user=None) -> str:
     env_candidates: List[str] = []
     if env_key:
         env_candidates.append(env_key)
@@ -53,18 +54,68 @@ def _get_api_key(provider_name: str, env_key: Optional[str]) -> str:
 
     provider_candidates: List[str] = [provider_name] if provider_name else []
     provider_alias_map = getattr(settings, "AI_PROVIDER_NAME_ALIASES", {})
+    
+    # Add direct aliases (e.g., if provider_name is "openai", add ["chatgpt", "gpt", ...])
     provider_candidates.extend(provider_alias_map.get(provider_name, []))
-    provider_candidates = [name for name in provider_candidates if name]
+    
+    # Add reverse aliases (e.g., if provider_name is "chatgpt", find which main provider it maps to)
+    # Build reverse map: alias -> main_provider
+    reverse_alias_map: Dict[str, str] = {}
+    for main_provider, aliases in provider_alias_map.items():
+        for alias in aliases:
+            reverse_alias_map[alias] = main_provider
+            # Also add the main provider to candidates if searching for an alias
+            if provider_name == alias and main_provider not in provider_candidates:
+                provider_candidates.append(main_provider)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_candidates = []
+    for candidate in provider_candidates:
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            unique_candidates.append(candidate)
+    provider_candidates = unique_candidates
 
     if not provider_candidates:
+        LOGGER.debug(f"No provider candidates found for provider_name={provider_name}")
         return ""
 
     if APIConfiguration is None:
+        LOGGER.debug("APIConfiguration model not available")
         return ""
+    
+    LOGGER.debug(f"Searching for API key: provider_name={provider_name}, candidates={provider_candidates}, user={user}")
 
     try:
-        # First try to get system-wide API key (user=None)
-        config = (
+        # 1. User-specific API key (if request user provided)
+        if user is not None and getattr(user, "is_authenticated", False):
+            user_config = (
+                APIConfiguration.objects.filter(
+                    provider__in=provider_candidates,
+                    is_active=True,
+                    user=user,
+                )
+                .order_by("-updated_at", "-created_at")
+                .first()
+            )
+            if user_config and user_config.api_key:
+                LOGGER.debug(f"Found user-specific API key for provider={provider_name}, user_id={user.id}")
+                return user_config.api_key.strip()
+
+        # Resolve admin/system users via phone number
+        admin_phone = getattr(settings, "ADMIN_PHONE_NUMBER", "09035760718")
+        admin_user_ids: List[int] = []
+        if admin_phone and UserProfile is not None:
+            try:
+                admin_user_ids = list(
+                    UserProfile.objects.filter(phone=admin_phone).values_list("user_id", flat=True)
+                )
+            except Exception:
+                admin_user_ids = []
+
+        # 2. System-wide API key (user=None)
+        system_config = (
             APIConfiguration.objects.filter(
                 provider__in=provider_candidates,
                 is_active=True,
@@ -73,11 +124,28 @@ def _get_api_key(provider_name: str, env_key: Optional[str]) -> str:
             .order_by("-updated_at", "-created_at")
             .first()
         )
-        if config and config.api_key:
-            return config.api_key.strip()
-        
-        # If no system key found, try to get any active user key
-        # This allows users to use their own API keys for AI providers
+        if system_config and system_config.api_key:
+            LOGGER.debug(f"Found system-wide API key for provider={provider_name}, provider_in_db={system_config.provider}")
+            return system_config.api_key.strip()
+
+        # 3. Admin-provided API keys (shared for all users)
+        if admin_user_ids:
+            admin_config = (
+                APIConfiguration.objects.filter(
+                    provider__in=provider_candidates,
+                    is_active=True,
+                    user_id__in=admin_user_ids,
+                )
+                .order_by("-updated_at", "-created_at")
+                .first()
+            )
+            if admin_config and admin_config.api_key:
+                LOGGER.debug(f"Found admin API key for provider={provider_name}, admin_user_ids={admin_user_ids}, provider_in_db={admin_config.provider}")
+                return admin_config.api_key.strip()
+            else:
+                LOGGER.debug(f"No admin API key found for provider={provider_name}, admin_user_ids={admin_user_ids}, candidates={provider_candidates}")
+
+        # 4. Fallback to any active key (legacy behaviour)
         config = (
             APIConfiguration.objects.filter(
                 provider__in=provider_candidates,
@@ -87,7 +155,15 @@ def _get_api_key(provider_name: str, env_key: Optional[str]) -> str:
             .first()
         )
         if config and config.api_key:
+            LOGGER.debug(f"Found fallback API key for provider={provider_name}, provider_in_db={config.provider}")
             return config.api_key.strip()
+        
+        # Log what we searched for if no key found
+        LOGGER.warning(
+            f"No API key found for provider={provider_name} (searched candidates={provider_candidates}, "
+            f"user={user.id if user and hasattr(user, 'id') else None}, "
+            f"admin_user_ids={admin_user_ids})"
+        )
     except Exception:  # pragma: no cover - database errors should not break provider discovery
         LOGGER.exception("Failed to fetch API key for provider %s from database", provider_name)
     return ""
@@ -100,9 +176,14 @@ class BaseProvider:
 
     def __init__(self) -> None:
         self.logger = logging.getLogger(f"ai.providers.{self.name or 'unknown'}")
+        self._user_context = None
+
+    def set_user_context(self, user) -> None:
+        """Attach current request user for API key resolution."""
+        self._user_context = user
 
     def get_api_key(self) -> str:
-        return _get_api_key(self.name, self.env_key)
+        return _get_api_key(self.name, self.env_key, user=self._user_context)
 
     def is_available(self) -> bool:
         return bool(self.get_api_key())
@@ -510,24 +591,54 @@ class ChatCompletionProvider(BaseProvider):
 
             raw_text = response.text
             error_message = None
+            error_type = None
             if isinstance(data, dict):
                 error = data.get("error")
                 if isinstance(error, dict):
                     error_message = error.get("message") or error.get("code")
+                    error_type = error.get("type")
                 elif isinstance(error, str):
                     error_message = error
+            
+            # Provide more detailed error messages for common OpenAI errors
+            if status_code == 401:
+                error_message = error_message or "Invalid API key. Please check your OpenAI API key."
+            elif status_code == 429:
+                error_message = error_message or "Rate limit exceeded. Please try again later."
+            elif status_code == 400:
+                model_name = payload.get("model", "unknown")
+                error_message = error_message or f"Invalid request. Model '{model_name}' may not be available or request format is incorrect."
+            elif status_code == 404:
+                model_name = payload.get("model", "unknown")
+                error_message = error_message or f"Model '{model_name}' not found. Please check the model name."
+            
             if not error_message:
-                error_message = raw_text
+                error_message = raw_text or f"HTTP {status_code} error"
+
+            full_error = f"{self.name} error: {error_message}"
+            if error_type:
+                full_error += f" (type: {error_type})"
+            
+            self.logger.warning(
+                f"{self.name} API call failed: status={status_code}, error={error_message}, "
+                f"model={payload.get('model', 'unknown')}"
+            )
 
             return ProviderResult(
                 success=False,
-                error=f"{self.name} error: {error_message}",
+                error=full_error,
                 status_code=status_code,
                 raw_response=data or raw_text,
             )
+        except requests.exceptions.Timeout as exc:
+            self.logger.exception("%s request timed out: %s", self.name, exc)
+            return ProviderResult(success=False, error=f"{self.name} request timed out after {self.get_timeout()}s")
+        except requests.exceptions.RequestException as exc:
+            self.logger.exception("%s request failed (network error): %s", self.name, exc)
+            return ProviderResult(success=False, error=f"{self.name} network error: {str(exc)}")
         except Exception as exc:
             self.logger.exception("%s request failed: %s", self.name, exc)
-            return ProviderResult(success=False, error=str(exc))
+            return ProviderResult(success=False, error=f"{self.name} error: {str(exc)}")
 
 
 class OpenRouterProvider(ChatCompletionProvider):
@@ -568,7 +679,7 @@ class GroqProvider(ChatCompletionProvider):
 class OpenAIProvider(ChatCompletionProvider):
     name = "openai"
     env_key = "OPENAI_API_KEY"
-    default_model = "gpt-4.1-mini"
+    default_model = "gpt-4o-mini"  # Fixed: was "gpt-4.1-mini" which is invalid
     endpoint = "https://api.openai.com/v1/chat/completions"
 
     def _build_headers(self, api_key: str) -> Dict[str, str]:

@@ -32,7 +32,6 @@ const PROVIDER_NAMES: Record<string, string> = {
   openai: 'OpenAI (ChatGPT)',
   kavenegar: 'Kavenegar',
   mt5: 'MetaTrader 5',
-  google_oauth: 'Google OAuth',
   zarinpal: 'Zarinpal',
 }
 

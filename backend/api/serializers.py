@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from datetime import datetime
 from django.utils import timezone
+from django.conf import settings
 from core.models import (
     APIConfiguration,
     TradingStrategy,
@@ -104,11 +105,46 @@ class APIConfigurationSerializer(serializers.ModelSerializer):
         
         return data
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get('request')
+
+        if not request or not request.user or not request.user.is_authenticated:
+            data['api_key'] = None
+            return data
+
+        # Staff/admin users can view full keys
+        if request.user.is_staff or request.user.is_superuser:
+            return data
+
+        # Owners can view their own keys
+        if instance.user_id == request.user.id:
+            return data
+
+        # Hide keys that belong to system/admin accounts
+        if self._belongs_to_admin(instance):
+            data['api_key'] = None
+        else:
+            data['api_key'] = None
+        return data
+
+    @staticmethod
+    def _belongs_to_admin(instance) -> bool:
+        admin_phone = getattr(settings, "ADMIN_PHONE_NUMBER", "09035760718")
+        if not admin_phone:
+            return False
+        user = getattr(instance, "user", None)
+        if user is None:
+            return True
+        profile = getattr(user, "userprofile", None)
+        user_phone = getattr(profile, "phone", None)
+        return str(user_phone) == str(admin_phone)
+
 
 class SystemSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = SystemSettings
-        fields = ['google_auth_enabled', 'live_trading_enabled']
+        fields = ['live_trading_enabled']
 
 
 class PublicSystemSettingsSerializer(serializers.Serializer):

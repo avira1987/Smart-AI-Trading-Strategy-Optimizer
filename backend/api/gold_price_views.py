@@ -57,7 +57,8 @@ class GoldPriceView(APIView):
         
         access = getattr(user, 'gold_api_access', None)  # type: UserGoldAPIAccess | None
         has_credentials = bool(access and access.has_credentials)
-        allow_mt5_access = bool(access and access.allow_mt5_access and access.is_active)
+        # MT5 fallback should be available to all authenticated users by default
+        allow_mt5_access = True
         
         if has_credentials:
             result = gold_price_manager.get_price_for_user(access.provider, access.api_key)

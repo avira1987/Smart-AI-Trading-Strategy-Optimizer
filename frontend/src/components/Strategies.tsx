@@ -4,6 +4,7 @@ import { useToast } from './ToastProvider'
 import StrategyQuestions from './StrategyQuestions'
 import StrategyOptimizer from './StrategyOptimizer'
 import AIRecommendations from './AIRecommendations'
+import { useRateLimit } from '../hooks/useRateLimit'
 
 interface TradingStrategy {
   id: number
@@ -33,6 +34,11 @@ export default function Strategies() {
   const [hasAIProvider, setHasAIProvider] = useState(false)
   const { showToast } = useToast()
   const expandedStrategyIdRef = useRef<number | null>(null)
+  const rateLimitClickSubmit = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'strategies-submit' })
+  const rateLimitClickToggle = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'strategies-toggle' })
+  const rateLimitClickDelete = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'strategies-delete' })
+  const rateLimitClickProcess = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'strategies-process' })
+  const rateLimitClickSetPrimary = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'strategies-setPrimary' })
   
   // Sync ref with state
   useEffect(() => {
@@ -129,171 +135,206 @@ export default function Strategies() {
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!file) {
       showToast('Please select a file', { type: 'warning' })
       return
     }
 
-    try {
-      const formData = new FormData()
-      formData.append('name', name)
-      formData.append('description', description)
-      formData.append('strategy_file', file)
+    const submitAction = rateLimitClickSubmit(async () => {
+      try {
+        const formData = new FormData()
+        formData.append('name', name)
+        formData.append('description', description)
+        formData.append('strategy_file', file!)
 
-      console.log('Submitting strategy:', { name, description, file: file.name }) // Debug log
-      
-      const response = await addStrategy(formData)
-      console.log('Strategy upload response:', response) // Debug log
-      
-      showToast('Strategy uploaded successfully!', { type: 'success' })
-      setShowModal(false)
-      setName('')
-      setDescription('')
-      setFile(null)
-      
-      // Reload strategies after successful upload
-      await loadStrategies()
-    } catch (error: any) {
-      console.error('Error uploading strategy:', error)
-      showToast('Error uploading strategy: ' + (error?.response?.data?.detail || 'Unknown error'), { type: 'error' })
-    }
+        console.log('Submitting strategy:', { name, description, file: file.name }) // Debug log
+        
+        const response = await addStrategy(formData)
+        console.log('Strategy upload response:', response) // Debug log
+        
+        showToast('Strategy uploaded successfully!', { type: 'success' })
+        setShowModal(false)
+        setName('')
+        setDescription('')
+        setFile(null)
+        
+        // Reload strategies after successful upload
+        await loadStrategies()
+      } catch (error: any) {
+        console.error('Error uploading strategy:', error)
+        showToast('Error uploading strategy: ' + (error?.response?.data?.detail || 'Unknown error'), { type: 'error' })
+      }
+    })
+    
+    submitAction()
   }
 
-  const toggleStrategy = async (id: number) => {
-    try {
-      const response = await fetch(`http://localhost:8000/api/strategies/${id}/toggle_active/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      })
-      
-      if (response.ok) {
-        await loadStrategies()
-        showToast('Strategy status updated', { type: 'success' })
-      } else {
+  const toggleStrategy = (id: number) => {
+    const toggleAction = rateLimitClickToggle(async () => {
+      try {
+        const response = await fetch(`http://localhost:8000/api/strategies/${id}/toggle_active/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        })
+        
+        if (response.ok) {
+          await loadStrategies()
+          showToast('Strategy status updated', { type: 'success' })
+        } else {
+          showToast('Error toggling strategy status', { type: 'error' })
+        }
+      } catch (error) {
+        console.error('Error toggling strategy:', error)
         showToast('Error toggling strategy status', { type: 'error' })
       }
-    } catch (error) {
-      console.error('Error toggling strategy:', error)
-      showToast('Error toggling strategy status', { type: 'error' })
-    }
+    })
+    
+    toggleAction()
   }
 
-  const handleDelete = async (id: number, name: string) => {
+  const handleDelete = (id: number, name: string) => {
     const confirmDelete = window.confirm(`آیا از حذف استراتژی «${name}» مطمئن هستید؟ این عمل قابل بازگشت نیست.`)
     if (!confirmDelete) return
-    try {
-      await apiDeleteStrategy(id)
-      showToast('استراتژی با موفقیت حذف شد', { type: 'success' })
-      await loadStrategies()
-    } catch (error) {
-      console.error('Error deleting strategy:', error)
-      showToast('خطا در حذف استراتژی', { type: 'error' })
-    }
+    
+    const deleteAction = rateLimitClickDelete(async () => {
+      try {
+        await apiDeleteStrategy(id)
+        showToast('استراتژی با موفقیت حذف شد', { type: 'success' })
+        await loadStrategies()
+      } catch (error) {
+        console.error('Error deleting strategy:', error)
+        showToast('خطا در حذف استراتژی', { type: 'error' })
+      }
+    })
+    
+    deleteAction()
   }
 
-  const handleProcess = async (id: number, name: string) => {
-    try {
-      const processStartedAt = performance.now()
-      showToast('در حال پردازش استراتژی...', { type: 'info' })
-      const response = await processStrategy(id)
-      
-      console.log('Process response:', response) // Debug log
-      
-      if (response.data.status === 'success') {
-        const elapsedSeconds = (performance.now() - processStartedAt) / 1000
-        const analysisSourceDisplay = response?.data?.analysis_sources_display || {}
-        const analysisSources = response?.data?.analysis_sources || {}
-        const aiModelDisplay =
-          analysisSourceDisplay?.ai_model_display ||
-          analysisSourceDisplay?.analysis_method_display ||
-          analysisSources?.ai_model ||
-          analysisSources?.analysis_method ||
-          'تحلیل پایه'
-        const aiStatusDisplay =
-          analysisSourceDisplay?.ai_status_display || analysisSources?.ai_status || ''
-        const durationDisplay =
-          analysisSourceDisplay?.processing_duration_display ||
-          `${elapsedSeconds.toFixed(2)} ثانیه`
-        const aiFallbackReason =
-          analysisSourceDisplay?.ai_fallback_reason_display ||
-          analysisSourceDisplay?.ai_message_display ||
-          analysisSources?.ai_fallback_reason ||
-          analysisSources?.ai_message ||
-          analysisSources?.ai_error ||
-          ''
+  const handleProcess = (id: number, name: string) => {
+    const processAction = rateLimitClickProcess(async () => {
+      try {
+        const processStartedAt = performance.now()
+        showToast('در حال پردازش استراتژی...', { type: 'info' })
+        const response = await processStrategy(id)
+        
+        console.log('Process response:', response) // Debug log
+        
+        if (response.data.status === 'success') {
+          const elapsedSeconds = (performance.now() - processStartedAt) / 1000
+          const analysisSourceDisplay = response?.data?.analysis_sources_display || {}
+          const analysisSources = response?.data?.analysis_sources || {}
+          const tokenInfo = response?.data?.token_info || {}
+          const aiModelDisplay =
+            analysisSourceDisplay?.ai_model_display ||
+            analysisSourceDisplay?.analysis_method_display ||
+            analysisSources?.ai_model ||
+            analysisSources?.analysis_method ||
+            'تحلیل پایه'
+          const aiStatusDisplay =
+            analysisSourceDisplay?.ai_status_display || analysisSources?.ai_status || ''
+          const durationDisplay =
+            analysisSourceDisplay?.processing_duration_display ||
+            `${elapsedSeconds.toFixed(2)} ثانیه`
+          const aiFallbackReason =
+            analysisSourceDisplay?.ai_fallback_reason_display ||
+            analysisSourceDisplay?.ai_message_display ||
+            analysisSources?.ai_fallback_reason ||
+            analysisSources?.ai_message ||
+            analysisSources?.ai_error ||
+            ''
 
-        const isBasicAnalysis = aiModelDisplay === 'هیچکدام' || aiModelDisplay === 'تحلیل پایه'
-        const toastMessageParts = [
-          `استراتژی «${name}» با ${isBasicAnalysis ? 'تحلیل پایه' : aiModelDisplay}`
-        ]
-        if (aiStatusDisplay && !isBasicAnalysis) {
-          toastMessageParts.push(`(وضعیت: ${aiStatusDisplay})`)
-        }
-        toastMessageParts.push(`در ${durationDisplay} پردازش شد (آنلاین).`)
-        if (isBasicAnalysis && aiFallbackReason) {
-          toastMessageParts.push(`دلیل عدم استفاده از هوش مصنوعی: ${aiFallbackReason}`)
-        }
+          const isBasicAnalysis = aiModelDisplay === 'هیچکدام' || aiModelDisplay === 'تحلیل پایه'
+          const toastMessageParts = [
+            `استراتژی «${name}» با ${isBasicAnalysis ? 'تحلیل پایه' : aiModelDisplay}`
+          ]
+          if (aiStatusDisplay && !isBasicAnalysis) {
+            toastMessageParts.push(`(وضعیت: ${aiStatusDisplay})`)
+          }
+          toastMessageParts.push(`در ${durationDisplay} پردازش شد (آنلاین).`)
+          
+          // نمایش اطلاعات توکن‌های مصرفی
+          if (tokenInfo && tokenInfo.total_tokens) {
+            const tokenCount = tokenInfo.total_tokens
+            const inputTokens = tokenInfo.input_tokens || ''
+            const outputTokens = tokenInfo.output_tokens || ''
+            if (inputTokens && outputTokens) {
+              toastMessageParts.push(`توکن‌های مصرفی: ${tokenCount.toLocaleString('fa-IR')} (ورودی: ${inputTokens.toLocaleString('fa-IR')}، خروجی: ${outputTokens.toLocaleString('fa-IR')})`)
+            } else {
+              toastMessageParts.push(`توکن‌های مصرفی: ${tokenCount.toLocaleString('fa-IR')}`)
+            }
+          }
+          
+          if (isBasicAnalysis && aiFallbackReason) {
+            toastMessageParts.push(`دلیل عدم استفاده از هوش مصنوعی: ${aiFallbackReason}`)
+          }
 
-        showToast(toastMessageParts.join(' '), { type: 'success', duration: 8000 })
-        await loadStrategies()
-        await checkAIProvider() // Recheck AI status after processing
-      } else {
-        const errorMsg = response.data.message || response.data.error || 'خطای نامشخص'
+          showToast(toastMessageParts.join(' '), { type: 'success', duration: 10000 })
+          await loadStrategies()
+          await checkAIProvider() // Recheck AI status after processing
+        } else {
+          const errorMsg = response.data.message || response.data.error || 'خطای نامشخص'
+          showToast(`خطا در پردازش استراتژی: ${errorMsg}`, { type: 'error' })
+          await loadStrategies()
+          await checkAIProvider() // Recheck AI status even on error
+        }
+      } catch (error: any) {
+        console.error('Error processing strategy:', error)
+        console.error('Error response:', error?.response)
+        console.error('Error data:', error?.response?.data)
+        
+        // Extract error message from different possible locations
+        const errorMsg = 
+          error?.response?.data?.message || 
+          error?.response?.data?.error || 
+          error?.response?.data?.detail ||
+          error?.message ||
+          'خطای نامشخص'
+        
         showToast(`خطا در پردازش استراتژی: ${errorMsg}`, { type: 'error' })
+        
+        // Reload strategies immediately to get latest status
         await loadStrategies()
         await checkAIProvider() // Recheck AI status even on error
-      }
-    } catch (error: any) {
-      console.error('Error processing strategy:', error)
-      console.error('Error response:', error?.response)
-      console.error('Error data:', error?.response?.data)
-      
-      // Extract error message from different possible locations
-      const errorMsg = 
-        error?.response?.data?.message || 
-        error?.response?.data?.error || 
-        error?.response?.data?.detail ||
-        error?.message ||
-        'خطای نامشخص'
-      
-      showToast(`خطا در پردازش استراتژی: ${errorMsg}`, { type: 'error' })
-      
-      // Reload strategies immediately to get latest status
-      await loadStrategies()
-      await checkAIProvider() // Recheck AI status even on error
-      
-      // If error was timeout or network error, retry loading strategies after delay
-      // to ensure we get the updated status from server (backend may have set status to 'failed')
-      if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout') || !error?.response) {
-        // Retry loading strategies after 2 seconds to get updated status
-        setTimeout(async () => {
-          await loadStrategies()
-        }, 2000)
         
-        // Retry one more time after 5 seconds to ensure status is updated
-        setTimeout(async () => {
-          await loadStrategies()
-        }, 5000)
+        // If error was timeout or network error, retry loading strategies after delay
+        // to ensure we get the updated status from server (backend may have set status to 'failed')
+        if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout') || !error?.response) {
+          // Retry loading strategies after 2 seconds to get updated status
+          setTimeout(async () => {
+            await loadStrategies()
+          }, 2000)
+          
+          // Retry one more time after 5 seconds to ensure status is updated
+          setTimeout(async () => {
+            await loadStrategies()
+          }, 5000)
+        }
       }
-    }
+    })
+    
+    processAction()
   }
 
-  const handleSetPrimary = async (id: number, name: string) => {
-    try {
-      await setPrimaryStrategy(id)
-      showToast(`استراتژی «${name}» به‌عنوان استراتژی اصلی انتخاب شد`, { type: 'success' })
-      await loadStrategies()
-    } catch (error: any) {
-      console.error('Error setting primary strategy:', error)
-      const message =
-        error?.response?.data?.message ||
-        error?.response?.data?.detail ||
-        error?.message ||
-        'خطای نامشخص'
-      showToast(`خطا در تعیین استراتژی اصلی: ${message}`, { type: 'error' })
-    }
+  const handleSetPrimary = (id: number, name: string) => {
+    const setPrimaryAction = rateLimitClickSetPrimary(async () => {
+      try {
+        await setPrimaryStrategy(id)
+        showToast(`استراتژی «${name}» به‌عنوان استراتژی اصلی انتخاب شد`, { type: 'success' })
+        await loadStrategies()
+      } catch (error: any) {
+        console.error('Error setting primary strategy:', error)
+        const message =
+          error?.response?.data?.message ||
+          error?.response?.data?.detail ||
+          error?.message ||
+          'خطای نامشخص'
+        showToast(`خطا در تعیین استراتژی اصلی: ${message}`, { type: 'error' })
+      }
+    })
+    
+    setPrimaryAction()
   }
 
   const getProcessingStatusLabel = (status?: string) => {

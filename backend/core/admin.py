@@ -246,8 +246,8 @@ class GoldAPIAccessRequestAdmin(admin.ModelAdmin):
 @admin.register(SystemSettings)
 class SystemSettingsAdmin(admin.ModelAdmin):
     """Admin برای تنظیمات سیستم"""
-    list_display = ['id', 'google_auth_enabled', 'live_trading_enabled', 'updated_at']
-    list_filter = ['google_auth_enabled', 'live_trading_enabled']
+    list_display = ['id', 'live_trading_enabled', 'updated_at']
+    list_filter = ['live_trading_enabled']
     readonly_fields = ['created_at', 'updated_at']
     
     def has_add_permission(self, request):
@@ -259,9 +259,9 @@ class SystemSettingsAdmin(admin.ModelAdmin):
         return False
     
     fieldsets = (
-        ('تنظیمات احراز هویت', {
-            'fields': ('google_auth_enabled',),
-            'description': 'فعال یا غیرفعال کردن ویژگی‌های احراز هویت مختلف'
+        ('تنظیمات سیستم', {
+            'fields': (),
+            'description': 'تنظیمات سیستم'
         }),
         ('ویژگی‌های وب‌سایت', {
             'fields': ('live_trading_enabled',),

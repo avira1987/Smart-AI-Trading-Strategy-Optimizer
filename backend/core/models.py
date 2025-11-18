@@ -24,7 +24,6 @@ class APIConfiguration(models.Model):
         ('deepinfra', 'DeepInfra'),
         ('groq', 'GroqCloud'),
         ('kavenegar', 'Kavenegar (SMS)'),
-        ('google_oauth', 'Google OAuth (Client ID)'),
         ('zarinpal', 'Zarinpal (Merchant ID)'),
         ('recaptcha', 'reCAPTCHA v3 (Site Key & Secret Key)'),
     ]
@@ -1215,12 +1214,6 @@ class SystemSettings(models.Model):
     class Meta:
         verbose_name = "تنظیمات سیستم"
         verbose_name_plural = "تنظیمات سیستم"
-    
-    # Google Authentication
-    google_auth_enabled = models.BooleanField(
-        default=False, 
-        help_text="فعال/غیرفعال کردن ورود با گوگل"
-    )
 
     # Feature flags
     live_trading_enabled = models.BooleanField(
@@ -1290,3 +1283,54 @@ class APIUsageLog(models.Model):
         username = self.user.username if self.user else "سیستم"
         return f"{username} - {self.provider} - {status} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
 
+
+class UserActivityLog(models.Model):
+    """لاگ فعالیت‌های کاربر برای نمایش در پروفایل"""
+    
+    ACTION_TYPE_CHOICES = [
+        ('strategy_processed', 'پردازش استراتژی'),
+        ('strategy_created', 'ایجاد استراتژی'),
+        ('strategy_deleted', 'حذف استراتژی'),
+        ('backtest_run', 'اجرای بک‌تست'),
+        ('trade_opened', 'باز کردن معامله'),
+        ('trade_closed', 'بستن معامله'),
+        ('api_key_added', 'افزودن کلید API'),
+        ('api_key_removed', 'حذف کلید API'),
+        ('wallet_charged', 'شارژ کیف پول'),
+        ('profile_updated', 'به‌روزرسانی پروفایل'),
+        ('other', 'سایر'),
+    ]
+    
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='activity_logs',
+        help_text="کاربری که این فعالیت را انجام داده است"
+    )
+    action_type = models.CharField(
+        max_length=50,
+        choices=ACTION_TYPE_CHOICES,
+        help_text="نوع فعالیت"
+    )
+    action_description = models.TextField(
+        help_text="توضیحات فعالیت"
+    )
+    metadata = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="اطلاعات اضافی (مثل تعداد توکن‌ها، نام استراتژی، و غیره)"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = "لاگ فعالیت کاربر"
+        verbose_name_plural = "لاگ‌های فعالیت کاربران"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', 'created_at']),
+            models.Index(fields=['action_type', 'created_at']),
+            models.Index(fields=['created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.get_action_type_display()} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"

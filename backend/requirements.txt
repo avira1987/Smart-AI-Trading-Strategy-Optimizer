@@ -22,11 +22,6 @@ MetaTrader5==5.0.5388
 # SMS with Kavenegar
 kavenegar==1.1.2
 
-# Google OAuth
-google-auth==2.35.0
-google-auth-httplib2==0.2.0
-cryptography>=46.0.0
-
 # Zarinpal Payment Gateway
 requests==2.32.3
 

@@ -74,30 +74,6 @@ export const logout = async (): Promise<AuthResponse> => {
   return response.data
 }
 
-export const googleLogin = async (idToken: string, captchaData?: any): Promise<AuthResponse> => {
-  // First, get CSRF token if not already in cookies
-  try {
-    await client.get('/auth/csrf-token/', { withCredentials: true })
-  } catch (error) {
-    // Ignore errors, CSRF token might already be set
-    console.log('CSRF token fetch:', error)
-  }
-  
-  const payload: any = {
-    id_token: idToken,
-  }
-  
-  // Add CAPTCHA data if provided
-  if (captchaData) {
-    Object.assign(payload, captchaData)
-  }
-  
-  const response = await client.post<AuthResponse>('/auth/google/', payload, {
-    withCredentials: true, // Important for session cookies
-  })
-  return response.data
-}
-
 export interface ProfileCompletionResponse {
   success: boolean
   is_complete: boolean
@@ -159,19 +135,6 @@ export interface IPLocationResponse {
 
 export const checkIPLocation = async (): Promise<IPLocationResponse> => {
   const response = await client.get<IPLocationResponse>('/auth/check-ip/', {
-    withCredentials: true,
-  })
-  return response.data
-}
-
-export interface GoogleAuthStatusResponse {
-  success: boolean
-  google_auth_enabled: boolean
-  message?: string
-}
-
-export const checkGoogleAuthStatus = async (): Promise<GoogleAuthStatusResponse> => {
-  const response = await client.get<GoogleAuthStatusResponse>('/auth/google-status/', {
     withCredentials: true,
   })
   return response.data

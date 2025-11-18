@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { getStrategies, getLiveTrades, getAccountInfo, getMarketStatus, openTrade, closeTrade, syncPositions, getMT5Positions, TradingStrategy, LiveTrade, AccountInfo } from '../api/client'
 import { useToast } from './ToastProvider'
 import { useSymbol } from '../context/SymbolContext'
 import AutoTradingSettings from './AutoTradingSettings'
+import { useRateLimit } from '../hooks/useRateLimit'
 
 export default function LiveTrading() {
   const [strategies, setStrategies] = useState<TradingStrategy[]>([])
@@ -13,6 +14,9 @@ export default function LiveTrading() {
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const { showToast } = useToast()
+  const rateLimitClickOpenTrade = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'liveTrading-openTrade' })
+  const rateLimitClickCloseTrade = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'liveTrading-closeTrade' })
+  const rateLimitClickSync = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'liveTrading-sync' })
 
   // Form state
   const [selectedStrategy, setSelectedStrategy] = useState<number | ''>('')
@@ -180,71 +184,78 @@ export default function LiveTrading() {
     }
   }
 
-  const handleOpenTrade = async () => {
-    if (!selectedStrategy) {
-      showToast('لطفاً یک استراتژی انتخاب کنید', { type: 'warning' })
-      return
-    }
-
-    if (!marketOpen) {
-      showToast(`بازار بسته است: ${marketMessage}`, { type: 'warning' })
-      return
-    }
-
-    try {
-      setLoading(true)
-      const response = await openTrade({
-        strategy_id: Number(selectedStrategy),
-        symbol,
-        trade_type: tradeType,
-        volume: parseFloat(volume),
-        stop_loss: stopLoss ? parseFloat(stopLoss) : undefined,
-        take_profit: takeProfit ? parseFloat(takeProfit) : undefined,
-      })
-
-      if (response.data.status === 'success') {
-        showToast('معامله با موفقیت باز شد!', { type: 'success' })
-        await loadTrades(true) // silent mode after action
-        await loadAccountInfo()
-        // Reset form
-        setStopLoss('')
-        setTakeProfit('')
-      } else {
-        showToast(response.data.message || 'خطا در باز کردن معامله', { type: 'error' })
+  const handleOpenTrade = useCallback(
+    rateLimitClickOpenTrade(async () => {
+      if (!selectedStrategy) {
+        showToast('لطفاً یک استراتژی انتخاب کنید', { type: 'warning' })
+        return
       }
-    } catch (error: any) {
-      const message = error.response?.data?.message || error.message || 'خطا در باز کردن معامله'
-      showToast(message, { type: 'error' })
-    } finally {
-      setLoading(false)
-    }
-  }
 
-  const handleCloseTrade = async (tradeId: number) => {
+      if (!marketOpen) {
+        showToast(`بازار بسته است: ${marketMessage}`, { type: 'warning' })
+        return
+      }
+
+      try {
+        setLoading(true)
+        const response = await openTrade({
+          strategy_id: Number(selectedStrategy),
+          symbol,
+          trade_type: tradeType,
+          volume: parseFloat(volume),
+          stop_loss: stopLoss ? parseFloat(stopLoss) : undefined,
+          take_profit: takeProfit ? parseFloat(takeProfit) : undefined,
+        })
+
+        if (response.data.status === 'success') {
+          showToast('معامله با موفقیت باز شد!', { type: 'success' })
+          await loadTrades(true) // silent mode after action
+          await loadAccountInfo()
+          // Reset form
+          setStopLoss('')
+          setTakeProfit('')
+        } else {
+          showToast(response.data.message || 'خطا در باز کردن معامله', { type: 'error' })
+        }
+      } catch (error: any) {
+        const message = error.response?.data?.message || error.message || 'خطا در باز کردن معامله'
+        showToast(message, { type: 'error' })
+      } finally {
+        setLoading(false)
+      }
+    }),
+    [selectedStrategy, marketOpen, marketMessage, symbol, tradeType, volume, stopLoss, takeProfit, rateLimitClickOpenTrade, showToast, setLoading, loadTrades, loadAccountInfo, setStopLoss, setTakeProfit]
+  )
+
+  const handleCloseTrade = (tradeId: number) => {
     if (!confirm('آیا مطمئن هستید که می‌خواهید این معامله را ببندید؟')) {
       return
     }
 
-    try {
-      setLoading(true)
-      const response = await closeTrade(tradeId)
+    const closeTradeAction = rateLimitClickCloseTrade(async () => {
+      try {
+        setLoading(true)
+        const response = await closeTrade(tradeId)
 
-      if (response.data.status === 'success') {
-        showToast('معامله با موفقیت بسته شد!', { type: 'success' })
-        await loadTrades(true) // silent mode after action
-        await loadAccountInfo()
-      } else {
-        showToast(response.data.message || 'خطا در بستن معامله', { type: 'error' })
+        if (response.data.status === 'success') {
+          showToast('معامله با موفقیت بسته شد!', { type: 'success' })
+          await loadTrades(true) // silent mode after action
+          await loadAccountInfo()
+        } else {
+          showToast(response.data.message || 'خطا در بستن معامله', { type: 'error' })
+        }
+      } catch (error: any) {
+        const message = error.response?.data?.message || error.message || 'خطا در بستن معامله'
+        showToast(message, { type: 'error' })
+      } finally {
+        setLoading(false)
       }
-    } catch (error: any) {
-      const message = error.response?.data?.message || error.message || 'خطا در بستن معامله'
-      showToast(message, { type: 'error' })
-    } finally {
-      setLoading(false)
-    }
+    })
+    
+    closeTradeAction()
   }
 
-  const handleSyncPositions = async () => {
+  const handleSyncPositions = rateLimitClickSync(async () => {
     try {
       setLoading(true)
       const response = await syncPositions()
@@ -261,7 +272,7 @@ export default function LiveTrading() {
     } finally {
       setLoading(false)
     }
-  }
+  })
 
   const openTrades = trades.filter(t => t.status === 'open')
   const closedTrades = trades.filter(t => t.status === 'closed')

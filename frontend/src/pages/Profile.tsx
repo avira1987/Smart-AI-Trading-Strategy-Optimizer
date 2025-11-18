@@ -16,8 +16,10 @@ import {
   listGoldAPIAccessRequests,
   cancelGoldAPIAccessRequest,
   assignGoldAPIAccessRequest,
+  getUserActivityLogs,
   type GoldAPIAccessInfo,
   type GoldAPIAccessRequest,
+  type UserActivityLog,
 } from '../api/client'
 import { useFeatureFlags } from '../context/FeatureFlagsContext'
 
@@ -71,6 +73,8 @@ export default function Profile() {
   const [assignIsActive, setAssignIsActive] = useState(true)
   const [assignAllowMt5, setAssignAllowMt5] = useState(false)
   const [assignSubmitting, setAssignSubmitting] = useState(false)
+  const [activityLogs, setActivityLogs] = useState<UserActivityLog[]>([])
+  const [activityLogsLoading, setActivityLogsLoading] = useState(false)
   const navigate = useNavigate()
 
   const liveTradingStatusLabel = featureFlagsLoading
@@ -146,7 +150,7 @@ export default function Profile() {
             }
             if (isMounted) {
               try {
-                await Promise.all([loadGoldAccess(), loadGoldRequests()])
+                await Promise.all([loadGoldAccess(), loadGoldRequests(), loadActivityLogs()])
               } catch (goldError) {
                 console.error('Error loading gold access data:', goldError)
               }
@@ -173,7 +177,7 @@ export default function Profile() {
                   }
                   if (isMounted) {
                     try {
-                      await Promise.all([loadGoldAccess(), loadGoldRequests()])
+                      await Promise.all([loadGoldAccess(), loadGoldRequests(), loadActivityLogs()])
                     } catch (goldError) {
                       console.error('Error loading gold access after auth:', goldError)
                     }
@@ -407,6 +411,21 @@ export default function Profile() {
       setGoldRequests([])
     } finally {
       setGoldRequestsLoading(false)
+    }
+  }
+
+  const loadActivityLogs = async () => {
+    try {
+      setActivityLogsLoading(true)
+      const response = await getUserActivityLogs(50, 0)
+      if (response.data.success) {
+        setActivityLogs(response.data.logs)
+      }
+    } catch (error) {
+      console.error('Error loading activity logs:', error)
+      setActivityLogs([])
+    } finally {
+      setActivityLogsLoading(false)
     }
   }
 
@@ -715,6 +734,14 @@ export default function Profile() {
                 </label>
                 <p className="text-white text-lg">
                   {nickname || user?.nickname || 'تعریف نشده'}
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-1">
+                  نقش کاربر
+                </label>
+                <p className="text-white text-lg">
+                  {isAdmin ? 'ادمین' : 'کاربر عادی'}
                 </p>
               </div>
               <div>
@@ -1284,6 +1311,59 @@ export default function Profile() {
           <ErrorBoundary fallback={<div className="p-6 text-red-400">خطا در بارگذاری آمار API</div>}>
             <APIUsageStats />
           </ErrorBoundary>
+        </div>
+
+        {/* User Activity Logs */}
+        <div className="bg-gray-800 rounded-lg p-6 mt-6">
+          <h2 className="text-xl font-semibold text-white mb-4">لاگ فعالیت‌ها</h2>
+          {activityLogsLoading ? (
+            <div className="text-center py-8">
+              <div className="text-gray-400">در حال بارگذاری...</div>
+            </div>
+          ) : activityLogs.length === 0 ? (
+            <div className="text-center py-8">
+              <div className="text-gray-400">هیچ فعالیتی ثبت نشده است</div>
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {activityLogs.map((log) => {
+                const date = new Date(log.created_at)
+                const formattedDate = date.toLocaleDateString('fa-IR', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })
+                const tokenInfo = log.metadata?.token_info
+                return (
+                  <div
+                    key={log.id}
+                    className="bg-gray-700 rounded-lg p-4 border border-gray-600 hover:border-gray-500 transition"
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex-1">
+                        <div className="text-white font-medium">{log.action_type_display}</div>
+                        <div className="text-gray-300 text-sm mt-1">{log.action_description}</div>
+                        {tokenInfo && tokenInfo.total_tokens && (
+                          <div className="text-blue-300 text-xs mt-2">
+                            توکن‌های مصرفی: {tokenInfo.total_tokens.toLocaleString('fa-IR')}
+                            {tokenInfo.input_tokens && tokenInfo.output_tokens && (
+                              <span className="text-gray-400 mr-2">
+                                (ورودی: {tokenInfo.input_tokens.toLocaleString('fa-IR')}، خروجی:{' '}
+                                {tokenInfo.output_tokens.toLocaleString('fa-IR')})
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-gray-400 text-xs whitespace-nowrap mr-4">{formattedDate}</div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
 
         {/* Security & Admin Controls - Admin Only */}

@@ -1,31 +1,9 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
-import { sendOTP, verifyOTP, googleLogin, checkGoogleAuthStatus } from '../api/auth'
+import { sendOTP, verifyOTP } from '../api/auth'
 import { useToast } from '../components/ToastProvider'
 import { getCaptcha, initPageLoadTime, prepareCaptchaData, clearCaptcha } from '../utils/selfCaptcha'
-
-declare global {
-  interface Window {
-    google?: {
-      accounts: {
-        id: {
-          initialize: (config: {
-            client_id: string
-            callback: (response: { credential: string }) => void
-          }) => void
-          renderButton: (element: HTMLElement, config: {
-            theme: string
-            size: string
-            text: string
-            width?: number
-          }) => void
-          prompt: () => void
-        }
-      }
-    }
-  }
-}
 
 export default function Login() {
   const [step, setStep] = useState<'phone' | 'otp'>('phone')
@@ -33,14 +11,11 @@ export default function Login() {
   const [otpCode, setOtpCode] = useState('')
   const [loading, setLoading] = useState(false)
   const [countdown, setCountdown] = useState(0)
-  const [googleLoading, setGoogleLoading] = useState(false)
-  const [googleAuthEnabled, setGoogleAuthEnabled] = useState(false)
   const [captchaChallenge, setCaptchaChallenge] = useState('')
   const [captchaAnswer, setCaptchaAnswer] = useState('')
   const { login, isAuthenticated } = useAuth()
   const navigate = useNavigate()
   const { showToast } = useToast()
-  const googleButtonRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -88,126 +63,6 @@ export default function Login() {
   const handleRefreshCaptcha = async () => {
     await loadCaptcha()
   }
-
-  // بررسی وضعیت Google Auth با timeout برای موبایل
-  useEffect(() => {
-    const fetchGoogleAuthStatus = async () => {
-      try {
-        // Add timeout for mobile devices (3 seconds)
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Google Auth check timeout')), 3000)
-        })
-        
-        const response = await Promise.race([checkGoogleAuthStatus(), timeoutPromise]) as Awaited<ReturnType<typeof checkGoogleAuthStatus>>
-        if (response.success) {
-          setGoogleAuthEnabled(response.google_auth_enabled)
-        }
-      } catch (error) {
-        console.error('Error checking Google Auth status:', error)
-        // در صورت خطا، به صورت پیش‌فرض غیرفعال در نظر می‌گیریم
-        setGoogleAuthEnabled(false)
-      }
-    }
-    fetchGoogleAuthStatus()
-  }, [])
-
-  const handleGoogleSignIn = useCallback(async (response: { credential: string }) => {
-    setGoogleLoading(true)
-    try {
-      // Prepare CAPTCHA data for Google OAuth (optional)
-      const captchaData = captchaAnswer ? prepareCaptchaData(Number(captchaAnswer)) : null
-      
-      const authResponse = await googleLogin(response.credential, captchaData)
-      if (authResponse.success && authResponse.user) {
-        if (authResponse.device_id) {
-          login(authResponse.user, authResponse.device_id)
-        }
-        
-        // Check if this is a new user or profile needs completion
-        // Google users might not have valid phone number
-        const needsProfileCompletion = !authResponse.user?.phone_number?.startsWith('09')
-        
-        if (needsProfileCompletion) {
-          showToast('حساب کاربری شما ایجاد شد. لطفا شماره موبایل خود را برای تکمیل پروفایل وارد کنید', { type: 'info', duration: 5000 })
-          navigate('/complete-profile')
-        } else {
-          showToast('ورود با گوگل با موفقیت انجام شد', { type: 'success' })
-          navigate('/')
-        }
-      } else {
-        showToast(authResponse.message || 'خطا در ورود با گوگل', { type: 'error' })
-      }
-    } catch (error: any) {
-      console.error('Google login error:', error)
-      
-      // بررسی خطای origin_mismatch
-      const errorMessage = error.response?.data?.message || error.message || 'خطا در ورود با گوگل'
-      let detailedMessage = errorMessage
-      
-      if (errorMessage.includes('origin_mismatch') || errorMessage.includes('Authorization Error') || error.code === 'ERR_BAD_REQUEST') {
-        const currentOrigin = `${window.location.protocol}//${window.location.hostname}:${window.location.port}`
-        detailedMessage = `خطای Google OAuth: origin_mismatch\n\nلطفاً آدرس زیر را به Google Cloud Console اضافه کنید:\n${currentOrigin}\n\nراهنمای کامل در فایل "راهنمای_تنظیم_Google_OAuth.md" موجود است.`
-        showToast(detailedMessage, { type: 'error', duration: 10000 })
-      } else {
-        showToast(errorMessage, { type: 'error', duration: 8000 })
-      }
-    } finally {
-      setGoogleLoading(false)
-    }
-  }, [login, navigate, showToast])
-
-  useEffect(() => {
-    // فقط اگر Google Auth فعال باشد، دکمه را initialize کنیم
-    if (!googleAuthEnabled) {
-      return
-    }
-
-    // Initialize Google Sign-In when window.google is available
-    const initGoogleSignIn = () => {
-      if (window.google && googleButtonRef.current) {
-        const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || ''
-        
-        if (!GOOGLE_CLIENT_ID) {
-          console.warn('Google Client ID not configured. Google login will not work.')
-          return
-        }
-
-        try {
-          window.google.accounts.id.initialize({
-            client_id: GOOGLE_CLIENT_ID,
-            callback: handleGoogleSignIn,
-          })
-
-          if (googleButtonRef.current) {
-            window.google.accounts.id.renderButton(googleButtonRef.current, {
-              theme: 'outline',
-              size: 'large',
-              text: 'signin_with',
-              width: 300,
-            })
-          }
-        } catch (error) {
-          console.error('Error initializing Google Sign-In:', error)
-        }
-      }
-    }
-
-    // Check if Google script is already loaded
-    if (window.google) {
-      initGoogleSignIn()
-    } else {
-      // Wait for Google script to load
-      const checkGoogle = setInterval(() => {
-        if (window.google) {
-          clearInterval(checkGoogle)
-          initGoogleSignIn()
-        }
-      }, 100)
-
-      // Cleanup after 5 seconds if Google doesn't load
-      setTimeout(() => clearInterval(checkGoogle), 5000)
-    }
-  }, [handleGoogleSignIn, googleAuthEnabled])
 
   useEffect(() => {
     if (countdown > 0) {
@@ -400,7 +255,7 @@ export default function Login() {
                     placeholder="09123456789"
                     className="input-standard-lg placeholder-gray-400 text-center"
                     required
-                    disabled={loading || googleLoading}
+                    disabled={loading}
                     dir="ltr"
                   />
                 </div>
@@ -415,7 +270,7 @@ export default function Login() {
                       <button
                         type="button"
                         onClick={handleRefreshCaptcha}
-                        disabled={loading || googleLoading}
+                        disabled={loading}
                         className="mr-2 p-2 text-blue-400 hover:text-blue-300 disabled:opacity-50 disabled:cursor-not-allowed transition"
                         title="تازه‌سازی CAPTCHA"
                       >
@@ -443,7 +298,7 @@ export default function Login() {
                       placeholder="پاسخ را وارد کنید"
                       className="input-standard-lg placeholder-gray-400 text-center"
                       required
-                      disabled={loading || googleLoading}
+                      disabled={loading}
                       dir="ltr"
                     />
                   </div>
@@ -461,35 +316,12 @@ export default function Login() {
 
                 <button
                   type="submit"
-                  disabled={loading || googleLoading || phoneNumber.length !== 11 || !captchaAnswer}
+                  disabled={loading || phoneNumber.length !== 11 || !captchaAnswer}
                   className="w-full btn-primary py-3"
                 >
                   {loading ? 'در حال ارسال...' : 'ارسال کد'}
                 </button>
               </form>
-
-              {googleAuthEnabled && (
-                <>
-                  <div className="relative my-6">
-                    <div className="absolute inset-0 flex items-center">
-                      <div className="w-full border-t border-gray-600"></div>
-                    </div>
-                    <div className="relative flex justify-center text-sm">
-                      <span className="px-4 bg-gray-800 text-gray-400">یا</span>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-center">
-                    <div 
-                      ref={googleButtonRef}
-                      className={googleLoading ? 'opacity-50 pointer-events-none' : ''}
-                    ></div>
-                  </div>
-                  {googleLoading && (
-                    <p className="text-center text-sm text-gray-400 mt-2">در حال ورود با گوگل...</p>
-                  )}
-                </>
-              )}
             </>
           ) : (
             <form onSubmit={handleOTPSubmit} className="space-y-6">

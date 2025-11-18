@@ -15,8 +15,16 @@ class AIProviderManager:
     Coordinates requests across multiple AI providers with fallback logic.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, user=None) -> None:
         self.providers = get_registered_providers()
+        self.user = user
+        self._apply_user_context(user)
+
+    def _apply_user_context(self, user) -> None:
+        for provider in self.providers.values():
+            set_context = getattr(provider, "set_user_context", None)
+            if callable(set_context):
+                set_context(user)
 
     @staticmethod
     def _normalize_provider_name(provider: str) -> Optional[str]:
@@ -91,21 +99,42 @@ class AIProviderManager:
         generation_config: Dict[str, Any],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ProviderResult:
+        # Ensure user context is always fresh before generating
+        self._apply_user_context(self.user)
+        
+        user_id = None
+        if self.user and getattr(self.user, "is_authenticated", False):
+            user_id = getattr(self.user, "pk", None) or getattr(self.user, "id", None)
+        
+        LOGGER.info(
+            f"AIProviderManager.generate called (user_id={user_id}, prompt_length={len(prompt)})"
+        )
+        
         attempts: List[ProviderAttempt] = []
         providers_tried = 0
+        priority_list = self._get_priority_list()
+        LOGGER.info(f"Provider priority list: {priority_list}")
 
-        for provider_name in self._get_priority_list():
+        for provider_name in priority_list:
             provider = self.providers.get(provider_name)
             if not provider:
+                LOGGER.warning(f"Provider {provider_name} not found in providers dict")
                 continue
 
             providers_tried += 1
+            LOGGER.info(f"Trying provider {provider_name} (attempt {providers_tried})")
 
             if not provider.is_available():
+                api_key = provider.get_api_key()
+                error_msg = f"Provider {provider_name} not available - missing API key"
+                LOGGER.warning(
+                    f"Provider {provider_name} not available (user_id={user_id}, "
+                    f"has_api_key={bool(api_key)}, api_key_length={len(api_key) if api_key else 0})"
+                )
                 attempt = ProviderAttempt(
                     provider=provider_name,
                     success=False,
-                    error="missing_api_key",
+                    error=error_msg,
                     status_code=None,
                     latency_ms=None,
                 )
@@ -114,8 +143,13 @@ class AIProviderManager:
                 continue
 
             start_time = time.perf_counter()
+            LOGGER.info(f"Calling provider {provider_name}.generate()")
             result = provider.generate(prompt, generation_config, metadata=metadata)
             latency_ms = (time.perf_counter() - start_time) * 1000.0
+            LOGGER.info(
+                f"Provider {provider_name} returned: success={result.success}, "
+                f"error={result.error}, latency={latency_ms:.2f}ms"
+            )
 
             if not result.attempts:
                 attempt = ProviderAttempt(
@@ -145,23 +179,65 @@ class AIProviderManager:
             if providers_tried
             else "No AI providers configured or enabled"
         )
+        LOGGER.error(
+            f"All providers failed (user_id={user_id}, providers_tried={providers_tried}, "
+            f"attempts={len(attempts)}): {error_message}"
+        )
+        if attempts:
+            for attempt in attempts:
+                LOGGER.error(
+                    f"  Provider {attempt.provider}: success={attempt.success}, "
+                    f"error={attempt.error}, status_code={attempt.status_code}"
+                )
         failure = ProviderResult(success=False, error=error_message, attempts=attempts)
         return failure
 
     def has_available_provider(self) -> bool:
+        # Ensure user context is always fresh before checking availability
+        self._apply_user_context(self.user)
+        
+        user_id = None
+        if self.user and getattr(self.user, "is_authenticated", False):
+            user_id = getattr(self.user, "pk", None) or getattr(self.user, "id", None)
+        
         for provider_name in self._get_priority_list():
             provider = self.providers.get(provider_name)
-            if provider and provider.is_available():
-                return True
+            if provider:
+                is_available = provider.is_available()
+                if is_available:
+                    LOGGER.info(
+                        f"Found available provider: {provider_name} (user_id={user_id})"
+                    )
+                    return True
+                else:
+                    api_key = provider.get_api_key()
+                    LOGGER.debug(
+                        f"Provider {provider_name} not available (user_id={user_id}, "
+                        f"has_api_key={bool(api_key)})"
+                    )
+        LOGGER.warning(f"No available providers found (user_id={user_id})")
         return False
 
 
-_PROVIDER_MANAGER: Optional[AIProviderManager] = None
+_PROVIDER_MANAGERS: Dict[str, AIProviderManager] = {}
 
 
-def get_provider_manager() -> AIProviderManager:
-    global _PROVIDER_MANAGER
-    if _PROVIDER_MANAGER is None:
-        _PROVIDER_MANAGER = AIProviderManager()
-    return _PROVIDER_MANAGER
+def _manager_cache_key(user) -> str:
+    if user and getattr(user, "is_authenticated", False):
+        user_id = getattr(user, "pk", None) or getattr(user, "id", None)
+        if user_id is not None:
+            return f"user:{user_id}"
+    return "anonymous"
+
+
+def get_provider_manager(user=None) -> AIProviderManager:
+    key = _manager_cache_key(user)
+    manager = _PROVIDER_MANAGERS.get(key)
+    if manager is None:
+        manager = AIProviderManager(user=user)
+        _PROVIDER_MANAGERS[key] = manager
+    else:
+        manager.user = user
+        manager._apply_user_context(user)
+    return manager
 

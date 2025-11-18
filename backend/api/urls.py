@@ -20,9 +20,9 @@ from .views import (
     UserAPIUsageStatsView,
     SystemSettingsView,
 )
-from .auth_views import SendOTPView, VerifyOTPView, GoogleOAuthView, check_auth, logout, get_csrf_token, check_profile_completion, update_profile, check_ip_location, check_google_auth_status
+from .auth_views import SendOTPView, VerifyOTPView, check_auth, logout, get_csrf_token, check_profile_completion, update_profile, check_ip_location, get_user_activity_logs
 from .captcha_views import GetCaptchaView
-from .test_endpoints import test_sms, test_google_oauth_config, test_backend_status, test_kavenegar_config, emergency_set_kavenegar_api_key
+from .test_endpoints import test_sms, test_backend_status, test_kavenegar_config, emergency_set_kavenegar_api_key
 from .gold_price_views import GoldPriceView
 from .gold_access_views import GoldAPIAccessRequestViewSet, UserGoldAPIAccessView
 from .demo_trading_views import (
@@ -55,19 +55,17 @@ urlpatterns = [
     # Authentication endpoints
     path('auth/send-otp/', SendOTPView.as_view(), name='send_otp'),
     path('auth/verify-otp/', VerifyOTPView.as_view(), name='verify_otp'),
-    path('auth/google/', GoogleOAuthView.as_view(), name='google_oauth'),
     path('auth/check/', check_auth, name='check_auth'),
     path('auth/logout/', logout, name='logout'),
     path('auth/csrf-token/', get_csrf_token, name='get_csrf_token'),
     path('auth/profile/check/', check_profile_completion, name='check_profile_completion'),
     path('auth/profile/update/', update_profile, name='update_profile'),
+    path('auth/activity-logs/', get_user_activity_logs, name='get_user_activity_logs'),
     path('auth/check-ip/', check_ip_location, name='check_ip_location'),
-    path('auth/google-status/', check_google_auth_status, name='check_google_auth_status'),
     # System settings
     path('system-settings/', SystemSettingsView.as_view(), name='system_settings'),
     # Test endpoints
     path('test/sms/', test_sms, name='test_sms'),
-    path('test/google-oauth/', test_google_oauth_config, name='test_google_oauth'),
     path('test/backend-status/', test_backend_status, name='test_backend_status'),
     path('test/kavenegar-config/', test_kavenegar_config, name='test_kavenegar_config'),
     path('emergency/set-kavenegar-api-key/', emergency_set_kavenegar_api_key, name='emergency_set_kavenegar_api_key'),

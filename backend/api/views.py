@@ -106,7 +106,7 @@ class APIConfigurationViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     
     # Backend/system providers that require admin access
-    BACKEND_PROVIDERS = ['kavenegar', 'google_oauth', 'zarinpal']
+    BACKEND_PROVIDERS = ['kavenegar', 'zarinpal']
     
     def get_queryset(self):
         """Filter queryset based on user permissions"""
@@ -612,10 +612,7 @@ class MarketDataView(APIView):
     def _has_mt5_access(user) -> bool:
         if not user or not user.is_authenticated:
             return False
-        if user.is_staff or user.is_superuser:
-            return True
-        access = getattr(user, 'gold_api_access', None)
-        return bool(access and access.allow_mt5_access and access.is_active)
+        return True
 
     def get(self, request, *args, **kwargs):
         source = request.query_params.get('source')
@@ -653,6 +650,33 @@ class MarketDataView(APIView):
             ]
             logger.info(f"[API] mt5_candles success symbol={symbol} rows={len(candles)} first={candles[0]['datetime']} last={candles[-1]['datetime']}")
             return Response({'status': 'success', 'source': 'mt5', 'symbol': symbol, 'timeframe': timeframe, 'count': len(candles), 'candles': candles})
+        elif source == 'mt5_symbols':
+            # Get available MT5 symbols
+            if not self._has_mt5_access(request.user):
+                return Response(
+                    {
+                        'status': 'error',
+                        'message': 'دسترسی به داده‌های MetaTrader 5 فقط برای ادمین یا کاربران مجاز فعال است.',
+                        'allow_mt5_access': False,
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            from .mt5_client import get_available_mt5_symbols
+            symbols, error = get_available_mt5_symbols()
+            if error:
+                return Response({'status': 'error', 'message': error}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Filter to only available symbols if requested
+            only_available = request.query_params.get('only_available', 'false').lower() == 'true'
+            if only_available:
+                symbols = [s for s in symbols if s.get('is_available', False)]
+            
+            return Response({
+                'status': 'success',
+                'symbols': symbols,
+                'total_count': len(symbols),
+                'available_count': sum(1 for s in symbols if s.get('is_available', False))
+            })
 
         return Response({'status': 'error', 'message': 'Unknown market data source'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -693,7 +717,7 @@ class BacktestPrecheckView(APIView):
                     'message': 'استراتژی انتخاب شده فایل ندارد. لطفاً ابتدا استراتژی را آپلود کنید.'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            parsed = parse_strategy_file(strategy.strategy_file.path)
+            parsed = parse_strategy_file(strategy.strategy_file.path, user=request.user)
             symbol = parsed.get('symbol', 'EUR/USD')
 
             data_manager = DataProviderManager()
@@ -857,7 +881,7 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             try:
-                parsed_data = parse_strategy_file(strategy_file_path)
+                parsed_data = parse_strategy_file(strategy_file_path, user=request.user)
             except Exception as parse_error:
                 import traceback
                 error_trace = traceback.format_exc()
@@ -1142,6 +1166,57 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                     'message': str(optimization_error),
                 }
             
+            # استخراج اطلاعات توکن از تحلیل AI
+            token_info = {}
+            if analysis and isinstance(analysis, dict):
+                tokens_used = analysis.get('tokens_used')
+                if tokens_used:
+                    token_info = {
+                        'total_tokens': tokens_used,
+                        'provider': analysis.get('ai_provider') or analysis.get('provider') or 'ai',
+                    }
+                # همچنین بررسی metadata در analysis_sources_info
+                if analysis_sources_info.get('ai_provider'):
+                    # استخراج از API usage log
+                    try:
+                        from core.models import APIUsageLog
+                        latest_log = APIUsageLog.objects.filter(
+                            user=user,
+                            provider=analysis_sources_info.get('ai_provider'),
+                            endpoint='analyze_strategy_with_gemini',
+                            success=True
+                        ).order_by('-created_at').first()
+                        if latest_log and latest_log.metadata:
+                            meta = latest_log.metadata
+                            if meta.get('total_tokens_approx'):
+                                token_info = {
+                                    'total_tokens': meta.get('total_tokens_approx'),
+                                    'input_tokens': meta.get('input_tokens_approx'),
+                                    'output_tokens': meta.get('output_tokens_approx'),
+                                    'provider': analysis_sources_info.get('ai_provider'),
+                                }
+                    except Exception:
+                        pass
+            
+            # ثبت لاگ فعالیت
+            if user and user.is_authenticated:
+                try:
+                    from core.models import UserActivityLog
+                    UserActivityLog.objects.create(
+                        user=user,
+                        action_type='strategy_processed',
+                        action_description=f'پردازش استراتژی «{strategy.name}»',
+                        metadata={
+                            'strategy_id': strategy.id,
+                            'strategy_name': strategy.name,
+                            'token_info': token_info,
+                            'analysis_method': analysis_sources_info.get('analysis_method'),
+                            'ai_provider': analysis_sources_info.get('ai_provider'),
+                        }
+                    )
+                except Exception as log_error:
+                    logger.warning(f"Failed to log user activity: {log_error}")
+            
             # Save parsed data (with or without analysis)
             process_completed_at = timezone.now()
             duration_seconds = max(time.perf_counter() - process_started_perf, 0.0)
@@ -1166,7 +1241,8 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                 'confidence_score': parsed_data.get('confidence_score', 0.0),
                 'analysis_generated': analysis is not None,
                 'analysis_sources': strategy.analysis_sources,
-                'analysis_sources_display': serializer.data.get('analysis_sources_display')
+                'analysis_sources_display': serializer.data.get('analysis_sources_display'),
+                'token_info': token_info,  # بازگرداندن اطلاعات توکن
             })
             
         except Exception as e:
@@ -1207,7 +1283,7 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                 'message': 'استراتژی هنوز پردازش نشده است. لطفاً ابتدا روی دکمه "پردازش" کلیک کنید.'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        manager = get_provider_manager()
+        manager = get_provider_manager(user=request.user)
         available_providers = [
             name for name, provider in manager.providers.items() if provider.is_available()
         ]
@@ -1239,7 +1315,7 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             logger.info(f"Generating questions for strategy {strategy.id}, parsed_data keys: {list(parsed_data.keys())}, raw_text length: {len(raw_text)}")
             
             # Generate questions using Gemini
-            questions_result = generate_strategy_questions(parsed_data, raw_text, existing_answers)
+            questions_result = generate_strategy_questions(parsed_data, raw_text, existing_answers, user=request.user)
             if questions_result.get('ai_status') != 'ok':
                 message = questions_result.get(
                     'message',
@@ -1349,10 +1425,33 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             raw_text = extract_text_from_file(strategy_file_path)
             
             # Convert strategy with answers
-            enhanced_strategy = parse_strategy_with_answers(parsed_data, raw_text, answers)
+            enhanced_strategy = parse_strategy_with_answers(parsed_data, raw_text, answers, user=request.user)
+            
+            # استخراج اطلاعات توکن
+            token_info = enhanced_strategy.get('_token_info', {})
+            
+            # ثبت لاگ فعالیت
+            try:
+                from core.models import UserActivityLog
+                UserActivityLog.objects.create(
+                    user=request.user,
+                    action_type='strategy_processed',
+                    action_description=f'پردازش استراتژی «{strategy.name}» با استفاده از هوش مصنوعی',
+                    metadata={
+                        'strategy_id': strategy.id,
+                        'strategy_name': strategy.name,
+                        'token_info': token_info,
+                    }
+                )
+            except Exception as log_error:
+                logger.warning(f"Failed to log user activity: {log_error}")
+            
+            # حذف _token_info از parsed_data قبل از ذخیره
+            enhanced_strategy_for_save = dict(enhanced_strategy)
+            enhanced_strategy_for_save.pop('_token_info', None)
             
             # Update strategy
-            strategy.parsed_strategy_data = enhanced_strategy
+            strategy.parsed_strategy_data = enhanced_strategy_for_save
             strategy.processing_status = 'processed'
             strategy.processed_at = timezone.now()
             strategy.processing_error = ''
@@ -1363,8 +1462,9 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             return Response({
                 'status': 'success',
                 'message': 'Strategy processed successfully with answers',
-                'parsed_data': enhanced_strategy,
-                'confidence_score': enhanced_strategy.get('confidence_score', 0.0)
+                'parsed_data': enhanced_strategy_for_save,
+                'confidence_score': enhanced_strategy.get('confidence_score', 0.0),
+                'token_info': token_info,  # بازگرداندن اطلاعات توکن
             })
             
         except Exception as e:
@@ -2770,7 +2870,8 @@ class AIRecommendationViewSet(viewsets.ModelViewSet):
             recommendations_result = generate_ai_recommendations(
                 strategy.parsed_strategy_data,
                 raw_text,
-                analysis
+                analysis,
+                user=request.user
             )
             
             if recommendations_result.get('ai_status') != 'ok':

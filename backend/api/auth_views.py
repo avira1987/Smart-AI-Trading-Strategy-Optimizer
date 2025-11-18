@@ -11,15 +11,13 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.middleware.csrf import get_token
-from core.models import UserProfile, OTPCode, Device, SystemSettings
+from core.models import UserProfile, OTPCode, Device, SystemSettings, UserActivityLog
 from .serializers import PhoneNumberSerializer, OTPVerificationSerializer, UserSerializer
 from .sms_service import send_otp_sms
 from .self_captcha import verify_captcha, get_client_ip
 import logging
 import os
 import hashlib
-from google.oauth2 import id_token
-from google.auth.transport import requests as google_requests
 import requests
 
 logger = logging.getLogger(__name__)
@@ -338,205 +336,6 @@ def get_csrf_token(request):
     return Response({'csrfToken': token})
 
 
-class GoogleOAuthView(APIView):
-    """
-    Authenticate user with Google OAuth ID token
-    """
-    permission_classes = [AllowAny]
-    authentication_classes = []  # Disable authentication for this endpoint
-    
-    def post(self, request):
-        """
-        Verify Google ID token and login/create user
-        """
-        # بررسی اینکه Google Auth فعال است یا نه
-        settings = SystemSettings.load()
-        if not settings.google_auth_enabled:
-            return Response(
-                {
-                    'success': False,
-                    'message': 'ورود با گوگل در حال حاضر غیرفعال است'
-                },
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        # Verify self-managed CAPTCHA for Google OAuth
-        captcha_token = request.data.get('captcha_token', '')
-        captcha_answer = request.data.get('captcha_answer')
-        page_load_time = request.data.get('page_load_time')
-        honeypot = request.data.get('website', '')
-        
-        if captcha_token:
-            if page_load_time and isinstance(page_load_time, str):
-                try:
-                    page_load_time = float(page_load_time)
-                except (ValueError, TypeError):
-                    page_load_time = None
-            
-            captcha_result = verify_captcha(
-                token=captcha_token,
-                answer=captcha_answer,
-                page_load_time=page_load_time,
-                honeypot=honeypot
-            )
-            
-            if not captcha_result['success']:
-                logger.warning(f"CAPTCHA verification failed for Google OAuth")
-                return Response(
-                    {
-                        'success': False,
-                        'message': captcha_result.get('message', 'تایید امنیتی ناموفق بود. لطفا دوباره تلاش کنید.'),
-                        'error': captcha_result.get('error', 'captcha_failed')
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        
-        id_token_string = request.data.get('id_token')
-        
-        if not id_token_string:
-            return Response(
-                {
-                    'success': False,
-                    'message': 'توکن گوگل ارسال نشده است'
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            # Get Google Client ID from settings (which loads from env or APIConfiguration)
-            from django.conf import settings
-            GOOGLE_CLIENT_ID = getattr(settings, 'GOOGLE_CLIENT_ID', '')
-            
-            if not GOOGLE_CLIENT_ID:
-                logger.error("GOOGLE_CLIENT_ID not configured in environment or APIConfiguration")
-                return Response(
-                    {
-                        'success': False,
-                        'message': 'تنظیمات احراز هویت گوگل کامل نیست'
-                    },
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                )
-            
-            # Verify the token
-            try:
-                idinfo = id_token.verify_oauth2_token(
-                    id_token_string, 
-                    google_requests.Request(), 
-                    GOOGLE_CLIENT_ID
-                )
-            except ValueError as e:
-                logger.error(f"Invalid Google token: {e}")
-                return Response(
-                    {
-                        'success': False,
-                        'message': 'توکن گوگل نامعتبر است'
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Extract user information
-            google_id = idinfo.get('sub')
-            email = idinfo.get('email')
-            name = idinfo.get('name', '')
-            given_name = idinfo.get('given_name', '')
-            family_name = idinfo.get('family_name', '')
-            picture = idinfo.get('picture', '')
-            
-            if not email:
-                return Response(
-                    {
-                        'success': False,
-                        'message': 'ایمیل از گوگل دریافت نشد'
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Get or create user
-            # Use email as username, or create unique username if email already exists
-            username = email.split('@')[0]
-            base_username = username
-            
-            # Ensure unique username
-            counter = 1
-            while User.objects.filter(username=username).exists():
-                username = f"{base_username}_{counter}"
-                counter += 1
-            
-            user, created = User.objects.get_or_create(
-                email=email,
-                defaults={
-                    'username': username,
-                    'first_name': given_name or name.split()[0] if name else '',
-                    'last_name': family_name or ' '.join(name.split()[1:]) if name and len(name.split()) > 1 else '',
-                }
-            )
-            
-            # Update user info if needed
-            if not created:
-                if given_name and not user.first_name:
-                    user.first_name = given_name
-                if family_name and not user.last_name:
-                    user.last_name = family_name
-                if user.username != username and not User.objects.filter(username=username).exists():
-                    user.username = username
-                user.save()
-            
-            # Get or create user profile
-            # For Google users, use a unique placeholder since phone_number is unique
-            # Format: google_{email_hash} to ensure uniqueness
-            email_hash = hashlib.md5(email.encode()).hexdigest()[:8]
-            google_phone_placeholder = f'google_{email_hash}'
-            
-            profile, profile_created = UserProfile.objects.get_or_create(
-                user=user,
-                defaults={'phone_number': google_phone_placeholder}
-            )
-            
-            # Generate device ID
-            device_id = Device.generate_device_id(request)
-            device_name = request.META.get('HTTP_USER_AGENT', 'Unknown Device')[:255]
-            
-            # Get or create device
-            device, device_created = Device.objects.get_or_create(
-                user=user,
-                device_id=device_id,
-                defaults={'device_name': device_name}
-            )
-            
-            # Update device last login
-            device.update_last_login()
-            device.is_active = True
-            device.save()
-            
-            # Login user
-            login(request, user)
-            
-            # Serialize user data
-            user_serializer = UserSerializer(user)
-            
-            logger.info(f"User {user.username} logged in via Google OAuth from device {device_id[:20]}")
-            
-            return Response({
-                'success': True,
-                'message': 'ورود با گوگل با موفقیت انجام شد',
-                'user': user_serializer.data,
-                'device_id': device_id,
-                'is_new_user': created,
-                'is_new_device': device_created
-            }, status=status.HTTP_200_OK)
-            
-        except Exception as e:
-            logger.error(f"Error verifying Google OAuth: {e}")
-            return Response(
-                {
-                    'success': False,
-                    'message': 'خطا در ورود با گوگل. لطفا دوباره تلاش کنید.',
-                    'error': str(e)
-                },
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def check_profile_completion(request):
@@ -805,25 +604,46 @@ def check_ip_location(request):
 
 
 @api_view(['GET'])
-@permission_classes([AllowAny])
-def check_google_auth_status(request):
+@permission_classes([IsAuthenticated])
+def get_user_activity_logs(request):
     """
-    بررسی وضعیت فعال/غیرفعال بودن ورود با گوگل
+    دریافت لاگ فعالیت‌های کاربر
     """
     try:
-        settings = SystemSettings.load()
+        user = request.user
+        limit = int(request.query_params.get('limit', 50))
+        offset = int(request.query_params.get('offset', 0))
+        
+        # دریافت لاگ‌های کاربر
+        logs = UserActivityLog.objects.filter(user=user).order_by('-created_at')[offset:offset+limit]
+        
+        # تبدیل به فرمت JSON
+        logs_data = []
+        for log in logs:
+            logs_data.append({
+                'id': log.id,
+                'action_type': log.action_type,
+                'action_type_display': log.get_action_type_display(),
+                'action_description': log.action_description,
+                'metadata': log.metadata,
+                'created_at': log.created_at.isoformat(),
+            })
+        
+        total_count = UserActivityLog.objects.filter(user=user).count()
+        
         return Response({
             'success': True,
-            'google_auth_enabled': settings.google_auth_enabled
+            'logs': logs_data,
+            'total_count': total_count,
+            'limit': limit,
+            'offset': offset,
         }, status=status.HTTP_200_OK)
+        
     except Exception as e:
-        logger.error(f"Error checking Google Auth status: {e}")
-        return Response(
-            {
-                'success': False,
-                'message': 'خطا در بررسی وضعیت',
-                'google_auth_enabled': False
-            },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        logger.error(f"Error getting user activity logs: {e}")
+        return Response({
+            'success': False,
+            'message': 'خطا در دریافت لاگ فعالیت‌ها',
+            'error': str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

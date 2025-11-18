@@ -302,7 +302,7 @@ def parse_strategy_text(text: str) -> Dict[str, Any]:
     
     return parsed
 
-def parse_strategy_file(file_path: str) -> Dict[str, Any]:
+def parse_strategy_file(file_path: str, user=None) -> Dict[str, Any]:
     """
     Parse strategy file using AI-First approach with Regex fallback.
     
@@ -332,10 +332,10 @@ def parse_strategy_file(file_path: str) -> Dict[str, Any]:
         ai_success = False
         
         # ===== STEP 1: Try AI First (with automatic caching) =====
-        if parse_with_gemini is not None and _providers_available():
+        if parse_with_gemini is not None and _providers_available(user=user):
             try:
                 logger.info("Attempting AI parsing first (with cache support)...")
-                ai_result = parse_with_gemini(text)
+                ai_result = parse_with_gemini(text, user=user)
                 
                 if isinstance(ai_result, dict) and ai_result.get('ai_status') == 'ok':
                     # AI parsing successful
@@ -389,7 +389,7 @@ def parse_strategy_file(file_path: str) -> Dict[str, Any]:
         else:
             if parse_with_gemini is None:
                 logger.info("AI parser not available (parse_with_gemini is None)")
-            elif not _providers_available():
+            elif not _providers_available(user=user):
                 logger.info("No AI providers configured - falling back to regex")
         
         # ===== STEP 2: Fallback to Regex Parsing =====

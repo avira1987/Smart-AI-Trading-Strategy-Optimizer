@@ -3,6 +3,7 @@ import { getAPIConfigurations, addAPIConfiguration, updateAPIConfiguration, dele
 import { checkIPLocation } from '../api/auth'
 import { useToast } from './ToastProvider'
 import { useAuth } from '../context/AuthContext'
+import { useRateLimit } from '../hooks/useRateLimit'
 
 export default function APIConfigurations() {
   const { isAdmin } = useAuth()
@@ -36,7 +37,6 @@ export default function APIConfigurations() {
   // API providers for backend/system (admin only)
   const backendProviders = [
     { value: 'kavenegar', label: 'Kavenegar (SMS)' },
-    { value: 'google_oauth', label: 'Google OAuth (Client ID)' },
     { value: 'zarinpal', label: 'Zarinpal (Merchant ID)' }
   ]
   
@@ -46,8 +46,14 @@ export default function APIConfigurations() {
     : tradingDataProviders
   
   // Backend provider names for filtering
-  const backendProviderNames = ['kavenegar', 'google_oauth', 'zarinpal']
+  const backendProviderNames = ['kavenegar', 'zarinpal']
   const { showToast } = useToast()
+  const rateLimitClickSubmit = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'apiConfig-submit' })
+  const rateLimitClickUpdate = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'apiConfig-update' })
+  const rateLimitClickDelete = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'apiConfig-delete' })
+  const rateLimitClickTest = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'apiConfig-test' })
+  const rateLimitClickTestMT5 = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'apiConfig-testMT5' })
+  const rateLimitClickCheckIP = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'apiConfig-checkIP' })
 
   useEffect(() => {
     loadAPIs()
@@ -104,7 +110,7 @@ export default function APIConfigurations() {
     }
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (!apiKey.trim()) {
       showToast('Please enter an API key', { type: 'warning' })
@@ -117,110 +123,122 @@ export default function APIConfigurations() {
       return
     }
 
-    try {
-      console.log('Submitting API configuration:', { provider, apiKey }) // Debug log
-      
-      const response = await addAPIConfiguration({ 
-        provider, 
-        api_key: apiKey, 
-        is_active: true 
-      })
-      
-      console.log('API configuration response:', response) // Debug log
-      
-      setSuccessMessage('API key added successfully')
-      setTimeout(() => setSuccessMessage(null), 2500)
-      showToast('API key added successfully', { type: 'success' })
-      setShowModal(false)
-      setApiKey('')
-      setProvider('twelvedata')
-      
-      // Reload APIs after successful addition
-      await loadAPIs()
-      await loadAvailableProviders()
-    } catch (error: any) {
-      console.error('Error adding API:', error)
-      console.error('Error response:', error?.response?.data) // Debug log
-      
-      // Handle Django REST Framework validation errors
-      let errorMessage = 'خطا در افزودن تنظیمات API'
-      if (error?.response?.data) {
-        const errorData = error.response.data
+    const submitAction = rateLimitClickSubmit(async () => {
+      try {
+        console.log('Submitting API configuration:', { provider, apiKey }) // Debug log
         
-        // Check for detail field (general error)
-        if (errorData.detail) {
-          errorMessage = errorData.detail
-        }
-        // Check for non_field_errors (general validation errors)
-        else if (errorData.non_field_errors && Array.isArray(errorData.non_field_errors)) {
-          errorMessage = errorData.non_field_errors.join(', ')
-        }
-        // Check for field-specific errors
-        else if (typeof errorData === 'object') {
-          const fieldErrors: string[] = []
-          for (const [field, messages] of Object.entries(errorData)) {
-            if (Array.isArray(messages)) {
-              fieldErrors.push(`${field}: ${messages.join(', ')}`)
-            } else if (typeof messages === 'string') {
-              fieldErrors.push(`${field}: ${messages}`)
+        const response = await addAPIConfiguration({ 
+          provider, 
+          api_key: apiKey, 
+          is_active: true 
+        })
+        
+        console.log('API configuration response:', response) // Debug log
+        
+        setSuccessMessage('API key added successfully')
+        setTimeout(() => setSuccessMessage(null), 2500)
+        showToast('API key added successfully', { type: 'success' })
+        setShowModal(false)
+        setApiKey('')
+        setProvider('twelvedata')
+        
+        // Reload APIs after successful addition
+        await loadAPIs()
+        await loadAvailableProviders()
+      } catch (error: any) {
+        console.error('Error adding API:', error)
+        console.error('Error response:', error?.response?.data) // Debug log
+        
+        // Handle Django REST Framework validation errors
+        let errorMessage = 'خطا در افزودن تنظیمات API'
+        if (error?.response?.data) {
+          const errorData = error.response.data
+          
+          // Check for detail field (general error)
+          if (errorData.detail) {
+            errorMessage = errorData.detail
+          }
+          // Check for non_field_errors (general validation errors)
+          else if (errorData.non_field_errors && Array.isArray(errorData.non_field_errors)) {
+            errorMessage = errorData.non_field_errors.join(', ')
+          }
+          // Check for field-specific errors
+          else if (typeof errorData === 'object') {
+            const fieldErrors: string[] = []
+            for (const [field, messages] of Object.entries(errorData)) {
+              if (Array.isArray(messages)) {
+                fieldErrors.push(`${field}: ${messages.join(', ')}`)
+              } else if (typeof messages === 'string') {
+                fieldErrors.push(`${field}: ${messages}`)
+              }
+            }
+            if (fieldErrors.length > 0) {
+              errorMessage = fieldErrors.join(' | ')
             }
           }
-          if (fieldErrors.length > 0) {
-            errorMessage = fieldErrors.join(' | ')
+          // Fallback to string if errorData is a string
+          else if (typeof errorData === 'string') {
+            errorMessage = errorData
           }
+        } else if (error?.message) {
+          errorMessage = error.message
         }
-        // Fallback to string if errorData is a string
-        else if (typeof errorData === 'string') {
-          errorMessage = errorData
-        }
-      } else if (error?.message) {
-        errorMessage = error.message
+        
+        showToast(errorMessage, { type: 'error', duration: 5000 })
       }
-      
-      showToast(errorMessage, { type: 'error', duration: 5000 })
-    }
+    })
+    
+    submitAction()
   }
 
-  const handleTest = async (id: number) => {
-    setTesting(id)
-    try {
-      const response = await testAPIConfiguration(id)
-      if (response.data.status === 'success') {
-        showToast(`API Test Successful: ${response.data.provider}${response.data.data_points ? ` (${response.data.data_points} data points)` : ''}`, { type: 'success' })
-      } else {
-        showToast(`API Test Failed: ${response.data.message}`, { type: 'error' })
+  const handleTest = (id: number) => {
+    const testAction = rateLimitClickTest(async () => {
+      setTesting(id)
+      try {
+        const response = await testAPIConfiguration(id)
+        if (response.data.status === 'success') {
+          showToast(`API Test Successful: ${response.data.provider}${response.data.data_points ? ` (${response.data.data_points} data points)` : ''}`, { type: 'success' })
+        } else {
+          showToast(`API Test Failed: ${response.data.message}`, { type: 'error' })
+        }
+      } catch (error: any) {
+        console.error('Error testing API configuration:', error)
+        // Try to extract error message from response
+        const errorMessage = error?.response?.data?.message || error?.response?.data?.detail || error?.message || 'Unknown error'
+        showToast(`API Test Failed: ${errorMessage}`, { type: 'error' })
+      } finally {
+        setTesting(null)
       }
-    } catch (error: any) {
-      console.error('Error testing API configuration:', error)
-      // Try to extract error message from response
-      const errorMessage = error?.response?.data?.message || error?.response?.data?.detail || error?.message || 'Unknown error'
-      showToast(`API Test Failed: ${errorMessage}`, { type: 'error' })
-    } finally {
-      setTesting(null)
-    }
+    })
+    
+    testAction()
   }
 
-  const handleTestMT5 = async () => {
-    setTestingMT5(true)
-    try {
-      const response = await testMT5Connection()
-      if (response.data.status === 'success') {
-        const accountInfo = response.data.account_info
-        let message = response.data.message
-        if (accountInfo) {
-          message += ` | موجودی: ${accountInfo.balance?.toFixed(2) || 'N/A'} ${accountInfo.currency || ''}`
+  const handleTestMT5 = () => {
+    const testMT5Action = rateLimitClickTestMT5(async () => {
+      setTestingMT5(true)
+      try {
+        const response = await testMT5Connection()
+        if (response.data.status === 'success') {
+          const accountInfo = response.data.account_info
+          let message = response.data.message
+          if (accountInfo) {
+            message += ` | موجودی: ${accountInfo.balance?.toFixed(2) || 'N/A'} ${accountInfo.currency || ''}`
+          }
+          showToast(message, { type: 'success', duration: 5000 })
+        } else {
+          showToast(`تست اتصال Meta5 ناموفق: ${response.data.message}`, { type: 'error' })
         }
-        showToast(message, { type: 'success', duration: 5000 })
-      } else {
-        showToast(`تست اتصال Meta5 ناموفق: ${response.data.message}`, { type: 'error' })
+      } catch (error: any) {
+        console.error('Error testing MT5 connection:', error)
+        const errorMessage = error?.response?.data?.message || error?.response?.data?.detail || error?.message || 'خطای ناشناخته'
+        showToast(`تست اتصال Meta5 ناموفق: ${errorMessage}`, { type: 'error' })
+      } finally {
+        setTestingMT5(false)
       }
-    } catch (error: any) {
-      console.error('Error testing MT5 connection:', error)
-      const errorMessage = error?.response?.data?.message || error?.response?.data?.detail || error?.message || 'خطای ناشناخته'
-      showToast(`تست اتصال Meta5 ناموفق: ${errorMessage}`, { type: 'error' })
-    } finally {
-      setTestingMT5(false)
-    }
+    })
+    
+    testMT5Action()
   }
 
   const handleEdit = (api: APIConfiguration) => {
@@ -230,7 +248,7 @@ export default function APIConfigurations() {
     setShowModal(true)
   }
 
-  const handleUpdate = async (e: React.FormEvent) => {
+  const handleUpdate = (e: React.FormEvent) => {
     e.preventDefault()
     if (!editingApi) return
 
@@ -245,7 +263,8 @@ export default function APIConfigurations() {
       return
     }
 
-    try {
+    const updateAction = rateLimitClickUpdate(async () => {
+      try {
       console.log('Updating API configuration:', { id: editingApi.id, provider, apiKey }) // Debug log
       
       const response = await updateAPIConfiguration(editingApi.id, { 
@@ -306,10 +325,13 @@ export default function APIConfigurations() {
       }
       
       showToast(errorMessage, { type: 'error', duration: 5000 })
-    }
+      }
+    })
+    
+    updateAction()
   }
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = (id: number) => {
     // Find the API config to check if it's a backend provider
     const apiToDelete = apis.find(api => api.id === id)
     if (apiToDelete && backendProviderNames.includes(apiToDelete.provider) && !isAdmin) {
@@ -319,21 +341,26 @@ export default function APIConfigurations() {
 
     // Remove blocking confirm; proceed and notify
     showToast('Deleting API configuration...', { type: 'info', duration: 1500 })
-    try {
-      console.log('Deleting API configuration:', id) // Debug log
-      
-      const response = await deleteAPIConfiguration(id)
-      console.log('API configuration delete response:', response) // Debug log
-      
-      setSuccessMessage('API key deleted successfully')
-      setTimeout(() => setSuccessMessage(null), 2500)
-      showToast('API key deleted successfully', { type: 'success' })
-      await loadAPIs()
-      await loadAvailableProviders()
-    } catch (error: any) {
-      console.error('Error deleting API:', error)
-      showToast('Error deleting API configuration: ' + (error?.response?.data?.detail || 'Unknown error'), { type: 'error' })
-    }
+    
+    const deleteAction = rateLimitClickDelete(async () => {
+      try {
+        console.log('Deleting API configuration:', id) // Debug log
+        
+        const response = await deleteAPIConfiguration(id)
+        console.log('API configuration delete response:', response) // Debug log
+        
+        setSuccessMessage('API key deleted successfully')
+        setTimeout(() => setSuccessMessage(null), 2500)
+        showToast('API key deleted successfully', { type: 'success' })
+        await loadAPIs()
+        await loadAvailableProviders()
+      } catch (error: any) {
+        console.error('Error deleting API:', error)
+        showToast('Error deleting API configuration: ' + (error?.response?.data?.detail || 'Unknown error'), { type: 'error' })
+      }
+    })
+    
+    deleteAction()
   }
 
   const handleCancel = () => {
@@ -343,33 +370,37 @@ export default function APIConfigurations() {
     setApiKey('')
   }
 
-  const handleCheckIP = async () => {
-    setCheckingIP(true)
-    try {
-      const response = await checkIPLocation()
-      
-      if (!response.success) {
-        showToast(response.message || 'خطا در بررسی IP. لطفاً دوباره تلاش کنید.', { type: 'error' })
-        return
+  const handleCheckIP = () => {
+    const checkIPAction = rateLimitClickCheckIP(async () => {
+      setCheckingIP(true)
+      try {
+        const response = await checkIPLocation()
+        
+        if (!response.success) {
+          showToast(response.message || 'خطا در بررسی IP. لطفاً دوباره تلاش کنید.', { type: 'error' })
+          return
+        }
+        
+        if (response.is_iran) {
+          showToast('⚠️ هشدار: IP شما از ایران است. لطفاً از VPN استفاده کنید.', { 
+            type: 'error', 
+            duration: 8000 
+          })
+        } else {
+          showToast('✓ IP شما از خارج از ایران است. وضعیت مناسب است.', { 
+            type: 'success', 
+            duration: 5000 
+          })
+        }
+      } catch (error: any) {
+        console.error('Error checking IP:', error)
+        showToast('خطا در بررسی IP. لطفاً دوباره تلاش کنید.', { type: 'error' })
+      } finally {
+        setCheckingIP(false)
       }
-      
-      if (response.is_iran) {
-        showToast('⚠️ هشدار: IP شما از ایران است. لطفاً از VPN استفاده کنید.', { 
-          type: 'error', 
-          duration: 8000 
-        })
-      } else {
-        showToast('✓ IP شما از خارج از ایران است. وضعیت مناسب است.', { 
-          type: 'success', 
-          duration: 5000 
-        })
-      }
-    } catch (error: any) {
-      console.error('Error checking IP:', error)
-      showToast('خطا در بررسی IP. لطفاً دوباره تلاش کنید.', { type: 'error' })
-    } finally {
-      setCheckingIP(false)
-    }
+    })
+    
+    checkIPAction()
   }
 
   return (
@@ -573,7 +604,6 @@ export default function APIConfigurations() {
                   placeholder={
                     provider === 'gemini' ? 'کلید API Gemini خود را از aistudio.google.com دریافت کنید' :
                     provider === 'kavenegar' ? 'کلید API Kavenegar خود را از panel.kavenegar.com دریافت کنید' :
-                    provider === 'google_oauth' ? 'Google OAuth Client ID خود را از console.cloud.google.com دریافت کنید' :
                     provider === 'zarinpal' ? 'Merchant ID خود را از zarinpal.com دریافت کنید' :
                     provider === 'nerkh' ? 'کلید API Nerkh.io خود را وارد کنید' :
                     'کلید API خود را وارد کنید'
@@ -625,21 +655,6 @@ export default function APIConfigurations() {
                       3. از منوی API، کلید API خود را کپی کنید
                       <br />
                       4. کلید را اینجا وارد کنید
-                    </p>
-                  </div>
-                )}
-                {provider === 'google_oauth' && (
-                  <div className="mt-2 p-3 bg-blue-900/30 rounded-lg border border-blue-700">
-                    <p className="text-blue-300 text-xs">
-                      <strong>💡 راهنمای دریافت Google OAuth Client ID:</strong>
-                      <br />
-                      1. به <a href="https://console.cloud.google.com" target="_blank" rel="noopener noreferrer" className="underline font-semibold">Google Cloud Console</a> بروید
-                      <br />
-                      2. یک پروژه جدید بسازید یا پروژه موجود را انتخاب کنید
-                      <br />
-                      3. APIs & Services → Credentials → Create Credentials → OAuth client ID
-                      <br />
-                      4. Client ID را کپی کرده و اینجا وارد کنید
                     </p>
                   </div>
                 )}

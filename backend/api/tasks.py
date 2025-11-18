@@ -5,7 +5,7 @@ from core.models import Job, Result, TradingStrategy
 from api.data_providers import DataProviderManager
 from ai_module.nlp_parser import parse_strategy_file
 from ai_module.backtest_engine import BacktestEngine
-from .mt5_client import fetch_mt5_candles, is_mt5_available
+from .mt5_client import fetch_mt5_candles, is_mt5_available, map_user_symbol_to_server_symbol
 import time
 import os
 import logging
@@ -21,6 +21,65 @@ def _mt5_symbol_from(symbol: Any) -> str:
     except Exception:
         s = 'EUR/USD'
     return s.replace('/', '')
+
+def _normalize_timeframe(timeframe: str) -> str:
+    """Normalize timeframe string to MT5 format (M1, M5, M15, M30, H1, etc.)
+    
+    Args:
+        timeframe: Timeframe string from strategy (e.g., 'M15', '15min', '15 دقیقه', 'H1', '1hour', etc.)
+    
+    Returns:
+        Normalized MT5 timeframe string (M1, M5, M15, M30, H1) or 'M15' as default
+    """
+    if not timeframe:
+        return 'M15'  # Default
+    
+    timeframe_upper = str(timeframe).upper().strip()
+    
+    # Direct MT5 format matches
+    if timeframe_upper in ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1']:
+        return timeframe_upper
+    
+    # Pattern matching for various formats
+    import re
+    
+    # Minute patterns: "15min", "15 minute", "15 دقیقه", etc.
+    minute_match = re.search(r'(\d+)\s*(?:min|minute|دقیقه)', timeframe_upper)
+    if minute_match:
+        minutes = int(minute_match.group(1))
+        # Map to closest MT5 timeframe
+        if minutes <= 1:
+            return 'M1'
+        elif minutes <= 5:
+            return 'M5'
+        elif minutes <= 15:
+            return 'M15'
+        elif minutes <= 30:
+            return 'M30'
+        else:
+            return 'M15'  # Default for larger minute values
+    
+    # Hour patterns: "1h", "1 hour", "1 ساعت", "H1", etc.
+    hour_match = re.search(r'(\d+)\s*(?:h|hour|ساعت)', timeframe_upper)
+    if hour_match:
+        hours = int(hour_match.group(1))
+        if hours == 1:
+            return 'H1'
+        elif hours == 4:
+            return 'H4'
+        else:
+            return 'H1'  # Default for other hour values
+    
+    # Daily patterns
+    if re.search(r'daily|روزانه|D1', timeframe_upper):
+        return 'D1'
+    
+    # Weekly patterns
+    if re.search(r'weekly|هفتگی|W1', timeframe_upper):
+        return 'D1'  # MT5 doesn't have weekly, use daily
+    
+    # Default fallback
+    return 'M15'
 
 @shared_task
 def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = None, initial_capital: float = 10000, selected_indicators: List[str] = None):
@@ -70,6 +129,16 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
         detailed_logger.info(f"فایل استراتژی: {strategy.strategy_file.name if strategy.strategy_file else 'None'}")
         detailed_logger.info(f"وضعیت پردازش: {strategy.processing_status}")
         
+        # Determine user context for AI provider access
+        user = None
+        try:
+            if hasattr(job, 'user') and job.user:
+                user = job.user
+            elif hasattr(strategy, 'user') and strategy.user:
+                user = strategy.user
+        except Exception:
+            user = None
+
         # Use pre-processed strategy data if available, otherwise parse on the fly
         if strategy.parsed_strategy_data and strategy.processing_status == 'processed':
             parsed_strategy = strategy.parsed_strategy_data
@@ -84,7 +153,7 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             # Parse strategy file on the fly (backward compatibility)
             strategy_file_path = strategy.strategy_file.path
             detailed_logger.info(f"در حال پارس فایل استراتژی: {strategy_file_path}")
-            parsed_strategy = parse_strategy_file(strategy_file_path)
+            parsed_strategy = parse_strategy_file(strategy_file_path, user=user)
             detailed_logger.info(f"پارس استراتژی انجام شد:")
             detailed_logger.info(f"  - confidence_score: {parsed_strategy.get('confidence_score', 0):.2f}")
             detailed_logger.info(f"  - entry_conditions: {len(parsed_strategy.get('entry_conditions', []))} شرط")
@@ -139,23 +208,17 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
         start_date = (timezone.now() - timezone.timedelta(days=days)).strftime('%Y-%m-%d')
         end_date = timezone.now().strftime('%Y-%m-%d')
         
+        # Extract and normalize timeframe from strategy
+        strategy_timeframe = parsed_strategy.get('timeframe')
+        normalized_timeframe = _normalize_timeframe(strategy_timeframe) if strategy_timeframe else 'M15'
+        
         detailed_logger.info(f"پارامترهای دریافت داده:")
         detailed_logger.info(f"  - symbol: {symbol}")
         detailed_logger.info(f"  - start_date: {start_date}")
         detailed_logger.info(f"  - end_date: {end_date}")
         detailed_logger.info(f"  - days: {days}")
-        
-        # Get user from job if available
-        user = None
-        try:
-            # Try to get user from job
-            if hasattr(job, 'user') and job.user:
-                user = job.user
-            # Fallback: try to get from strategy if it has user field
-            elif hasattr(strategy, 'user') and strategy.user:
-                user = strategy.user
-        except Exception:
-            pass
+        detailed_logger.info(f"  - strategy_timeframe: {strategy_timeframe or 'تعیین نشده'}")
+        detailed_logger.info(f"  - normalized_timeframe: {normalized_timeframe}")
         
         # Try to get data from any available provider
         detailed_logger.info(f"در حال دریافت داده از ارائه‌دهندگان موجود...")
@@ -166,22 +229,43 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             logger.info(f"Backtest job {job_id}: Received {len(data)} rows from {provider_used} for symbol={symbol}")
         else:
             # If no provider worked, try MT5 as last resort (only if available)
+            detailed_logger.warning("⚠️ هشدار: هیچ ارائه‌دهنده API خارجی داده برنگرداند!")
             detailed_logger.warning("هیچ ارائه‌دهنده API داده برنگرداند؛ در حال تلاش MT5 به عنوان آخرین راه...")
             logger.warning("No API provider returned data; attempting MT5 fallback as last resort")
             mt5_ok, mt5_msg = is_mt5_available()
             if mt5_ok:
-                mt5_symbol = _mt5_symbol_from(symbol)
-                # Calculate dynamic count based on timeframe days
+                # Map user symbol to server symbol for backtesting (e.g., XAUUSD -> XAUUSD_l)
+                base_mt5_symbol = _mt5_symbol_from(symbol)
+                mt5_symbol = map_user_symbol_to_server_symbol(base_mt5_symbol, for_backtest=True)
+                detailed_logger.info(f"MT5 fallback: نماد کاربر '{symbol}' به نماد سرور '{mt5_symbol}' تبدیل شد")
+                logger.info(f"MT5 fallback: mapped user symbol '{symbol}' to server symbol '{mt5_symbol}' for backtest")
+                # Calculate dynamic count based on timeframe and days
                 minutes_in_day = 24 * 60
-                bars_per_day = minutes_in_day // 15  # tf = M15
+                # Map timeframe to minutes per bar
+                timeframe_minutes = {
+                    'M1': 1,
+                    'M5': 5,
+                    'M15': 15,
+                    'M30': 30,
+                    'H1': 60,
+                    'H4': 240,
+                    'D1': 1440
+                }
+                minutes_per_bar = timeframe_minutes.get(normalized_timeframe, 15)
+                bars_per_day = minutes_in_day // minutes_per_bar
                 count = days * bars_per_day
-                detailed_logger.info(f"MT5 fallback: درخواست {count} کندل برای {days} روز برای نماد {mt5_symbol}")
-                logger.info(f"MT5 fallback: requesting count={count} for days={days} symbol={mt5_symbol}")
-                mt5_df, mt5_err = fetch_mt5_candles(mt5_symbol, timeframe='M15', count=count)
+                detailed_logger.info(f"MT5 fallback: درخواست {count} کندل برای {days} روز با تایم‌فریم {normalized_timeframe} برای نماد {mt5_symbol}")
+                logger.info(f"MT5 fallback: requesting count={count} for days={days} timeframe={normalized_timeframe} symbol={mt5_symbol}")
+                mt5_df, mt5_err = fetch_mt5_candles(mt5_symbol, timeframe=normalized_timeframe, count=count)
                 if mt5_err is None and not mt5_df.empty:
                     data = mt5_df
                     provider_used = 'mt5'
+                    # Add MT5 to available_providers list since it was used
+                    if 'mt5' not in available_providers:
+                        available_providers.append('mt5')
+                    detailed_logger.warning("⚠️ توجه: از MetaTrader 5 (MT5) برای دریافت داده استفاده شد. این داده از بروکر محلی شما است، نه از API های خارجی.")
                     detailed_logger.info(f"✅ MT5 fallback موفق: {len(data)} کندل برای {mt5_symbol}")
+                    logger.warning("MT5 fallback used - data is from local MT5 terminal, not external APIs")
                     logger.info(f"MT5 fallback succeeded with {len(data)} candles for {mt5_symbol}")
                     
                     # لاگ استفاده از MT5
@@ -197,7 +281,7 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                             user=user,
                             metadata={
                                 'symbol': mt5_symbol,
-                                'timeframe': 'M15',
+                                'timeframe': normalized_timeframe,
                                 'count': count,
                                 'data_points': len(mt5_df)
                             }
@@ -265,15 +349,32 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                         # Only try MT5 if no API provider worked
                         mt5_ok, mt5_msg = is_mt5_available()
                         if mt5_ok:
-                            mt5_symbol = _mt5_symbol_from(symbol)
+                            # Map user symbol to server symbol for backtesting (e.g., XAUUSD -> XAUUSD_l)
+                            base_mt5_symbol = _mt5_symbol_from(symbol)
+                            mt5_symbol = map_user_symbol_to_server_symbol(base_mt5_symbol, for_backtest=True)
+                            logger.info(f"MT5 flat-series fallback: mapped user symbol '{symbol}' to server symbol '{mt5_symbol}'")
                             minutes_in_day = 24 * 60
-                            bars_per_day = minutes_in_day // 15  # tf = M15
+                            # Map timeframe to minutes per bar
+                            timeframe_minutes = {
+                                'M1': 1,
+                                'M5': 5,
+                                'M15': 15,
+                                'M30': 30,
+                                'H1': 60,
+                                'H4': 240,
+                                'D1': 1440
+                            }
+                            minutes_per_bar = timeframe_minutes.get(normalized_timeframe, 15)
+                            bars_per_day = minutes_in_day // minutes_per_bar
                             count = days * bars_per_day
-                            logger.info(f"MT5 flat-series fallback: requesting count={count} for days={days} symbol={mt5_symbol}")
-                            mt5_df, mt5_err = fetch_mt5_candles(mt5_symbol, timeframe='M15', count=count)
+                            logger.info(f"MT5 flat-series fallback: requesting count={count} for days={days} timeframe={normalized_timeframe} symbol={mt5_symbol}")
+                            mt5_df, mt5_err = fetch_mt5_candles(mt5_symbol, timeframe=normalized_timeframe, count=count)
                             if mt5_err is None and not mt5_df.empty:
                                 data = mt5_df
                                 provider_used = 'mt5'
+                                # Add MT5 to available_providers list since it was used
+                                if 'mt5' not in available_providers:
+                                    available_providers.append('mt5')
                                 logger.info(f"MT5 fallback succeeded with {len(data)} candles for {mt5_symbol}")
                             else:
                                 logger.warning(f"MT5 fallback failed or returned empty data: {mt5_err}")
@@ -448,6 +549,8 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                 'data_points': len(data) if not data.empty else 0,
                 'available_providers': available_providers,
                 'timeframe_days': days,
+                'strategy_timeframe': strategy_timeframe,  # Original timeframe from strategy text
+                'normalized_timeframe': normalized_timeframe,  # Normalized timeframe used for backtest
                 'data_range': {
                     'first_date': str(data.index[0]) if not data.empty else None,
                     'last_date': str(data.index[-1]) if not data.empty else None,
@@ -457,15 +560,36 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             # Build data sources description text (provider_display already defined above)
             data_sources_text = f"\n\n{'=' * 80}\n\n📊 منابع داده استفاده شده:\n\n"
             data_sources_text += f"• ارائه‌دهنده داده: {provider_display}\n"
+            # Add warning if MT5 was used instead of external APIs
+            if provider_used == 'mt5':
+                data_sources_text += f"  ⚠️ توجه: داده از MetaTrader 5 (MT5) محلی شما دریافت شده است، نه از API های خارجی.\n"
+                data_sources_text += f"  برای استفاده از داده‌های واقعی بازار، لطفاً API key های خارجی را تنظیم کنید.\n"
             data_sources_text += f"• نماد معاملاتی: {symbol}\n"
+            if strategy_timeframe:
+                data_sources_text += f"• تایم‌فریم استراتژی: {strategy_timeframe} (استفاده شده: {normalized_timeframe})\n"
+            else:
+                data_sources_text += f"• تایم‌فریم استفاده شده: {normalized_timeframe}\n"
             data_sources_text += f"• بازه زمانی: {start_date} تا {end_date} ({days} روز)\n"
             if not data.empty:
                 data_sources_text += f"• تعداد نقاط داده: {len(data):,}\n"
                 if data_sources_info['data_range']['first_date'] and data_sources_info['data_range']['last_date']:
                     data_sources_text += f"• محدوده داده‌ها: {data_sources_info['data_range']['first_date']} تا {data_sources_info['data_range']['last_date']}\n"
-            if available_providers and len(available_providers) > 1:
-                providers_display = [provider_names.get(p, p) for p in available_providers]
-                data_sources_text += f"• ارائه‌دهندگان در دسترس: {', '.join(providers_display)}\n"
+            # Only show available providers list if:
+            # 1. There are multiple providers available, OR
+            # 2. The provider used is in the available_providers list (to avoid confusion)
+            # This ensures transparency about which providers were actually available
+            if available_providers:
+                # Always include the provider that was actually used in the list
+                if provider_used and provider_used not in available_providers:
+                    available_providers = available_providers + [provider_used]
+                
+                if len(available_providers) > 1:
+                    providers_display = [provider_names.get(p, p) for p in available_providers]
+                    data_sources_text += f"• ارائه‌دهندگان در دسترس: {', '.join(providers_display)}\n"
+                elif len(available_providers) == 1 and provider_used in available_providers:
+                    # If only one provider was available and used, show it for clarity
+                    provider_display_single = provider_names.get(available_providers[0], available_providers[0])
+                    data_sources_text += f"• ارائه‌دهنده در دسترس: {provider_display_single}\n"
             data_sources_text += "\n"
             
             # Combine original description with AI analysis and data sources

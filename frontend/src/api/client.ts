@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { AxiosResponse } from 'axios'
 import { navigateTo } from '../utils/navigation'
 
 // Auto-detect API URL based on current hostname
@@ -247,6 +247,16 @@ export interface Result {
     entry_reason_fa?: string
     exit_reason_fa?: string
   }>
+  data_sources?: {
+    provider?: string
+    symbol?: string
+    start_date?: string
+    end_date?: string
+    data_points?: number
+    timeframe_days?: number
+    strategy_timeframe?: string
+    normalized_timeframe?: string
+  }
   created_at: string
 }
 
@@ -411,6 +421,29 @@ export const getLiveTrade = (id: number) => client.get<LiveTrade>(`/trades/${id}
 export const getAccountInfo = () => client.get<{status: string, account: AccountInfo}>('/trades/account_info/')
 export const getMT5Positions = (symbol?: string) => client.get<{status: string, positions: any[]}>('/trades/mt5_positions/', { params: symbol ? { symbol } : {} })
 export const getMarketStatus = () => client.get<{status: string, market_open: boolean, message: string}>('/trades/market_status/')
+
+// MT5 Symbols
+export interface MT5Symbol {
+  name: string
+  is_available: boolean
+  description?: string
+  currency_base?: string
+  currency_profit?: string
+  currency_margin?: string
+}
+
+export const getMT5Symbols = (onlyAvailable: boolean = true) => 
+  client.get<{
+    status: string
+    symbols: MT5Symbol[]
+    total_count: number
+    available_count: number
+  }>('/market/mt5_candles/', {
+    params: {
+      source: 'mt5_symbols',
+      only_available: onlyAvailable ? 'true' : 'false'
+    }
+  })
 export const openTrade = (data: {
   strategy_id: number
   symbol?: string
@@ -703,6 +736,30 @@ export const assignGoldAPIAccessRequest = (
   id: number,
   data: { provider: string; api_key: string; admin_notes?: string; is_active?: boolean; allow_mt5_access?: boolean }
 ) => client.post<GoldAPIAccessRequest>(`/gold-access/requests/${id}/assign/`, data)
+
+// User Activity Logs
+export interface UserActivityLog {
+  id: number
+  action_type: string
+  action_type_display: string
+  action_description: string
+  metadata: Record<string, any>
+  created_at: string
+}
+
+export interface UserActivityLogsResponse {
+  success: boolean
+  logs: UserActivityLog[]
+  total_count: number
+  limit: number
+  offset: number
+}
+
+export async function getUserActivityLogs(limit: number = 50, offset: number = 0): Promise<AxiosResponse<UserActivityLogsResponse>> {
+  return client.get('/auth/activity-logs/', {
+    params: { limit, offset }
+  })
+}
 
 export default client
 

@@ -44,6 +44,16 @@ interface Result {
     entry_reason_fa?: string
     exit_reason_fa?: string
   }>
+  data_sources?: {
+    provider?: string
+    symbol?: string
+    start_date?: string
+    end_date?: string
+    data_points?: number
+    timeframe_days?: number
+    strategy_timeframe?: string
+    normalized_timeframe?: string
+  }
   created_at: string
 }
 
@@ -290,6 +300,70 @@ export default function Results() {
                           return selectedResult.description
                         })()}
                       </pre>
+                    </div>
+                  </div>
+                )}
+
+                {/* Backtest Information */}
+                {selectedResult.data_sources && (
+                  <div className="card-standard mb-6">
+                    <h2 className="text-xl font-semibold text-white mb-4 text-right">اطلاعات بک‌تست</h2>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                      {selectedResult.data_sources.symbol && (
+                        <div className="bg-gray-700 rounded p-4">
+                          <div className="text-gray-400 text-sm mb-1">نماد معاملاتی</div>
+                          <div className="text-lg font-semibold text-white">
+                            {selectedResult.data_sources.symbol}
+                          </div>
+                        </div>
+                      )}
+                      {selectedResult.data_sources.strategy_timeframe && (
+                        <div className="bg-gray-700 rounded p-4">
+                          <div className="text-gray-400 text-sm mb-1">تایم‌فریم استراتژی</div>
+                          <div className="text-lg font-semibold text-blue-400">
+                            {selectedResult.data_sources.strategy_timeframe}
+                            {selectedResult.data_sources.normalized_timeframe && 
+                              selectedResult.data_sources.normalized_timeframe !== selectedResult.data_sources.strategy_timeframe && (
+                                <span className="text-gray-400 text-sm mr-1">
+                                  {' '}({selectedResult.data_sources.normalized_timeframe})
+                                </span>
+                              )
+                            }
+                          </div>
+                        </div>
+                      )}
+                      {selectedResult.data_sources.normalized_timeframe && !selectedResult.data_sources.strategy_timeframe && (
+                        <div className="bg-gray-700 rounded p-4">
+                          <div className="text-gray-400 text-sm mb-1">تایم‌فریم استفاده شده</div>
+                          <div className="text-lg font-semibold text-blue-400">
+                            {selectedResult.data_sources.normalized_timeframe}
+                          </div>
+                        </div>
+                      )}
+                      {selectedResult.data_sources.provider && (
+                        <div className="bg-gray-700 rounded p-4">
+                          <div className="text-gray-400 text-sm mb-1">ارائه‌دهنده داده</div>
+                          <div className="text-lg font-semibold text-white">
+                            {selectedResult.data_sources.provider}
+                          </div>
+                        </div>
+                      )}
+                      {selectedResult.data_sources.data_points && (
+                        <div className="bg-gray-700 rounded p-4">
+                          <div className="text-gray-400 text-sm mb-1">تعداد نقاط داده</div>
+                          <div className="text-lg font-semibold text-white">
+                            {selectedResult.data_sources.data_points.toLocaleString('fa-IR')}
+                          </div>
+                        </div>
+                      )}
+                      {selectedResult.data_sources.start_date && selectedResult.data_sources.end_date && (
+                        <div className="bg-gray-700 rounded p-4">
+                          <div className="text-gray-400 text-sm mb-1">بازه زمانی</div>
+                          <div className="text-lg font-semibold text-white text-sm">
+                            {selectedResult.data_sources.start_date} تا {selectedResult.data_sources.end_date}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

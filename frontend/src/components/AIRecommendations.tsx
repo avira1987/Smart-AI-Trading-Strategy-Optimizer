@@ -8,6 +8,7 @@ import {
   AIRecommendation as AIRecommendationType
 } from '../api/client'
 import { useToast } from './ToastProvider'
+import { useRateLimit } from '../hooks/useRateLimit'
 
 interface AIRecommendationsProps {
   strategyId: number
@@ -25,6 +26,8 @@ export default function AIRecommendations({ strategyId, strategyName }: AIRecomm
   const [loadingBalance, setLoadingBalance] = useState(true)
   const { showToast } = useToast()
   const navigate = useNavigate()
+  const rateLimitClickGenerate = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: `aiRecommendations-generate-${strategyId}` })
+  const rateLimitClickPurchase = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: `aiRecommendations-purchase-${strategyId}` })
 
   useEffect(() => {
     loadRecommendations()
@@ -48,7 +51,7 @@ export default function AIRecommendations({ strategyId, strategyName }: AIRecomm
       setRecommendations(recommendationsData)
     } catch (error: any) {
       console.error('Error loading recommendations:', error)
-      showToast('خطا در بارگذاری پیشنهادات', 'error')
+      showToast('خطا در بارگذاری پیشنهادات', { type: 'error' })
     } finally {
       setLoading(false)
     }
@@ -68,32 +71,32 @@ export default function AIRecommendations({ strategyId, strategyName }: AIRecomm
     }
   }
 
-  const handleGenerateRecommendations = async () => {
+  const handleGenerateRecommendations = rateLimitClickGenerate(async () => {
     try {
       setGenerating(true)
       const response = await generateAIRecommendations(strategyId)
       
       if (response.data.status === 'success') {
-        showToast(`با موفقیت ${response.data.count} پیشنهاد تولید شد!`, 'success')
+        showToast(`با موفقیت ${response.data.count} پیشنهاد تولید شد!`, { type: 'success' })
         await loadRecommendations()
       } else {
-        showToast(response.data.error || 'خطا در تولید پیشنهادات', 'error')
+        showToast(response.data.error || 'خطا در تولید پیشنهادات', { type: 'error' })
       }
     } catch (error: any) {
       console.error('Error generating recommendations:', error)
       showToast(
         error.response?.data?.error || 'خطا در تولید پیشنهادات',
-        'error'
+        { type: 'error' }
       )
     } finally {
       setGenerating(false)
     }
-  }
+  })
 
-  const handlePurchase = async (recommendationId: number) => {
+  const handlePurchase = (recommendationId: number) => {
     // Check if user has enough balance
     if (walletBalance === null) {
-      showToast('لطفاً ابتدا وارد حساب کاربری شوید', 'error')
+      showToast('لطفاً ابتدا وارد حساب کاربری شوید', { type: 'error' })
       navigate('/login')
       return
     }
@@ -103,46 +106,50 @@ export default function AIRecommendations({ strategyId, strategyName }: AIRecomm
 
     // If balance is insufficient, redirect to profile for charging
     if (walletBalance < recommendation.price) {
-      showToast('موجودی شما کافی نیست. لطفاً حساب خود را شارژ کنید', 'warning')
+      showToast('موجودی شما کافی نیست. لطفاً حساب خود را شارژ کنید', { type: 'warning' })
       navigate('/profile')
       return
     }
 
-    try {
-      setPurchasing(recommendationId)
-      const response = await purchaseRecommendation(recommendationId)
-      
-      if (response.data.status === 'success') {
-        showToast('پیشنهاد با موفقیت خریداری شد!', 'success')
-        setWalletBalance(response.data.remaining_balance || 0)
-        await loadRecommendations()
-      } else if (response.data.status === 'payment_required') {
-        // If backend still requires payment, redirect to profile
-        showToast('موجودی شما کافی نیست. لطفاً حساب خود را شارژ کنید', 'warning')
-        navigate('/profile')
-      } else if (response.data.status === 'already_purchased') {
-        showToast('این پیشنهاد قبلاً خریداری شده است', 'info')
-      } else {
-        showToast(response.data.error || 'خطا در خرید پیشنهاد', 'error')
+    const purchaseAction = rateLimitClickPurchase(async () => {
+      try {
+        setPurchasing(recommendationId)
+        const response = await purchaseRecommendation(recommendationId)
+        
+        if (response.data.status === 'success') {
+          showToast('پیشنهاد با موفقیت خریداری شد!', { type: 'success' })
+          setWalletBalance(response.data.remaining_balance || 0)
+          await loadRecommendations()
+        } else if (response.data.status === 'payment_required') {
+          // If backend still requires payment, redirect to profile
+          showToast('موجودی شما کافی نیست. لطفاً حساب خود را شارژ کنید', { type: 'warning' })
+          navigate('/profile')
+        } else if (response.data.status === 'already_purchased') {
+          showToast('این پیشنهاد قبلاً خریداری شده است', { type: 'info' })
+        } else {
+          showToast(response.data.error || 'خطا در خرید پیشنهاد', { type: 'error' })
+        }
+      } catch (error: any) {
+        console.error('Error purchasing recommendation:', error)
+        
+        // If error is about insufficient balance, redirect to profile
+        if (error.response?.data?.error?.includes('موجودی') || 
+            error.response?.data?.error?.includes('کافی نیست') ||
+            error.response?.status === 400) {
+          showToast('موجودی شما کافی نیست. لطفاً حساب خود را شارژ کنید', { type: 'warning' })
+          navigate('/profile')
+        } else {
+          showToast(
+            error.response?.data?.error || 'خطا در خرید پیشنهاد',
+            { type: 'error' }
+          )
+        }
+      } finally {
+        setPurchasing(null)
       }
-    } catch (error: any) {
-      console.error('Error purchasing recommendation:', error)
-      
-      // If error is about insufficient balance, redirect to profile
-      if (error.response?.data?.error?.includes('موجودی') || 
-          error.response?.data?.error?.includes('کافی نیست') ||
-          error.response?.status === 400) {
-        showToast('موجودی شما کافی نیست. لطفاً حساب خود را شارژ کنید', 'warning')
-        navigate('/profile')
-      } else {
-        showToast(
-          error.response?.data?.error || 'خطا در خرید پیشنهاد',
-          'error'
-        )
-      }
-    } finally {
-      setPurchasing(null)
-    }
+    })
+    
+    purchaseAction()
   }
 
   const getTypeText = (type: string) => {

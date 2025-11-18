@@ -1,6 +1,6 @@
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict, Any
 import MetaTrader5 as mt5
 import logging
 
@@ -664,5 +664,108 @@ def _detect_symbol_from_available(base_symbol: str) -> str:
     finally:
         if initialized:
             mt5.shutdown()
+
+
+def get_available_mt5_symbols() -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """
+    Get all available symbols from MT5 and test if they are actually selectable.
+    
+    Returns:
+        (list of symbol dictionaries with 'name' and 'is_available' status, error_message)
+    """
+    initialized = False
+    available_symbols = []
+    
+    try:
+        if not mt5.initialize():
+            return [], 'Failed to initialize MT5 terminal'
+        initialized = True
+        
+        # Get all symbols
+        symbols = mt5.symbols_get()
+        if symbols is None:
+            return [], 'Failed to get symbols from MT5'
+        
+        logger.info(f"Found {len(symbols)} symbols in MT5, testing availability...")
+        
+        # Test each symbol to see if it's actually selectable
+        for symbol_info in symbols:
+            symbol_name = symbol_info.name
+            is_selectable = False
+            
+            try:
+                # Try to select the symbol
+                is_selectable = mt5.symbol_select(symbol_name, True)
+            except Exception as e:
+                logger.debug(f"Error selecting symbol {symbol_name}: {e}")
+                is_selectable = False
+            
+            available_symbols.append({
+                'name': symbol_name,
+                'is_available': is_selectable,
+                'description': symbol_info.description if hasattr(symbol_info, 'description') else '',
+                'currency_base': symbol_info.currency_base if hasattr(symbol_info, 'currency_base') else '',
+                'currency_profit': symbol_info.currency_profit if hasattr(symbol_info, 'currency_profit') else '',
+                'currency_margin': symbol_info.currency_margin if hasattr(symbol_info, 'currency_margin') else '',
+            })
+        
+        # Filter to only available symbols and sort
+        available_count = sum(1 for s in available_symbols if s['is_available'])
+        logger.info(f"Tested {len(available_symbols)} symbols, {available_count} are available")
+        
+        return available_symbols, None
+        
+    except Exception as e:
+        logger.exception(f"Error getting MT5 symbols: {e}")
+        return [], f'Error: {e}'
+    finally:
+        if initialized:
+            mt5.shutdown()
+
+
+def map_user_symbol_to_server_symbol(user_symbol: str, for_backtest: bool = True) -> str:
+    """
+    Map user-selected symbol to the appropriate server symbol.
+    For backtesting, prefer XAUUSD_l for gold symbols.
+    
+    Args:
+        user_symbol: Symbol selected by user (e.g., 'XAUUSD')
+        for_backtest: Whether this is for backtesting (default: True)
+    
+    Returns:
+        Server symbol (e.g., 'XAUUSD_l' for XAUUSD in backtest mode)
+    """
+    user_symbol = user_symbol.strip().upper()
+    
+    # For backtesting with gold symbols, prefer _l (live) variant
+    if for_backtest:
+        # Special handling for gold symbols
+        if user_symbol == 'XAUUSD' or user_symbol.startswith('XAU'):
+            # Try to detect available variant
+            server_symbol = _detect_symbol_from_available('XAUUSD')
+            # If detected symbol is base, prefer _l for backtest
+            if server_symbol == 'XAUUSD':
+                # Check if _l exists
+                initialized = False
+                try:
+                    if mt5.initialize():
+                        initialized = True
+                        if mt5.symbol_select('XAUUSD_l', True):
+                            return 'XAUUSD_l'
+                        elif mt5.symbol_select('XAUUSD_o', True):
+                            return 'XAUUSD_o'
+                except Exception:
+                    pass
+                finally:
+                    if initialized:
+                        mt5.shutdown()
+            return server_symbol
+        
+        # For other symbols, try to get the appropriate variant
+        server_symbol = _detect_symbol_from_available(user_symbol)
+        return server_symbol
+    
+    # For live trading, use the mapping function based on account type
+    return get_symbol_for_account(user_symbol)
 
 

@@ -95,8 +95,8 @@ def _clean_response_text(response_text: str) -> str:
     return cleaned.strip()
 
 
-def _providers_available() -> bool:
-    manager = get_provider_manager()
+def _providers_available(user=None) -> bool:
+    manager = get_provider_manager(user=user)
     return manager.has_available_provider()
 
 
@@ -209,9 +209,9 @@ def _enforce_rate_limit() -> Optional[Dict[str, Any]]:
     return None
 
 
-def _get_gemini_api_key() -> Optional[str]:
+def _get_gemini_api_key(user=None) -> Optional[str]:
     """Compatibility helper to fetch Gemini API key."""
-    provider = get_provider_manager().providers.get("gemini")
+    provider = get_provider_manager(user=user).providers.get("gemini")
     if provider:
         key = provider.get_api_key()
         if key:
@@ -225,16 +225,29 @@ def _call_gemini(
     cache_namespace: str,
     cache_key: str,
     generation_config: Optional[Dict[str, Any]],
-    response_parser: Callable[[str], Dict[str, Any]]
+    response_parser: Callable[[str], Dict[str, Any]],
+    user=None,
 ) -> Dict[str, Any]:
     """Execute AI provider call with caching, rate limiting, and standardized responses."""
-    manager = get_provider_manager()
+    user_id = None
+    if user and getattr(user, "is_authenticated", False):
+        user_id = getattr(user, "pk", None) or getattr(user, "id", None)
+    
+    logger.info(
+        f"_call_gemini called (cache_namespace={cache_namespace}, user_id={user_id}, "
+        f"prompt_length={len(prompt)}, cache_key_length={len(cache_key)})"
+    )
+    
+    manager = get_provider_manager(user=user)
     digest = _hash_text(cache_key)
     cached = _load_cache(cache_namespace, digest)
     if cached:
+        logger.info(f"Cache hit for {cache_namespace} (user_id={user_id})")
         return cached
 
+    logger.info(f"Cache miss for {cache_namespace} (user_id={user_id}), checking provider availability")
     if not manager.has_available_provider():
+        logger.warning(f"No available providers (user_id={user_id}, cache_namespace={cache_namespace})")
         return _build_base_response(
             ai_status="disabled",
             message=DISABLED_MESSAGE,
@@ -243,6 +256,7 @@ def _call_gemini(
 
     rate_limit_error = _enforce_rate_limit()
     if rate_limit_error:
+        logger.warning(f"Rate limit enforced (user_id={user_id})")
         return rate_limit_error
 
     config = dict(generation_config or {})
@@ -250,7 +264,21 @@ def _call_gemini(
     config.setdefault('max_output_tokens', min(configured_max_tokens, MAX_OUTPUT_TOKENS))
     metadata = config.pop('provider_metadata', None) or {}
 
+    # Validate prompt is not empty
+    if not prompt or not prompt.strip():
+        logger.error(f"Empty prompt provided (user_id={user_id}, cache_namespace={cache_namespace})")
+        return _build_base_response(
+            ai_status="error",
+            message="Prompt cannot be empty",
+            extra={"error": "empty_prompt"}
+        )
+    
+    logger.info(f"Calling manager.generate() (user_id={user_id}, cache_namespace={cache_namespace})")
     result = manager.generate(prompt, config, metadata=metadata)
+    logger.info(
+        f"manager.generate() returned: success={result.success}, "
+        f"error={result.error}, provider={result.provider} (user_id={user_id})"
+    )
 
     attempts_serialized = [
         {
@@ -312,7 +340,7 @@ def _call_gemini(
     return parsed_response
 
 
-def parse_with_gemini(text: str) -> Dict[str, Any]:
+def parse_with_gemini(text: str, user=None) -> Dict[str, Any]:
     """Parse strategy text using AI providers with standardized response."""
     truncated_text = truncate_text(text or "")
     cache_key = truncated_text or "empty"
@@ -385,13 +413,14 @@ def parse_with_gemini(text: str) -> Dict[str, Any]:
             'response_mime_type': 'application/json',
             'provider_metadata': {'system_prompt': JSON_ONLY_SYSTEM_PROMPT},
         },
-        response_parser=_parse_response
+        response_parser=_parse_response,
+        user=user,
     )
 
 
-def call_gemini_analyzer(text: str) -> Dict[str, Any]:
+def call_gemini_analyzer(text: str, user=None) -> Dict[str, Any]:
     """Public helper used by tests to parse strategy text via Gemini."""
-    return parse_with_gemini(text)
+    return parse_with_gemini(text, user=user)
 
 
 def generate_basic_analysis(parsed_strategy: Dict[str, Any]) -> Dict[str, Any]:
@@ -533,7 +562,8 @@ def analyze_strategy_with_gemini(parsed_strategy: Dict[str, Any], raw_text: str 
             'response_mime_type': 'application/json',
             'provider_metadata': {'system_prompt': JSON_ONLY_SYSTEM_PROMPT},
         },
-        response_parser=_parse_response
+        response_parser=_parse_response,
+        user=user,
     )
 
     provider_name = result.get("ai_provider") or result.get("provider") or "ai"
@@ -593,7 +623,8 @@ def analyze_strategy_with_gemini(parsed_strategy: Dict[str, Any], raw_text: str 
 def generate_strategy_questions(
     parsed_strategy: Dict[str, Any],
     raw_text: str,
-    existing_answers: Dict[str, Any] = None
+    existing_answers: Dict[str, Any] = None,
+    user=None,
 ) -> Dict[str, Any]:
     """Generate intelligent follow-up questions for completing a strategy."""
     logger.info("Starting question generation...")
@@ -706,7 +737,8 @@ def generate_strategy_questions(
             'response_mime_type': 'application/json',
             'provider_metadata': {'system_prompt': JSON_ONLY_SYSTEM_PROMPT},
         },
-        response_parser=_parse_response
+        response_parser=_parse_response,
+        user=user,
     )
 
     logger.info("Question generation completed with status: %s", result.get("ai_status"))
@@ -716,10 +748,11 @@ def generate_strategy_questions(
 def parse_strategy_with_answers(
     parsed_strategy: Dict[str, Any],
     raw_text: str,
-    answers: Dict[str, Any]
+    answers: Dict[str, Any],
+    user=None,
 ) -> Dict[str, Any]:
     """تبدیل استراتژی به مدل قابل اجرا با استفاده از جواب‌های کاربر و Gemini"""
-    if not _providers_available():
+    if not _providers_available(user=user):
         logger.warning("AI provider not available for strategy conversion")
         return parsed_strategy
     
@@ -824,16 +857,68 @@ def parse_strategy_with_answers(
             'response_mime_type': 'application/json',
             'provider_metadata': {'system_prompt': JSON_ONLY_SYSTEM_PROMPT},
         },
-        response_parser=_parse_response
+        response_parser=_parse_response,
+        user=user,
     )
+
+    # استخراج اطلاعات توکن‌ها
+    tokens_used = result.get("tokens_used")
+    input_tokens_approx = len(prompt) // 4
+    output_tokens_approx = len(result.get("raw_output", "")) // 4
+    total_tokens_approx = input_tokens_approx + output_tokens_approx
+    
+    # اگر tokens_used از API موجود باشد، از آن استفاده کن
+    if tokens_used is not None:
+        total_tokens_approx = tokens_used
+    
+    # لاگ استفاده از API
+    provider_name = result.get("ai_provider") or result.get("provider") or "ai"
+    if result.get("ai_status") == "ok":
+        try:
+            from api.api_usage_tracker import log_api_usage
+            log_api_usage(
+                provider=provider_name,
+                endpoint='parse_strategy_with_answers',
+                request_type='POST',
+                status_code=200,
+                success=True,
+                tokens=total_tokens_approx,
+                user=user,
+                metadata={
+                    'function': 'parse_strategy_with_answers',
+                    'input_tokens_approx': input_tokens_approx,
+                    'output_tokens_approx': output_tokens_approx,
+                    'total_tokens_approx': total_tokens_approx,
+                    'tokens_used': tokens_used,
+                    'provider_attempts': result.get("provider_attempts"),
+                }
+            )
+        except Exception as log_error:
+            logger.warning("Failed to log AI usage: %s", log_error)
 
     if result.get("ai_status") == "ok":
         enhanced = result.get("enhanced_strategy") or {}
         if isinstance(enhanced, dict):
             merged = dict(parsed_strategy)
             merged.update(enhanced)
+            # اضافه کردن اطلاعات توکن به نتیجه
+            merged['_token_info'] = {
+                'total_tokens': total_tokens_approx,
+                'input_tokens': input_tokens_approx,
+                'output_tokens': output_tokens_approx,
+                'tokens_used': tokens_used,
+                'provider': provider_name,
+            }
             return merged
 
+    # حتی در صورت خطا، اطلاعات توکن را برگردان
+    parsed_strategy['_token_info'] = {
+        'total_tokens': total_tokens_approx,
+        'input_tokens': input_tokens_approx,
+        'output_tokens': output_tokens_approx,
+        'tokens_used': tokens_used,
+        'provider': provider_name,
+    }
     return parsed_strategy
 
 
@@ -909,7 +994,8 @@ def analyze_backtest_trades_with_ai(
             'response_mime_type': 'text/plain',
             'provider_metadata': {'system_prompt': JSON_ONLY_SYSTEM_PROMPT},
         },
-        response_parser=_parse_response
+        response_parser=_parse_response,
+        user=user,
     )
 
     provider_name = result.get("ai_provider") or result.get("provider") or "ai"
@@ -1062,7 +1148,8 @@ def generate_basic_backtest_analysis(
 def generate_ai_recommendations(
     parsed_strategy: Dict[str, Any],
     raw_text: str = None,
-    analysis: Dict[str, Any] = None
+    analysis: Dict[str, Any] = None,
+    user=None,
 ) -> Dict[str, Any]:
     """
     Generate AI recommendations for improving the strategy
@@ -1165,5 +1252,6 @@ def generate_ai_recommendations(
             'response_mime_type': 'application/json',
             'provider_metadata': {'system_prompt': JSON_ONLY_SYSTEM_PROMPT},
         },
-        response_parser=_parse_response
+        response_parser=_parse_response,
+        user=user,
     )

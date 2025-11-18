@@ -560,8 +560,12 @@ const StrategyMarketplace = () => {
   const renderMarketplaceCard = (listing: StrategyMarketplaceListing) => {
     const actionKey = (suffix: string) => `${suffix}-${listing.id}`
     return (
-      <div key={listing.id} className="bg-gray-800 rounded-xl p-6 shadow border border-gray-700" style={{ direction: 'rtl', textAlign: 'right' }}>
-        <div className="flex flex-col gap-2">
+      <div
+        key={listing.id}
+        className="flex flex-col h-full bg-gray-800 rounded-xl p-6 shadow border border-gray-700"
+        style={{ direction: 'rtl', textAlign: 'right' }}
+      >
+        <div className="flex flex-col gap-2 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h3 className="text-lg font-semibold text-white">{listing.title}</h3>
@@ -604,7 +608,7 @@ const StrategyMarketplace = () => {
             {renderAccessStatus(listing.current_user_access || null)}
           </div>
 
-          <div className="flex flex-wrap gap-2 mt-4">
+          <div className="flex flex-wrap gap-2 mt-auto pt-4 border-t border-gray-700/60">
             {listing.current_user_access?.has_active_access && (
               <button
                 disabled={actionLoading[actionKey('backtest')]}
@@ -645,8 +649,12 @@ const StrategyMarketplace = () => {
     const actionKey = (suffix: string) => `${suffix}-${listing.id}`
     const accesses = accessesMap[listing.id]
     return (
-      <div key={listing.id} className="bg-gray-800 rounded-xl p-6 border border-gray-700" style={{ direction: 'rtl', textAlign: 'right' }}>
-        <div className="flex flex-col gap-3">
+      <div
+        key={listing.id}
+        className="flex flex-col h-full bg-gray-800 rounded-xl p-6 border border-gray-700"
+        style={{ direction: 'rtl', textAlign: 'right' }}
+      >
+        <div className="flex flex-col gap-3 flex-1">
           <div className="flex items-start justify-between">
             <div>
               <h3 className="text-lg font-semibold text-white">{listing.title}</h3>
@@ -724,8 +732,12 @@ const StrategyMarketplace = () => {
   const renderMyAccessCard = (access: StrategyListingAccess) => {
     const listing = listings.find((item) => item.id === access.listing_id)
     return (
-      <div key={access.id} className="bg-gray-800 rounded-xl p-6 border border-gray-700" style={{ direction: 'rtl', textAlign: 'right' }}>
-        <div className="flex flex-col gap-3">
+      <div
+        key={access.id}
+        className="flex flex-col h-full bg-gray-800 rounded-xl p-6 border border-gray-700"
+        style={{ direction: 'rtl', textAlign: 'right' }}
+      >
+        <div className="flex flex-col gap-3 flex-1">
           <div className="flex justify-between items-start">
             <div>
               <h3 className="text-lg font-semibold text-white">{access.listing_title}</h3>
@@ -813,7 +825,7 @@ const StrategyMarketplace = () => {
       ) : (
         <>
           {activeTab === 'explore' && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 items-stretch">
               {listings.length === 0 && (
                 <div className="bg-gray-800 rounded-xl p-8 border border-gray-700 text-center text-gray-300">
                   هنوز استراتژی‌ای در مارکت‌پلیس منتشر نشده است.
@@ -824,25 +836,31 @@ const StrategyMarketplace = () => {
           )}
 
           {activeTab === 'myListings' && (
-            <div className="space-y-4">
-              {myListings.length === 0 && (
+            <>
+              {myListings.length === 0 ? (
                 <div className="bg-gray-800 rounded-xl p-8 border border-gray-700 text-center text-gray-300">
                   هنوز استراتژی‌ای را در مارکت‌پلیس منتشر نکرده‌اید.
                 </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4 items-start">
+                  {myListings.map(renderMyListingCard)}
+                </div>
               )}
-              {myListings.map(renderMyListingCard)}
-            </div>
+            </>
           )}
 
           {activeTab === 'myAccess' && (
-            <div className="space-y-4">
-              {myAccesses.length === 0 && (
+            <>
+              {myAccesses.length === 0 ? (
                 <div className="bg-gray-800 rounded-xl p-8 border border-gray-700 text-center text-gray-300">
                   هنوز هیچ استراتژی را برای تست یا اشتراک انتخاب نکرده‌اید.
                 </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4 items-start">
+                  {myAccesses.map(renderMyAccessCard)}
+                </div>
               )}
-              {myAccesses.map(renderMyAccessCard)}
-            </div>
+            </>
           )}
 
           {activeTab === 'create' && (

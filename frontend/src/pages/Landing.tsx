@@ -46,7 +46,10 @@ export default function Landing() {
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {/* Feature 1 */}
-            <div className="bg-gray-800 rounded-xl p-6 hover:bg-gray-750 transition-all duration-200 shadow-lg hover:shadow-xl">
+            <button
+              type="button"
+              className="bg-gray-800 rounded-xl p-6 hover:bg-gray-750 transition-all duration-200 shadow-lg hover:shadow-xl text-left w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
               <div className="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center mb-4">
                 <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -56,10 +59,13 @@ export default function Landing() {
               <p className="text-gray-400 leading-relaxed">
                 استراتژی‌های معاملاتی خود را با استفاده از هوش مصنوعی Gemini تجزیه و تحلیل کنید و به کد تبدیل کنید
               </p>
-            </div>
+            </button>
 
             {/* Feature 2 */}
-            <div className="bg-gray-800 rounded-xl p-6 hover:bg-gray-750 transition-all duration-200 shadow-lg hover:shadow-xl">
+            <button
+              type="button"
+              className="bg-gray-800 rounded-xl p-6 hover:bg-gray-750 transition-all duration-200 shadow-lg hover:shadow-xl text-left w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
               <div className="w-12 h-12 bg-green-600 rounded-lg flex items-center justify-center mb-4">
                 <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -69,25 +75,52 @@ export default function Landing() {
               <p className="text-gray-400 leading-relaxed">
                 استراتژی‌های خود را بر روی داده‌های تاریخی تست کنید و عملکرد آن‌ها را با نمودارها و آمار دقیق بررسی کنید
               </p>
-            </div>
+            </button>
 
             {/* Feature 3 */}
-            {liveTradingEnabled && (
-              <div className="bg-gray-800 rounded-xl p-6 hover:bg-gray-750 transition-all duration-200 shadow-lg hover:shadow-xl">
-                <div className="w-12 h-12 bg-yellow-600 rounded-lg flex items-center justify-center mb-4">
-                  <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                </div>
-                <h3 className="text-xl font-semibold text-white mb-3">معاملات خودکار</h3>
-                <p className="text-gray-400 leading-relaxed">
-                  معاملات زنده را با استفاده از حساب معاملاتی Litefinex به صورت خودکار انجام دهید
-                </p>
+            <button
+              type="button"
+              className="bg-gray-800 rounded-xl p-6 hover:bg-gray-750 transition-all duration-200 shadow-lg hover:shadow-xl text-left w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <div className="w-12 h-12 bg-teal-600 rounded-lg flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
               </div>
-            )}
+              <h3 className="text-xl font-semibold text-white mb-3">فواید بک‌تست قبل از معامله زنده</h3>
+              <p className="text-gray-400 leading-relaxed">
+                ابتدا استراتژی خود را بک‌تست کنید تا نقاط ضعف روشن شود، سپس با اطمینان وارد بازار واقعی شوید و ریسک ضررهای غیرمنتظره را کاهش دهید
+              </p>
+            </button>
 
             {/* Feature 4 */}
-            <div className="bg-gray-800 rounded-xl p-6 hover:bg-gray-750 transition-all duration-200 shadow-lg hover:shadow-xl">
+            <button
+              type="button"
+              aria-disabled={!liveTradingEnabled}
+              className={`bg-gray-800 rounded-xl p-6 transition-all duration-200 shadow-lg text-left w-full focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                liveTradingEnabled ? 'hover:bg-gray-750 hover:shadow-xl' : 'opacity-75 cursor-not-allowed'
+              }`}
+            >
+              <div className="w-12 h-12 bg-yellow-600 rounded-lg flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-semibold text-white mb-3">
+                {liveTradingEnabled ? 'معاملات خودکار' : 'معاملات خودکار (به‌زودی)'}
+              </h3>
+              <p className="text-gray-400 leading-relaxed">
+                {liveTradingEnabled
+                  ? 'معاملات زنده را با استفاده از حساب معاملاتی Litefinex به صورت خودکار انجام دهید'
+                  : 'در حال آماده‌سازی زیرساخت‌های امن برای شروع معاملات خودکار هستیم'}
+              </p>
+            </button>
+
+            {/* Feature 5 */}
+            <button
+              type="button"
+              className="bg-gray-800 rounded-xl p-6 hover:bg-gray-750 transition-all duration-200 shadow-lg hover:shadow-xl text-left w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
               <div className="w-12 h-12 bg-purple-600 rounded-lg flex items-center justify-center mb-4">
                 <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
@@ -97,23 +130,13 @@ export default function Landing() {
               <p className="text-gray-400 leading-relaxed">
                 با استفاده از الگوریتم‌های بهینه‌سازی ML و DL، پارامترهای استراتژی خود را بهبود دهید
               </p>
-            </div>
-
-            {/* Feature 5 */}
-            <div className="bg-gray-800 rounded-xl p-6 hover:bg-gray-750 transition-all duration-200 shadow-lg hover:shadow-xl">
-              <div className="w-12 h-12 bg-red-600 rounded-lg flex items-center justify-center mb-4">
-                <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-              </div>
-              <h3 className="text-xl font-semibold text-white mb-3">نمایشگرهای تکنیکال</h3>
-              <p className="text-gray-400 leading-relaxed">
-                از انواع اندیکاتورهای تکنیکال برای تحلیل بهتر بازار استفاده کنید
-              </p>
-            </div>
+            </button>
 
             {/* Feature 6 */}
-            <div className="bg-gray-800 rounded-xl p-6 hover:bg-gray-750 transition-all duration-200 shadow-lg hover:shadow-xl">
+            <button
+              type="button"
+              className="bg-gray-800 rounded-xl p-6 hover:bg-gray-750 transition-all duration-200 shadow-lg hover:shadow-xl text-left w-full focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
               <div className="w-12 h-12 bg-indigo-600 rounded-lg flex items-center justify-center mb-4">
                 <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -123,7 +146,7 @@ export default function Landing() {
               <p className="text-gray-400 leading-relaxed">
                 با تنظیم حد ضرر و حد سود، ریسک معاملات خود را مدیریت کنید
               </p>
-            </div>
+            </button>
           </div>
         </div>
       </section>
@@ -134,7 +157,7 @@ export default function Landing() {
           <h2 className="text-3xl md:text-4xl font-bold text-white text-center mb-12">
             چگونه کار می‌کند؟
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
             <div className="text-center">
               <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold text-white">
                 1
@@ -173,6 +196,15 @@ export default function Landing() {
                 </p>
               </div>
             )}
+            <div className="text-center">
+              <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold text-white">
+                5
+              </div>
+              <h3 className="text-lg font-semibold text-white mb-2">بررسی و بهینه‌سازی</h3>
+              <p className="text-gray-400 text-sm">
+                نتایج را بررسی کنید و استراتژی را بهینه کنید
+              </p>
+            </div>
           </div>
         </div>
       </section>

@@ -24,6 +24,9 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-please-change-in-prod
 DEBUG = os.environ.get('DEBUG', 'True') == 'True'
 ENV = os.environ.get('ENV', 'LOCAL')
 
+# Admin phone number for identifying system-level API keys
+ADMIN_PHONE_NUMBER = os.environ.get('ADMIN_PHONE_NUMBER', '09035760718')
+
 # Alias maps for AI provider configuration
 AI_ENV_KEY_ALIASES = {
     'OPENAI_API_KEY': [
@@ -94,7 +97,7 @@ GEMINI_MAX_OUTPUT_TOKENS = int(os.environ.get('GEMINI_MAX_OUTPUT_TOKENS', '8000'
 GEMINI_ENABLED = os.environ.get('GEMINI_ENABLED', 'True') == 'True'
 
 OPENAI_API_KEY = get_api_key_from_db_or_env('openai', 'OPENAI_API_KEY')
-OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4.1-mini')
+OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4o-mini')  # Fixed: was "gpt-4.1-mini" which is invalid
 OPENAI_ORG_ID = os.environ.get('OPENAI_ORG_ID', '')
 OPENAI_PROJECT_ID = os.environ.get('OPENAI_PROJECT_ID', '')
 
@@ -140,9 +143,6 @@ ADMIN_NOTIFICATION_PHONES = [
     if phone.strip()
 ]
 USER_PANEL_HOME_URL = os.environ.get('USER_PANEL_HOME_URL', '/')
-
-# Google OAuth Settings
-GOOGLE_CLIENT_ID = get_api_key_from_db_or_env('google_oauth', 'GOOGLE_CLIENT_ID')
 
 # reCAPTCHA v3 Settings
 RECAPTCHA_SECRET_KEY = get_api_key_from_db_or_env('recaptcha', 'RECAPTCHA_SECRET_KEY')
