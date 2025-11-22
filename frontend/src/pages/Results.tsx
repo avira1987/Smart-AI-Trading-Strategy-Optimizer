@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
-import { getResults, deleteResult, clearResults } from '../api/client'
+import { getResults, deleteResult, clearResults, getJobs, type Job, type Result as APIResult } from '../api/client'
 import { Line } from 'react-chartjs-2'
+import AIAnalysisDisplay from '../components/AIAnalysisDisplay'
+import GamificationScore from '../components/GamificationScore'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -22,45 +24,13 @@ ChartJS.register(
   Legend
 )
 
-interface Result {
-  id: number
-  job: number
-  total_return: number
-  total_trades: number
-  winning_trades: number
-  losing_trades: number
-  win_rate: number
-  max_drawdown: number
-  equity_curve_data: Array<{ date: string, equity: number }>
-  description?: string
-  trades_details?: Array<{
-    entry_date: string
-    exit_date: string
-    entry_price: number
-    exit_price: number
-    pnl: number
-    pnl_percent: number
-    duration_days: number
-    entry_reason_fa?: string
-    exit_reason_fa?: string
-  }>
-  data_sources?: {
-    provider?: string
-    symbol?: string
-    start_date?: string
-    end_date?: string
-    data_points?: number
-    timeframe_days?: number
-    strategy_timeframe?: string
-    normalized_timeframe?: string
-  }
-  created_at: string
-}
+type Result = APIResult
 
 export default function Results() {
   const [results, setResults] = useState<Result[]>([])
   const [selectedResult, setSelectedResult] = useState<Result | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [tradesExpanded, setTradesExpanded] = useState(false)
 
@@ -73,26 +43,68 @@ export default function Results() {
     setTradesExpanded(false)
   }, [selectedResult?.id])
 
+  const normalizeArrayResponse = <T = any>(data: any): T[] => {
+    if (!data) return []
+    if (Array.isArray(data)) return data
+    if (Array.isArray(data?.results)) return data.results
+    if (Array.isArray(data?.data)) return data.data
+    if (Array.isArray(data?.data?.results)) return data.data.results
+    if (Array.isArray(data?.results?.data)) return data.results.data
+    return []
+  }
+
+  const loadResultsFromJobs = async (): Promise<Result[]> => {
+    try {
+      const jobsResponse = await getJobs()
+      const jobsData = normalizeArrayResponse<Job>(jobsResponse.data)
+      const jobResults = jobsData
+        .map((job) => {
+          if (!job.result) return null
+          return { ...job.result, job: job.result.job ?? job.id }
+        })
+        .filter((item): item is Result => Boolean(item))
+
+      const unique: Result[] = []
+      const seen = new Set<number>()
+      for (const result of jobResults) {
+        if (!seen.has(result.id)) {
+          seen.add(result.id)
+          unique.push(result)
+        }
+      }
+      return unique
+    } catch (fallbackError) {
+      console.error('Job fallback failed:', fallbackError)
+      return []
+    }
+  }
+
   const loadResults = async () => {
     try {
+      setLoading(true)
       const response = await getResults()
       console.log('Results response:', response) // Debug log
       
-      // Handle Django REST Framework pagination format
-      let resultsData = []
-      if (response.data && response.data.results) {
-        resultsData = response.data.results
-      } else if (Array.isArray(response.data)) {
-        resultsData = response.data
+      // Handle possible response formats (array, paginated, nested data)
+      let resultsData: Result[] = normalizeArrayResponse<Result>(response.data)
+
+      if (resultsData.length === 0) {
+        console.warn('Primary results endpoint returned no data. Trying job fallback.')
+        resultsData = await loadResultsFromJobs()
       }
       
       console.log('Results data:', resultsData) // Debug log
       setResults(resultsData)
-      if (resultsData && resultsData.length > 0) {
-        setSelectedResult(resultsData[0])
-      }
-    } catch (error) {
-      console.error('Error loading results:', error)
+      setSelectedResult((current) => {
+        if (current && resultsData.some(r => r.id === current.id)) {
+          return current
+        }
+        return resultsData.length > 0 ? resultsData[0] : null
+      })
+      setError(null)
+    } catch (err) {
+      console.error('Error loading results:', err)
+      setError('خطا در بارگذاری نتایج. لطفاً دوباره تلاش کنید.')
     } finally {
       setLoading(false)
     }
@@ -125,12 +137,13 @@ export default function Results() {
     }
   }
 
-  const chartData = selectedResult ? {
-    labels: selectedResult.equity_curve_data.map(d => d.date),
+  const equityData = selectedResult?.equity_curve_data ?? []
+  const chartData = selectedResult && equityData.length > 0 ? {
+    labels: equityData.map(d => d.date),
     datasets: [
       {
         label: 'Equity Curve',
-        data: selectedResult.equity_curve_data.map(d => d.equity),
+        data: equityData.map(d => d.equity),
         borderColor: 'rgb(59, 130, 246)',
         backgroundColor: 'rgba(59, 130, 246, 0.1)',
         tension: 0.1,
@@ -169,6 +182,24 @@ export default function Results() {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="text-center text-gray-400">Loading results...</div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="bg-red-900/30 border border-red-700 text-red-200 rounded-lg p-6 text-center">
+          {error}
+          <div className="mt-4">
+            <button
+              onClick={loadResults}
+              className="btn-primary"
+            >
+              تلاش مجدد
+            </button>
+          </div>
+        </div>
       </div>
     )
   }
@@ -251,58 +282,39 @@ export default function Results() {
           <div className="lg:col-span-2">
             {selectedResult && (
               <>
-                {/* AI Analysis Section - Separated and at the top */}
-                {selectedResult.description && selectedResult.description.includes('تحلیل هوش مصنوعی') && (
-                  <div className="bg-gradient-to-br from-blue-900/50 to-purple-900/50 border border-blue-700/50 rounded-lg p-6 mb-6 shadow-lg">
-                    <div className="flex items-center justify-between mb-4">
-                      <h2 className="text-xl font-semibold text-white flex items-center gap-2">
-                        <span>🤖 تحلیل هوش مصنوعی نتایج بک‌تست</span>
-                        <span className="text-xs bg-blue-600 px-2 py-1 rounded font-medium">AI</span>
-                      </h2>
-                    </div>
-                    <div className="bg-gray-900/50 rounded-lg p-4 border border-blue-800/30">
-                      <pre className="text-sm text-gray-200 whitespace-pre-wrap font-sans text-right leading-relaxed">
-                        {(() => {
-                          // Extract AI analysis part - try different markers
-                          const markers = [
-                            '📊 تحلیل هوش مصنوعی نتایج بک‌تست:',
-                            'تحلیل هوش مصنوعی نتایج بک‌تست:',
-                            'تحلیل هوش مصنوعی'
-                          ]
-                          
-                          for (const marker of markers) {
-                            const markerIndex = selectedResult.description.indexOf(marker)
-                            if (markerIndex !== -1) {
-                              let extracted = selectedResult.description.substring(markerIndex + marker.length).trim()
-                              // Remove any leading separator lines
-                              extracted = extracted.replace(/^=+\s*/gm, '').trim()
-                              return extracted
-                            }
-                          }
-                          
-                          // If marker not found but contains AI analysis, try to extract after separator
-                          const separatorIndex = selectedResult.description.lastIndexOf('='.repeat(80))
-                          if (separatorIndex !== -1) {
-                            const afterSeparator = selectedResult.description.substring(separatorIndex).trim()
-                            const aiIndex = afterSeparator.indexOf('تحلیل هوش مصنوعی')
-                            if (aiIndex !== -1) {
-                              const markers = ['📊 تحلیل هوش مصنوعی نتایج بک‌تست:', 'تحلیل هوش مصنوعی نتایج بک‌تست:', 'تحلیل هوش مصنوعی']
-                              for (const marker of markers) {
-                                const markerIndex = afterSeparator.indexOf(marker)
-                                if (markerIndex !== -1) {
-                                  return afterSeparator.substring(markerIndex + marker.length).trim()
-                                }
-                              }
-                            }
-                          }
-                          
-                          // If marker not found but contains AI analysis, return full description
-                          return selectedResult.description
-                        })()}
-                      </pre>
-                    </div>
-                  </div>
-                )}
+                {/* Gamification Score */}
+                <GamificationScore />
+
+                {/* Share Button */}
+                <div className="mb-6 flex justify-end">
+                  <button
+                    onClick={() => {
+                      const shareText = `نتایج بک‌تست من:\nبازدهی: ${selectedResult.total_return > 0 ? '+' : ''}${selectedResult.total_return.toFixed(2)}%\nنرخ برد: ${selectedResult.win_rate.toFixed(2)}%\nمعاملات: ${selectedResult.total_trades}\n\n`
+                      const shareUrl = window.location.href
+                      
+                      if (navigator.share) {
+                        navigator.share({
+                          title: 'نتایج بک‌تست معاملاتی',
+                          text: shareText,
+                          url: shareUrl
+                        }).catch(() => {
+                          // Fallback to clipboard
+                          navigator.clipboard.writeText(shareText + shareUrl)
+                          alert('لینک کپی شد!')
+                        })
+                      } else {
+                        navigator.clipboard.writeText(shareText + shareUrl)
+                        alert('لینک کپی شد!')
+                      }
+                    }}
+                    className="btn-primary flex items-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                    </svg>
+                    اشتراک‌گذاری نتایج
+                  </button>
+                </div>
 
                 {/* Backtest Information */}
                 {selectedResult.data_sources && (
@@ -367,6 +379,106 @@ export default function Results() {
                     </div>
                   </div>
                 )}
+
+                {/* AI Analysis Section - Using new component */}
+                {selectedResult.description && selectedResult.description.includes('تحلیل هوش مصنوعی') && (() => {
+                  // Extract AI analysis text - improved extraction to avoid data sources section
+                  const markers = [
+                    '📊 تحلیل هوش مصنوعی نتایج بک‌تست:',
+                    'تحلیل هوش مصنوعی نتایج بک‌تست:',
+                    'تحلیل هوش مصنوعی'
+                  ]
+                  
+                  let analysisText = ''
+                  let startIndex = -1
+                  
+                  // Find the start of AI analysis section
+                  for (const marker of markers) {
+                    const markerIndex = selectedResult.description.indexOf(marker)
+                    if (markerIndex !== -1) {
+                      startIndex = markerIndex + marker.length
+                      break
+                    }
+                  }
+                  
+                  if (startIndex === -1) {
+                    // Try to find after separator
+                    const separatorIndex = selectedResult.description.lastIndexOf('='.repeat(80))
+                    if (separatorIndex !== -1) {
+                      const afterSeparator = selectedResult.description.substring(separatorIndex)
+                      for (const marker of markers) {
+                        const markerIndex = afterSeparator.indexOf(marker)
+                        if (markerIndex !== -1) {
+                          startIndex = separatorIndex + markerIndex + marker.length
+                          break
+                        }
+                      }
+                    }
+                  }
+                  
+                  if (startIndex !== -1) {
+                    // Extract text from start index until data sources section
+                    let extracted = selectedResult.description.substring(startIndex).trim()
+                    
+                    // Remove data sources section markers (stop before this section)
+                    const dataSourceMarkers = [
+                      '\n\n' + '='.repeat(80) + '\n\n📊 منابع داده استفاده شده:',
+                      '\n\n📊 منابع داده استفاده شده:',
+                      '\n' + '='.repeat(80) + '\n\n📊 منابع داده استفاده شده:',
+                      '='.repeat(80) + '\n\n📊 منابع داده استفاده شده:',
+                    ]
+                    
+                    let cutIndex = extracted.length
+                    for (const dsMarker of dataSourceMarkers) {
+                      const dsIndex = extracted.indexOf(dsMarker)
+                      if (dsIndex !== -1 && dsIndex < cutIndex) {
+                        cutIndex = dsIndex
+                      }
+                    }
+                    
+                    // Also check for long separator lines that might indicate data sources section
+                    const longSeparatorPattern = /\n={50,}\n/
+                    const separatorMatch = extracted.match(longSeparatorPattern)
+                    if (separatorMatch && separatorMatch.index !== undefined) {
+                      const afterSeparator = extracted.substring(separatorMatch.index + separatorMatch[0].length)
+                      if (afterSeparator.includes('منابع داده') || afterSeparator.includes('ارائه‌دهنده')) {
+                        if (separatorMatch.index < cutIndex) {
+                          cutIndex = separatorMatch.index
+                        }
+                      }
+                    }
+                    
+                    extracted = extracted.substring(0, cutIndex).trim()
+                    
+                    // Clean up formatting artifacts
+                    extracted = extracted
+                      .replace(/^=+\s*$/gm, '') // Remove standalone separator lines
+                      .replace(/\n{3,}/g, '\n\n') // Replace multiple newlines with double newline
+                      .trim()
+                    
+                    analysisText = extracted
+                  }
+                  
+                  // Fallback: if no clean extraction, use description but clean it
+                  if (!analysisText) {
+                    analysisText = selectedResult.description
+                      .replace(/^=+\s*$/gm, '')
+                      .replace(/\n{3,}/g, '\n\n')
+                      .trim()
+                  }
+                  
+                  return (
+                    <AIAnalysisDisplay
+                      analysisText={analysisText}
+                      resultMetrics={{
+                        total_return: selectedResult.total_return,
+                        win_rate: selectedResult.win_rate,
+                        total_trades: selectedResult.total_trades,
+                        max_drawdown: selectedResult.max_drawdown
+                      }}
+                    />
+                  )
+                })()}
 
                 {/* Key Metrics */}
                 <div className="card-standard mb-6">

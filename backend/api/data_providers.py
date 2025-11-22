@@ -7,6 +7,7 @@ import time
 from django.conf import settings
 import logging
 from dataclasses import dataclass
+from api.mt5_client import fetch_mt5_candles, is_mt5_available
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,26 @@ def _notify_admin_api_issue(provider_name: str, message: str) -> None:
             provider_name,
             message
         )
+
+
+class MT5DataProvider:
+    """MetaTrader 5 based market data provider."""
+
+    def __init__(self):
+        self.api_key = None  # For compatibility with legacy interfaces
+
+    def get_historical_data(self, symbol: str, timeframe: str = 'M15', count: int = 2000) -> pd.DataFrame:
+        df, error = fetch_mt5_candles(symbol, timeframe, count)
+        if df is None or df.empty:
+            raise RuntimeError(error or "MT5 returned no data")
+        return df
+
+    def test_connection(self) -> Dict[str, Any]:
+        available, error = is_mt5_available()
+        if not available:
+            raise RuntimeError(error or "MT5 terminal is not available")
+        return {"status": "success", "message": "MetaTrader 5 connection is healthy"}
+
 
 class TwelveDataProvider:
     """TwelveData API provider for historical data"""
@@ -528,65 +549,90 @@ class FinancialModelingPrepProvider:
 class DataProviderManager:
     """Manager for all data providers"""
     
-    def __init__(self):
+    def __init__(self, user=None):
+        # نگهداری کاربر برای تشخیص کلیدهای اختصاصی
+        self.user = user if user and getattr(user, "is_authenticated", False) else None
         self.providers = {
-            'financialmodelingprep': FinancialModelingPrepProvider(),
-            'twelvedata': TwelveDataProvider(),
-            'alphavantage': AlphaVantageProvider(),
-            'oanda': OANDAProvider(),
-            'metalsapi': MetalsAPIProvider(),
+            'mt5': MT5DataProvider(),
         }
         # Load API keys from APIConfiguration if available
         self._load_api_keys_from_db()
     
+    def _apply_api_configs(self, configs, *, override=False, source_label="system"):
+        for api_config in configs:
+            provider_name = api_config.provider
+            provider_instance = self.providers.get(provider_name)
+            if not provider_instance or not hasattr(provider_instance, 'api_key'):
+                continue
+            
+            current_value = getattr(provider_instance, 'api_key', None)
+            if override or not current_value:
+                provider_instance.api_key = api_config.api_key
+                logger.info(
+                    "Loaded %s API key for %s from APIConfiguration (override=%s)",
+                    source_label,
+                    provider_name,
+                    override,
+                )
+            else:
+                logger.debug(
+                    "Skipped loading %s API key for %s because provider already has a key",
+                    source_label,
+                    provider_name,
+                )
+
     def _load_api_keys_from_db(self):
         """Load API keys from APIConfiguration model"""
         if not APIConfiguration:
             return
         
+        user_id = None
+        if self.user:
+            user_id = getattr(self.user, "pk", None) or getattr(self.user, "id", None)
+        
         try:
-            # Get active API configurations
-            api_configs = APIConfiguration.objects.filter(is_active=True, user__isnull=True)
+            # Load system-wide keys first (user=None)
+            system_configs = APIConfiguration.objects.filter(
+                is_active=True,
+                user__isnull=True,
+            ).order_by('-updated_at', '-created_at')
             
-            for api_config in api_configs:
-                provider_name = api_config.provider
-                if provider_name in self.providers:
-                    provider_instance = self.providers[provider_name]
-                    if hasattr(provider_instance, 'api_key'):
-                        # Only override if not already set from environment variable
-                        if not provider_instance.api_key:
-                            provider_instance.api_key = api_config.api_key
-                            logger.info(f"Loaded API key for {provider_name} from APIConfiguration")
-                        else:
-                            # Environment variable takes precedence, but log that DB has a key too
-                            logger.debug(f"API key for {provider_name} already set from environment variable")
+            # Load user-specific keys if a user is provided
+            user_configs = []
+            if user_id is not None:
+                user_configs = APIConfiguration.objects.filter(
+                    is_active=True,
+                    user_id=user_id,
+                ).order_by('-updated_at', '-created_at')
         except Exception as e:
             logger.warning(f"Failed to load API keys from database: {e}")
+            return
+        
+        self._apply_api_configs(system_configs, override=False, source_label="system")
+        
+        if user_configs:
+            # User keys should override system/env keys for that user session
+            self._apply_api_configs(user_configs, override=True, source_label=f"user:{user_id}")
+
     def get_data(self, provider: str, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
         """Get data from specified provider"""
-        if provider in self.providers:
-            return self.providers[provider].get_historical_data(symbol, start_date, end_date)
-        else:
+        if provider != 'mt5':
             raise ValueError(f"Provider {provider} not supported")
+        try:
+            timeframe_days = max(
+                1,
+                (datetime.strptime(end_date, "%Y-%m-%d") - datetime.strptime(start_date, "%Y-%m-%d")).days or 1,
+            )
+        except Exception:
+            timeframe_days = 30
+        return self.get_historical_data(symbol, timeframe_days=timeframe_days)
     
     def get_available_providers(self) -> List[str]:
         """Get list of available providers with API keys"""
         available = []
-        # Priority order: Financial Modeling Prep > Twelve Data > Others
-        priority_order = ['financialmodelingprep', 'twelvedata', 'alphavantage', 'oanda', 'metalsapi']
-        
-        # First add priority providers
-        for name in priority_order:
-            if name in self.providers:
-                provider = self.providers[name]
-                if hasattr(provider, 'api_key') and provider.api_key:
-                    available.append(name)
-        
-        # Then add any other providers that have API keys
-        for name, provider in self.providers.items():
-            if name not in priority_order:
-                if hasattr(provider, 'api_key') and provider.api_key:
-                    available.append(name)
+        mt5_ok, _ = is_mt5_available()
+        if mt5_ok:
+            available.append('mt5')
         return available
 
     def _normalize_symbol(self, symbol: str) -> str:
@@ -598,6 +644,31 @@ class DataProviderManager:
         elif normalized == "USDXAU":
             normalized = "USD/XAU"
         return normalized
+
+    def _format_symbol_for_mt5(self, symbol: str) -> str:
+        if not symbol:
+            return "XAUUSD"
+        candidate = symbol.strip()
+        if "/" in candidate:
+            candidate = candidate.replace("/", "")
+        if "-" in candidate:
+            candidate = candidate.replace("-", "")
+        return candidate or "XAUUSD"
+
+    def _estimate_mt5_count(self, timeframe_days: int, interval: str) -> int:
+        interval = (interval or "").lower()
+        bars_per_day_map = {
+            'm1': 1440,
+            'm5': 288,
+            'm15': 96,
+            'm30': 48,
+            'h1': 24,
+            '4h': 6,
+            '1day': 1,
+            'daily': 1,
+        }
+        bars_per_day = bars_per_day_map.get(interval, 96)
+        return max(200, min(5000, bars_per_day * max(1, timeframe_days)))
 
     def get_historical_data(
         self,
@@ -611,62 +682,23 @@ class DataProviderManager:
         return_provider: bool = False,
     ) -> Any:
         """
-        Fetch historical data for given symbol within timeframe_days. Optionally
-        append latest live quote (for metals) and return provider used.
+        Fetch historical data exclusively from MetaTrader 5.
         """
-        from datetime import datetime, timedelta
-
         normalized_symbol = self._normalize_symbol(symbol)
+        mt5_symbol = self._format_symbol_for_mt5(normalized_symbol)
+        provider = self.providers.get('mt5')
+        if provider is None:
+            raise RuntimeError("MT5 provider is not initialized")
 
-        end_dt = datetime.utcnow()
-        start_dt = end_dt - timedelta(days=max(timeframe_days, 1))
-        start_date = start_dt.strftime("%Y-%m-%d")
-        end_date = end_dt.strftime("%Y-%m-%d")
-
-        provider_used: Optional[str] = None
-        data: pd.DataFrame = pd.DataFrame()
-
-        if prefer_provider and prefer_provider in self.providers:
-            try:
-                data = self.providers[prefer_provider].get_historical_data(
-                    normalized_symbol, start_date, end_date
-                )
-                provider_used = prefer_provider if data is not None and not data.empty else None
-            except Exception as provider_error:
-                logger.warning(
-                    "Preferred provider %s failed for symbol %s: %s",
-                    prefer_provider,
-                    normalized_symbol,
-                    provider_error,
-                )
-                data = pd.DataFrame()
-                provider_used = None
-
-        if data is None or data.empty:
-            data, provider_used = self.get_data_from_any_provider(
-                normalized_symbol, start_date, end_date, user=user
-            )
-
-        if include_latest and normalized_symbol in ("XAU/USD", "USD/XAU"):
-            metals_provider = self.providers.get("metalsapi")
-            if metals_provider and hasattr(metals_provider, "get_latest_usdxau"):
-                try:
-                    latest_df = metals_provider.get_latest_usdxau()
-                    if provider_used != "metalsapi" and (
-                        data is None or data.empty
-                    ):
-                        data = latest_df
-                        provider_used = "metalsapi"
-                    elif latest_df is not None and not latest_df.empty:
-                        data = (
-                            pd.concat([data, latest_df])
-                            .sort_index()
-                            .drop_duplicates(keep="last")
-                        )
-                except Exception as latest_error:
-                    logger.debug(
-                        "Failed to append latest metals quote: %s", latest_error
-                    )
+        mt5_timeframe = 'M15'
+        count = self._estimate_mt5_count(timeframe_days, interval)
+        try:
+            data = provider.get_historical_data(mt5_symbol, timeframe=mt5_timeframe, count=count)
+            provider_used = 'mt5'
+        except Exception as mt5_error:
+            logger.error("Failed to fetch data from MT5 for %s: %s", mt5_symbol, mt5_error)
+            data = pd.DataFrame()
+            provider_used = None
 
         if data is None:
             data = pd.DataFrame()
@@ -680,135 +712,33 @@ class DataProviderManager:
         Try to get data from any available provider
         Returns: (dataframe, provider_name) or (empty_df, None) if all fail
         """
-        available = self.get_available_providers()
-        
-        for provider_name in available:
-            try:
-                import time
-                from api.api_usage_tracker import log_api_usage
-                
-                logger.info(f"Trying provider: {provider_name} for symbol {symbol}")
-                start_time = time.time()
-                success = False
-                status_code = None
-                error_msg = ''
-                
-                try:
-                    data = self.get_data(provider_name, symbol, start_date, end_date)
-                    response_time = (time.time() - start_time) * 1000
-                    
-                    if not data.empty:
-                        logger.info(f"Successfully got data from {provider_name}: {len(data)} rows")
-                        success = True
-                        status_code = 200
-                        
-                        # لاگ استفاده موفق
-                        try:
-                            log_api_usage(
-                                provider=provider_name,
-                                endpoint=f"get_historical_data/{symbol}",
-                                request_type='GET',
-                                status_code=status_code,
-                                success=success,
-                                response_time_ms=response_time,
-                                user=user,
-                                metadata={
-                                    'symbol': symbol,
-                                    'start_date': start_date,
-                                    'end_date': end_date,
-                                    'data_points': len(data)
-                                }
-                            )
-                        except Exception as log_error:
-                            logger.warning(f"Failed to log API usage: {log_error}")
-                        
-                        return data, provider_name
-                    else:
-                        logger.warning(f"Provider {provider_name} returned empty data")
-                        success = False
-                        error_msg = "Empty data returned"
-                        
-                except Exception as e:
-                    response_time = (time.time() - start_time) * 1000
-                    logger.warning(f"Provider {provider_name} failed: {str(e)}")
-                    success = False
-                    error_msg = str(e)
-                    status_code = 500
-                    
-                    # لاگ استفاده ناموفق
-                    try:
-                        log_api_usage(
-                            provider=provider_name,
-                            endpoint=f"get_historical_data/{symbol}",
-                            request_type='GET',
-                            status_code=status_code,
-                            success=success,
-                            response_time_ms=response_time,
-                            error_message=error_msg,
-                            user=user,
-                            metadata={
-                                'symbol': symbol,
-                                'start_date': start_date,
-                                'end_date': end_date,
-                                'error': str(e)
-                            }
-                        )
-                    except Exception as log_error:
-                        logger.warning(f"Failed to log API usage: {log_error}")
-                    
-                    continue
-                    
-            except Exception as e:
-                logger.warning(f"Provider {provider_name} failed: {str(e)}")
-                continue
-        
-        logger.error(f"All providers failed to get data for {symbol}")
-        return pd.DataFrame(), None
+        try:
+            timeframe_days = max(
+                1,
+                (datetime.strptime(end_date, "%Y-%m-%d") - datetime.strptime(start_date, "%Y-%m-%d")).days or 1,
+            )
+        except Exception:
+            timeframe_days = 30
+        data = self.get_historical_data(symbol, timeframe_days=timeframe_days, return_provider=False)
+        provider = 'mt5' if data is not None and not data.empty else None
+        if provider is None:
+            logger.error(f"MT5 provider failed to get data for {symbol}")
+        return data, provider
     
     def test_provider(self, provider: str) -> Dict[str, Any]:
         """Test if provider is working"""
-        if provider not in self.providers:
-            return {'status': 'error', 'message': 'Provider not found'}
-        
+        if provider != 'mt5':
+            return {'status': 'error', 'message': 'Provider not supported'}
+
         try:
-            # Test with a representative symbol per provider
-            end_date = datetime.now().strftime('%Y-%m-%d')
-            start_date = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
-            if provider == 'metalsapi':
-                # Explicitly test USD -> Gold using latest price for reliability
-                data = self.providers['metalsapi'].get_latest_usdxau()
-            elif provider == 'financialmodelingprep':
-                # Try XAU/USD or EUR/USD
-                test_symbols = ['XAU/USD', 'EUR/USD']
-                data = pd.DataFrame()
-                for test_symbol in test_symbols:
-                    try:
-                        data = self.get_data(provider, test_symbol, start_date, end_date)
-                        if not data.empty:
-                            break
-                    except Exception:
-                        continue
-            elif provider == 'alphavantage':
-                # TEST EUR/USD for AlphaVantage (guaranteed to work)
-                test_symbol = 'EUR/USD'
-                data = self.get_data(provider, test_symbol, start_date, end_date)
+            test_result = self.providers['mt5'].test_connection()
+            test_symbol = 'XAUUSD'
+            data = self.providers['mt5'].get_historical_data(test_symbol, timeframe='M15', count=500)
+            if data is not None and not data.empty:
+                test_result['data_points'] = len(data)
             else:
-                test_symbol = 'EUR/USD'
-                data = self.get_data(provider, test_symbol, start_date, end_date)
-            
-            if not data.empty:
-                return {
-                    'status': 'success', 
-                    'message': f'Provider {provider} is working',
-                    'data_points': len(data)
-                }
-            else:
-                return {
-                    'status': 'error', 
-                    'message': f'Provider {provider} returned no data'
-                }
-        except Exception as e:
-            return {
-                'status': 'error', 
-                'message': f'Provider {provider} test failed: {str(e)}'
-            }
+                test_result['status'] = 'error'
+                test_result['message'] = 'MT5 returned no data for XAUUSD'
+            return test_result
+        except Exception as exc:
+            return {'status': 'error', 'message': f'MT5 test failed: {exc}'}

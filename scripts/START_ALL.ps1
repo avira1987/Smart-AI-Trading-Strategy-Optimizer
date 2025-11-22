@@ -11,6 +11,38 @@ Write-Host ""
 Write-Host "در حال راه‌اندازی همه سرویس‌ها..." -ForegroundColor Cyan
 Write-Host ""
 
+# Determine project root and frontend port
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$frontendPort = "3000"
+
+function Get-PortValue {
+    param(
+        [string]$Path,
+        [string]$Pattern
+    )
+    try {
+        if (Test-Path $Path) {
+            $content = Get-Content $Path -Raw
+            if ($content -match $Pattern) {
+                return $matches[1].Trim()
+            }
+        }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
+$frontendEnvPath = Join-Path $projectRoot "frontend\.env"
+$envPort = Get-PortValue -Path $frontendEnvPath -Pattern "(?m)^\s*VITE_FRONTEND_PORT\s*=\s*(.+)$"
+if (-not $envPort) {
+    $rootEnvPath = Join-Path $projectRoot ".env"
+    $envPort = Get-PortValue -Path $rootEnvPath -Pattern "(?m)^\s*FRONTEND_PUBLIC_PORT\s*=\s*(.+)$"
+}
+if ($envPort) {
+    $frontendPort = $envPort
+}
+
 # ==========================================
 # Step 1: Check and Start Redis
 # ==========================================
@@ -147,7 +179,18 @@ Write-Host ""
 # ==========================================
 Write-Host "[4/5] راه‌اندازی Frontend (React)..." -ForegroundColor Cyan
 Write-Host ""
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot\..\frontend'; Write-Host '=========================================' -ForegroundColor Cyan; Write-Host '  Frontend React Server' -ForegroundColor Cyan; Write-Host '  Port: 3000' -ForegroundColor Cyan; Write-Host '=========================================' -ForegroundColor Cyan; Write-Host ''; npm run dev"
+$frontendPath = Join-Path $projectRoot "frontend"
+$frontendStartCommand = @"
+cd '$frontendPath'
+`$env:VITE_FRONTEND_PORT='$frontendPort'
+Write-Host '=========================================' -ForegroundColor Cyan
+Write-Host '  Frontend React Server' -ForegroundColor Cyan
+Write-Host '  Port: $frontendPort' -ForegroundColor Cyan
+Write-Host '=========================================' -ForegroundColor Cyan
+Write-Host ''
+npm run dev
+"@
+Start-Process powershell -ArgumentList "-NoExit", "-Command", $frontendStartCommand
 Start-Sleep -Seconds 3
 Write-Host "  ✓ Frontend در حال راه‌اندازی..." -ForegroundColor Green
 Write-Host ""
@@ -190,9 +233,9 @@ try {
 
 Write-Host "📋 آدرس‌های دسترسی:" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  🌐 Frontend (Local):     http://localhost:3000" -ForegroundColor White
+Write-Host "  🌐 Frontend (Local):     http://localhost:$frontendPort" -ForegroundColor White
 if ($localIP) {
-    Write-Host "  🌐 Frontend (Network):   http://$localIP:3000" -ForegroundColor Cyan
+    Write-Host "  🌐 Frontend (Network):   http://$localIP:$frontendPort" -ForegroundColor Cyan
 }
 Write-Host "  🔧 Backend (Local):      http://localhost:8000" -ForegroundColor White
 if ($localIP) {
@@ -210,7 +253,7 @@ Write-Host ""
 Write-Host "📊 وضعیت سرویس‌ها:" -ForegroundColor Yellow
 Write-Host "  ✓ Redis          (Port 6379)" -ForegroundColor Green
 Write-Host "  ✓ Django Server  (Port 8000)" -ForegroundColor Green
-Write-Host "  ✓ React Dev      (Port 3000)" -ForegroundColor Green
+Write-Host "  ✓ React Dev      (Port $frontendPort)" -ForegroundColor Green
 Write-Host "  ✓ Celery Worker  (در حال اجرا)" -ForegroundColor Green
 Write-Host "  ✓ Celery Beat    (هر 5 دقیقه)" -ForegroundColor Green
 Write-Host ""

@@ -97,7 +97,12 @@ GEMINI_MAX_OUTPUT_TOKENS = int(os.environ.get('GEMINI_MAX_OUTPUT_TOKENS', '8000'
 GEMINI_ENABLED = os.environ.get('GEMINI_ENABLED', 'True') == 'True'
 
 OPENAI_API_KEY = get_api_key_from_db_or_env('openai', 'OPENAI_API_KEY')
-OPENAI_MODEL = os.environ.get('OPENAI_MODEL', 'gpt-4o-mini')  # Fixed: was "gpt-4.1-mini" which is invalid
+# Validate and fix invalid model names
+_openai_model_env = os.environ.get('OPENAI_MODEL', 'gpt-4o-mini')
+# Fix common invalid model names
+if _openai_model_env in ['gpt-4.1-mini', 'gpt-4.1', 'gpt4.1']:
+    _openai_model_env = 'gpt-4o-mini'
+OPENAI_MODEL = _openai_model_env
 OPENAI_ORG_ID = os.environ.get('OPENAI_ORG_ID', '')
 OPENAI_PROJECT_ID = os.environ.get('OPENAI_PROJECT_ID', '')
 
@@ -123,6 +128,11 @@ AI_PROVIDER_DEFAULT_MODELS = {
 AI_PROVIDER_HTTP_TIMEOUT = float(os.environ.get('AI_PROVIDER_HTTP_TIMEOUT', '30'))
 AI_PROVIDER_ENABLE_LOGGING = os.environ.get('AI_PROVIDER_ENABLE_LOGGING', 'True') == 'True'
 AI_PROVIDER_DEFAULT_TEMPERATURE = float(os.environ.get('AI_PROVIDER_DEFAULT_TEMPERATURE', '0.3'))
+
+# AI Rate Limiting and Optimization Settings
+AI_MAX_TPM = int(os.environ.get('AI_MAX_TPM', '70000'))  # Max tokens per minute
+AI_MAX_TOKENS_PER_CHUNK = int(os.environ.get('AI_MAX_TOKENS_PER_CHUNK', '1500'))  # Max tokens per chunk
+AI_RETRY_ATTEMPTS = int(os.environ.get('AI_RETRY_ATTEMPTS', '5'))  # Max retry attempts
 
 # Zarinpal Payment Gateway Settings
 ZARINPAL_MERCHANT_ID = get_api_key_from_db_or_env('zarinpal', 'ZARINPAL_MERCHANT_ID')
@@ -596,22 +606,30 @@ class SafeUnicodeStreamHandler(logging.StreamHandler):
                 safe_msg = safe_msg.encode('ascii', errors='replace').decode('ascii')
             
             # Write to stream (console)
+            # Don't flush immediately on Windows to avoid hanging
+            # The flush will happen automatically or can be skipped for console output
             try:
                 if hasattr(stream, 'buffer'):
                     # Try UTF-8 first
                     try:
                         stream.buffer.write(safe_msg.encode('utf-8', errors='replace'))
                         stream.buffer.write(b'\n')
-                        stream.buffer.flush()
+                        # Only flush if not Windows or if explicitly needed
+                        # Flushing on Windows console can sometimes hang if console is not ready
+                        if sys.platform != 'win32':
+                            stream.buffer.flush()
                     except (UnicodeEncodeError, AttributeError):
                         # Final fallback: ASCII
                         stream.write(safe_msg + '\n')
-                        stream.flush()
+                        if sys.platform != 'win32':
+                            stream.flush()
                 else:
                     stream.write(safe_msg + '\n')
-                    stream.flush()
-            except (UnicodeEncodeError, AttributeError, OSError):
+                    if sys.platform != 'win32':
+                        stream.flush()
+            except (UnicodeEncodeError, AttributeError, OSError, BlockingIOError, BrokenPipeError):
                 # Silently ignore - file handlers will still log the full message
+                # BlockingIOError and BrokenPipeError can occur when console is not ready
                 pass
         except Exception:
             # Silently handle all errors - don't break logging
@@ -644,6 +662,7 @@ LOGGING = {
             'encoding': 'utf-8',
             'formatter': 'detailed',
             'level': 'DEBUG',
+            'delay': True,  # Delay file opening until first log to avoid file lock issues
         },
         'api_file': {
             'class': 'logging.handlers.RotatingFileHandler',
@@ -652,6 +671,7 @@ LOGGING = {
             'backupCount': 5,
             'encoding': 'utf-8',
             'formatter': 'detailed',
+            'delay': True,  # Delay file opening until first log to avoid file lock issues
             'level': 'DEBUG',
         },
     },

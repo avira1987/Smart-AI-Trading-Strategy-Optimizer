@@ -18,6 +18,11 @@ class APIConfiguration(models.Model):
         ('nerkh', 'Nerkh.io (قیمت طلا)'),
         ('gemini', 'Gemini AI (Google AI Studio)'),
         ('openai', 'OpenAI (ChatGPT)'),
+        # Explicit aliases for OpenAI so users can pick the label they expect in the dashboard
+        ('chatgpt', 'ChatGPT (alias of OpenAI)'),
+        ('gpt', 'GPT (alias of OpenAI)'),
+        ('gpt4', 'GPT-4 (alias of OpenAI)'),
+        ('gpt-4', 'GPT-4 (alias of OpenAI)'),
         ('cohere', 'Cohere AI'),
         ('openrouter', 'OpenRouter'),
         ('together_ai', 'Together AI'),
@@ -1221,6 +1226,11 @@ class SystemSettings(models.Model):
         help_text="فعال/غیرفعال کردن نمایش بخش معاملات زنده در وب‌سایت"
     )
     
+    use_ai_cache = models.BooleanField(
+        default=True,
+        help_text="استفاده از کش برای پردازش تبدیل متن انسانی به مدل هوش مصنوعی. اگر غیرفعال شود، همیشه از API استفاده می‌شود."
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -1334,3 +1344,139 @@ class UserActivityLog(models.Model):
     
     def __str__(self):
         return f"{self.user.username} - {self.get_action_type_display()} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"
+
+
+class UserScore(models.Model):
+    """سیستم امتیازدهی کاربران برای گیمیفیکیشن"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='user_score')
+    total_points = models.IntegerField(default=0, help_text="مجموع امتیازات کاربر")
+    level = models.IntegerField(default=1, help_text="سطح کاربر (بر اساس امتیاز)")
+    backtests_completed = models.IntegerField(default=0, help_text="تعداد بک‌تست‌های انجام شده")
+    strategies_created = models.IntegerField(default=0, help_text="تعداد استراتژی‌های ایجاد شده")
+    optimizations_completed = models.IntegerField(default=0, help_text="تعداد بهینه‌سازی‌های انجام شده")
+    best_return = models.FloatField(default=0.0, help_text="بهترین بازدهی در بک‌تست")
+    total_trades = models.IntegerField(default=0, help_text="مجموع معاملات انجام شده")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "امتیاز کاربر"
+        verbose_name_plural = "امتیازات کاربران"
+        ordering = ['-total_points']
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.total_points} امتیاز - سطح {self.level}"
+    
+    def calculate_level(self):
+        """محاسبه سطح بر اساس امتیاز"""
+        if self.total_points < 100:
+            return 1
+        elif self.total_points < 500:
+            return 2
+        elif self.total_points < 1000:
+            return 3
+        elif self.total_points < 2500:
+            return 4
+        elif self.total_points < 5000:
+            return 5
+        elif self.total_points < 10000:
+            return 6
+        elif self.total_points < 25000:
+            return 7
+        elif self.total_points < 50000:
+            return 8
+        elif self.total_points < 100000:
+            return 9
+        else:
+            return 10
+    
+    def add_points(self, points: int, reason: str = ""):
+        """افزودن امتیاز به کاربر"""
+        self.total_points += points
+        old_level = self.level
+        self.level = self.calculate_level()
+        self.save(update_fields=['total_points', 'level', 'updated_at'])
+        
+        # اگر سطح افزایش یافت، یک دستاورد ایجاد می‌کنیم
+        if self.level > old_level:
+            achievement, _ = Achievement.objects.get_or_create(
+                code=f'level_{self.level}',
+                defaults={
+                    'name': f'سطح {self.level}',
+                    'description': f'رسیدن به سطح {self.level}',
+                    'icon': '⭐',
+                    'points_reward': 0,
+                    'category': 'level',
+                    'condition_type': 'level',
+                    'condition_value': float(self.level)
+                }
+            )
+            UserAchievement.objects.get_or_create(
+                user=self.user,
+                achievement=achievement,
+                defaults={'unlocked_at': timezone.now()}
+            )
+        
+        return self.level > old_level
+
+
+class Achievement(models.Model):
+    """دستاوردهای قابل دریافت"""
+    code = models.CharField(max_length=100, unique=True, help_text="کد یکتا برای دستاورد")
+    name = models.CharField(max_length=200, help_text="نام دستاورد")
+    description = models.TextField(help_text="توضیحات دستاورد")
+    icon = models.CharField(max_length=10, default='🏆', help_text="آیکون دستاورد")
+    points_reward = models.IntegerField(default=0, help_text="امتیاز جایزه")
+    category = models.CharField(
+        max_length=50,
+        choices=[
+            ('backtest', 'بک‌تست'),
+            ('strategy', 'استراتژی'),
+            ('optimization', 'بهینه‌سازی'),
+            ('trading', 'معاملات'),
+            ('social', 'اجتماعی'),
+            ('level', 'سطح'),
+        ],
+        default='backtest',
+        help_text="دسته‌بندی دستاورد"
+    )
+    condition_type = models.CharField(
+        max_length=50,
+        choices=[
+            ('backtest_count', 'تعداد بک‌تست'),
+            ('return_threshold', 'آستانه بازدهی'),
+            ('win_rate_threshold', 'آستانه نرخ برد'),
+            ('trades_count', 'تعداد معاملات'),
+            ('strategy_count', 'تعداد استراتژی'),
+            ('optimization_count', 'تعداد بهینه‌سازی'),
+            ('level', 'سطح'),
+        ],
+        help_text="نوع شرط برای دریافت دستاورد"
+    )
+    condition_value = models.FloatField(help_text="مقدار شرط")
+    is_active = models.BooleanField(default=True, help_text="آیا دستاورد فعال است")
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = "دستاورد"
+        verbose_name_plural = "دستاوردها"
+        ordering = ['category', 'points_reward']
+    
+    def __str__(self):
+        return f"{self.icon} {self.name}"
+
+
+class UserAchievement(models.Model):
+    """دستاوردهای دریافت شده توسط کاربران"""
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='achievements')
+    achievement = models.ForeignKey(Achievement, on_delete=models.CASCADE, related_name='user_achievements')
+    unlocked_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        verbose_name = "دستاورد کاربر"
+        verbose_name_plural = "دستاوردهای کاربران"
+        unique_together = ['user', 'achievement']
+        ordering = ['-unlocked_at']
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.achievement.name}"

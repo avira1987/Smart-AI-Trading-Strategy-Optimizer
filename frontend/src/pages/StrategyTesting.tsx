@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getStrategies, getJobs, createJob, precheckBacktest, getJobStatus } from '../api/client'
+import { getStrategies, getJobs, createJob, precheckBacktest, getJobStatus, getMT5Symbols, MT5Symbol } from '../api/client'
 import { useToast } from '../components/ToastProvider'
 import { useSymbol } from '../context/SymbolContext'
 
@@ -11,13 +11,7 @@ interface Strategy {
   is_primary: boolean
 }
 
-interface Job {
-  id: number
-  strategy: number
-  job_type: string
-  status: string
-  created_at: string
-}
+// Job interface removed - not used
 
 const TECHNICAL_INDICATORS = [
   { id: 'rsi', name: 'RSI (شاخص قدرت نسبی)', label: 'RSI' },
@@ -40,6 +34,8 @@ export default function StrategyTesting() {
   const [initialCapital, setInitialCapital] = useState('10000')
   const { selectedSymbol } = useSymbol()
   const [symbol, setSymbol] = useState('XAUUSD')
+  const [availableSymbols, setAvailableSymbols] = useState<MT5Symbol[]>([])
+  const [loadingSymbols, setLoadingSymbols] = useState(false)
   const [runningJob, setRunningJob] = useState<number | null>(null)
   const [jobStatus, setJobStatus] = useState('')
   const [error, setError] = useState('')
@@ -48,6 +44,7 @@ export default function StrategyTesting() {
   useEffect(() => {
     loadStrategies()
     loadJobs()
+    loadMT5Symbols()
   }, [])
 
   useEffect(() => {
@@ -97,6 +94,34 @@ export default function StrategyTesting() {
       }
     } catch (error) {
       console.error('Error loading jobs:', error)
+    }
+  }
+
+  const loadMT5Symbols = async () => {
+    setLoadingSymbols(true)
+    try {
+      const response = await getMT5Symbols(true) // only available symbols
+      if (response.data?.status === 'success' && response.data.symbols) {
+        const symbols = response.data.symbols as MT5Symbol[]
+        setAvailableSymbols(symbols)
+        // Set default symbol to first available or XAUUSD
+        if (symbols.length > 0 && !symbol) {
+          const defaultSymbol = symbols.find(s => s.name?.includes('XAU')) || symbols[0]
+          if (defaultSymbol) {
+            setSymbol(defaultSymbol.name || 'XAUUSD')
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading MT5 symbols:', error)
+      // Fallback to default symbols if API fails
+      setAvailableSymbols([
+        { name: 'XAUUSD', description: 'Gold/USD', is_available: true },
+        { name: 'XAUUSD_l', description: 'Gold/USD (Live)', is_available: true },
+        { name: 'XAUUSD_o', description: 'Gold/USD (Demo)', is_available: true },
+      ])
+    } finally {
+      setLoadingSymbols(false)
     }
   }
 
@@ -303,18 +328,40 @@ export default function StrategyTesting() {
 
             <div>
               <label className="label-standard">
-                نماد معاملاتی
+                نماد معاملاتی (جفت ارز)
               </label>
               <select
                 value={symbol}
                 onChange={(e) => setSymbol(e.target.value)}
                 className="select-compact"
-                disabled={runningJob !== null}
+                disabled={runningJob !== null || loadingSymbols}
               >
-                <option value="XAUUSD">XAUUSD (Auto)</option>
-                <option value="XAUUSD_o">XAUUSD_o (Demo)</option>
-                <option value="XAUUSD_l">XAUUSD_l (Live)</option>
+                {loadingSymbols ? (
+                  <option value="">در حال بارگذاری...</option>
+                ) : availableSymbols.length > 0 ? (
+                  <>
+                    <option value="">انتخاب جفت ارز...</option>
+                    {availableSymbols
+                      .filter(s => s.is_available)
+                      .map((sym) => (
+                        <option key={sym.name} value={sym.name}>
+                          {sym.name} {sym.description ? `(${sym.description})` : ''}
+                        </option>
+                      ))}
+                  </>
+                ) : (
+                  <>
+                    <option value="XAUUSD">XAUUSD (Gold/USD)</option>
+                    <option value="XAUUSD_l">XAUUSD_l (Gold/USD Live)</option>
+                    <option value="XAUUSD_o">XAUUSD_o (Gold/USD Demo)</option>
+                  </>
+                )}
               </select>
+              {availableSymbols.length > 0 && (
+                <p className="text-xs text-gray-400 mt-1">
+                  {availableSymbols.filter(s => s.is_available).length} جفت ارز در دسترس از MetaTrader 5
+                </p>
+              )}
             </div>
           </div>
 

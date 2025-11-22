@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../components/ToastProvider'
-import { useFeatureFlags } from '../context/FeatureFlagsContext'
 import {
   getSecurityManagement,
   unblockIP,
@@ -12,37 +11,41 @@ import {
   type BlockedIP,
   type RateLimitStat,
   type SecurityLog,
-  getSystemSettings,
-  updateSystemSettings,
-  type SystemSettingsResponse,
 } from '../api/client'
+
+const AUTO_REFRESH_INTERVAL_MS = 60000
 
 export default function AdminSecurity() {
   const { isAdmin } = useAuth()
   const { showToast } = useToast()
-  const { reload: reloadFeatureFlags } = useFeatureFlags()
   const [data, setData] = useState<SecurityManagementData | null>(null)
   const [logs, setLogs] = useState<SecurityLog[]>([])
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'blocked' | 'stats' | 'logs' | 'settings'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'blocked' | 'stats' | 'logs'>('overview')
   const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [systemSettings, setSystemSettings] = useState<SystemSettingsResponse | null>(null)
-  const [settingsLoading, setSettingsLoading] = useState(false)
-  const [settingsActionLoading, setSettingsActionLoading] = useState(false)
 
   useEffect(() => {
-    if (isAdmin) {
-      loadData()
-      loadLogs()
-      loadSystemSettings()
-      // Auto-refresh every 30 seconds
-      const interval = setInterval(() => {
-        loadData()
-        loadLogs()
-      }, 30000)
-      return () => clearInterval(interval)
+    if (!isAdmin) {
+      return
     }
-  }, [isAdmin])
+    loadData()
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        return
+      }
+      loadData()
+      if (activeTab === 'logs') {
+        loadLogs()
+      }
+    }, AUTO_REFRESH_INTERVAL_MS)
+    return () => clearInterval(interval)
+  }, [isAdmin, activeTab])
+
+  useEffect(() => {
+    if (isAdmin && activeTab === 'logs') {
+      loadLogs()
+    }
+  }, [isAdmin, activeTab])
 
   if (!isAdmin) {
     return (
@@ -66,19 +69,6 @@ export default function AdminSecurity() {
       showToast('خطا در بارگذاری اطلاعات امنیتی', { type: 'error' })
     } finally {
       setLoading(false)
-    }
-  }
-
-  const loadSystemSettings = async () => {
-    try {
-      setSettingsLoading(true)
-      const response = await getSystemSettings()
-      setSystemSettings(response.data)
-    } catch (error: any) {
-      console.error('Error loading system settings:', error)
-      showToast('خطا در بارگذاری تنظیمات سیستم', { type: 'error' })
-    } finally {
-      setSettingsLoading(false)
     }
   }
 
@@ -153,36 +143,6 @@ export default function AdminSecurity() {
     }
   }
 
-  const handleToggleLiveTrading = async () => {
-    if (!systemSettings) {
-      return
-    }
-
-    try {
-      setSettingsActionLoading(true)
-      const response = await updateSystemSettings({
-        live_trading_enabled: !systemSettings.live_trading_enabled,
-      })
-      setSystemSettings(response.data)
-      await reloadFeatureFlags()
-      showToast(
-        response.data.live_trading_enabled
-          ? 'بخش معاملات زنده برای کاربران فعال شد'
-          : 'بخش معاملات زنده برای کاربران مخفی شد',
-        { type: 'success' }
-      )
-    } catch (error: any) {
-      const message = error.response?.data?.detail || error.response?.data?.message || 'خطا در به‌روزرسانی تنظیمات'
-      showToast(message, { type: 'error' })
-    } finally {
-      setSettingsActionLoading(false)
-    }
-  }
-
-  const handleRefreshSettings = async () => {
-    await loadSystemSettings()
-  }
-
   const formatTime = (seconds: number) => {
     if (seconds < 60) return `${seconds} ثانیه`
     if (seconds < 3600) return `${Math.floor(seconds / 60)} دقیقه`
@@ -223,7 +183,6 @@ export default function AdminSecurity() {
               { id: 'blocked', label: 'IP های مسدود شده', icon: '🚫' },
               { id: 'stats', label: 'آمار Rate Limit', icon: '📈' },
               { id: 'logs', label: 'لاگ‌های امنیتی', icon: '📝' },
-              { id: 'settings', label: 'تنظیمات وب‌سایت', icon: '⚙️' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -522,78 +481,6 @@ export default function AdminSecurity() {
                       </div>
                     </div>
                   ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeTab === 'settings' && (
-            <div className="bg-gray-800 rounded-lg p-6 space-y-6">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                <div>
-                  <h3 className="text-xl font-bold text-white">تنظیمات وب‌سایت</h3>
-                  <p className="text-gray-400 text-sm">کنترل نمایش ویژگی‌های حساس برای کاربران سامانه</p>
-                </div>
-                <button
-                  onClick={handleRefreshSettings}
-                  disabled={settingsLoading}
-                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {settingsLoading ? 'در حال بارگذاری...' : 'بارگذاری مجدد'}
-                </button>
-              </div>
-
-              {settingsLoading && !systemSettings ? (
-                <div className="bg-gray-900 rounded-lg p-6 text-center">
-                  <div className="inline-block animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-500 mb-4"></div>
-                  <p className="text-gray-300">در حال بارگذاری تنظیمات سیستم...</p>
-                </div>
-              ) : systemSettings ? (
-                <div className="space-y-4">
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-gray-900 rounded-lg p-5">
-                    <div>
-                      <h4 className="text-lg font-semibold text-white">نمایش بخش معاملات زنده</h4>
-                      <p className="text-gray-400 text-sm mt-1">
-                        با غیرفعال کردن این گزینه، لینک‌ها و صفحه معاملات زنده برای تمامی کاربران پنهان می‌شود.
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                          systemSettings.live_trading_enabled
-                            ? 'bg-green-900 text-green-300'
-                            : 'bg-red-900 text-red-300'
-                        }`}
-                      >
-                        {systemSettings.live_trading_enabled ? 'فعال' : 'غیرفعال'}
-                      </span>
-                      <button
-                        onClick={handleToggleLiveTrading}
-                        disabled={settingsActionLoading}
-                        className={`px-4 py-2 rounded-lg font-medium text-white transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                          systemSettings.live_trading_enabled
-                            ? 'bg-red-600 hover:bg-red-700'
-                            : 'bg-green-600 hover:bg-green-700'
-                        }`}
-                      >
-                        {settingsActionLoading
-                          ? 'در حال اعمال...'
-                          : systemSettings.live_trading_enabled
-                          ? 'مخفی کردن'
-                          : 'فعال کردن'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="bg-gray-900 rounded-lg p-6 text-center">
-                  <p className="text-gray-300 mb-4">تنظیمات سیستم در دسترس نیست. لطفاً دوباره تلاش کنید.</p>
-                  <button
-                    onClick={handleRefreshSettings}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
-                  >
-                    تلاش مجدد
-                  </button>
                 </div>
               )}
             </div>

@@ -29,35 +29,32 @@ class SecurityManagementView(APIView):
         - تنظیمات Rate Limit
         """
         try:
-            current_time = time.time()
+            # لیست IP های مسدود شده (با محدود کردن خروجی برای کارایی)
+            blocked_snapshot, total_blocked = rate_limiter.get_blocked_snapshot(limit=200)
+            blocked_ips = [
+                {
+                    'ip': entry['ip'],
+                    'blocked_until': datetime.fromtimestamp(entry['blocked_until']).isoformat(),
+                    'remaining_seconds': entry['remaining_seconds'],
+                    'remaining_minutes': entry['remaining_seconds'] // 60,
+                }
+                for entry in blocked_snapshot
+            ]
             
-            # لیست IP های مسدود شده
-            blocked_ips = []
-            for ip, unblock_time in rate_limiter.blocked_ips.items():
-                if current_time < unblock_time:
-                    remaining_seconds = int(unblock_time - current_time)
-                    blocked_ips.append({
-                        'ip': ip,
-                        'blocked_until': datetime.fromtimestamp(unblock_time).isoformat(),
-                        'remaining_seconds': remaining_seconds,
-                        'remaining_minutes': remaining_seconds // 60,
-                    })
-            
-            # آمار Rate Limiting
-            rate_limit_stats = {}
-            for identifier, request_times in rate_limiter.requests.items():
-                if request_times:
-                    # محاسبه تعداد درخواست‌ها در 5 دقیقه گذشته
-                    cutoff_time = current_time - 300
-                    recent_requests = [t for t in request_times if t > cutoff_time]
-                    
-                    if recent_requests:
-                        rate_limit_stats[identifier] = {
-                            'ip': identifier,
-                            'requests_count': len(recent_requests),
-                            'last_request': datetime.fromtimestamp(max(recent_requests)).isoformat(),
-                            'first_request': datetime.fromtimestamp(min(recent_requests)).isoformat(),
-                        }
+            # آمار Rate Limiting (خلاصه بر اساس پنجره ۵ دقیقه‌ای)
+            stats_snapshot, total_tracked = rate_limiter.get_recent_activity_snapshot(
+                window_seconds=300,
+                limit=200,
+            )
+            rate_limit_stats = {
+                entry['ip']: {
+                    'ip': entry['ip'],
+                    'requests_count': entry['requests_count'],
+                    'last_request': datetime.fromtimestamp(entry['last_request']).isoformat(),
+                    'first_request': datetime.fromtimestamp(entry['first_request']).isoformat(),
+                }
+                for entry in stats_snapshot
+            }
             
             # تنظیمات Rate Limit
             from .rate_limiter import RateLimitMiddleware
@@ -71,8 +68,8 @@ class SecurityManagementView(APIView):
                 'blocked_ips': blocked_ips,
                 'rate_limit_stats': rate_limit_stats,
                 'rate_limit_config': rate_limit_config,
-                'total_blocked': len(blocked_ips),
-                'total_tracked_ips': len(rate_limit_stats),
+                'total_blocked': total_blocked,
+                'total_tracked_ips': total_tracked,
             })
             
         except Exception as e:

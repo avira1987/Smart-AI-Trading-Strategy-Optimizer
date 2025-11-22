@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { getStrategies, addStrategy, deleteStrategy as apiDeleteStrategy, processStrategy, getAPIConfigurations, setPrimaryStrategy } from '../api/client'
+import { getStrategies, addStrategy, deleteStrategy as apiDeleteStrategy, processStrategy, getStrategyProgress, getAPIConfigurations, setPrimaryStrategy } from '../api/client'
 import { useToast } from './ToastProvider'
 import StrategyQuestions from './StrategyQuestions'
 import StrategyOptimizer from './StrategyOptimizer'
 import AIRecommendations from './AIRecommendations'
 import { useRateLimit } from '../hooks/useRateLimit'
+
+const AI_PROVIDER_REFRESH_MS = 120000
 
 interface TradingStrategy {
   id: number
@@ -32,6 +34,7 @@ export default function Strategies() {
   const [collapsedQuestionsStrategyIds, setCollapsedQuestionsStrategyIds] = useState<Set<number>>(new Set())
   const [expandedDetailsStrategyIds, setExpandedDetailsStrategyIds] = useState<Set<number>>(new Set())
   const [hasAIProvider, setHasAIProvider] = useState(false)
+  const [processingStrategies, setProcessingStrategies] = useState<Map<number, { progress: number; stage: string; message: string }>>(new Map())
   const { showToast } = useToast()
   const expandedStrategyIdRef = useRef<number | null>(null)
   const rateLimitClickSubmit = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'strategies-submit' })
@@ -49,11 +52,13 @@ export default function Strategies() {
     loadStrategies()
     checkAIProvider()
     
-    // Check Gemini API status periodically (every 30 seconds)
-    // But only update if the value actually changed to avoid unnecessary re-renders
+    // Check Gemini API status periodically with throttling
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        return
+      }
       checkAIProvider()
-    }, 30000)
+    }, AI_PROVIDER_REFRESH_MS)
     
     return () => clearInterval(interval)
   }, [])
@@ -217,7 +222,46 @@ export default function Strategies() {
       try {
         const processStartedAt = performance.now()
         showToast('در حال پردازش استراتژی...', { type: 'info' })
+        
+        // Initialize progress tracking
+        setProcessingStrategies(prev => new Map(prev).set(id, { progress: 0, stage: 'شروع', message: 'در حال آماده‌سازی...' }))
+        
+        // Start polling for progress
+        const progressInterval = setInterval(async () => {
+          try {
+            const progressResponse = await getStrategyProgress(id)
+            if (progressResponse.data) {
+              const progressData = progressResponse.data
+              setProcessingStrategies(prev => new Map(prev).set(id, {
+                progress: progressData.progress || 0,
+                stage: progressData.stage || '',
+                message: progressData.message || ''
+              }))
+              
+              // Stop polling if processing is complete or failed
+              if (progressData.processing_status === 'processed' || progressData.processing_status === 'failed') {
+                clearInterval(progressInterval)
+                setProcessingStrategies(prev => {
+                  const newMap = new Map(prev)
+                  newMap.delete(id)
+                  return newMap
+                })
+              }
+            }
+          } catch (error) {
+            console.error('Error fetching progress:', error)
+          }
+        }, 1000) // Poll every second
+        
         const response = await processStrategy(id)
+        
+        // Clear interval when request completes
+        clearInterval(progressInterval)
+        setProcessingStrategies(prev => {
+          const newMap = new Map(prev)
+          newMap.delete(id)
+          return newMap
+        })
         
         console.log('Process response:', response) // Debug log
         
@@ -458,6 +502,29 @@ export default function Strategies() {
                       >
                         {strategy.processing_status === 'processing' ? 'در حال پردازش...' : 'پردازش'}
                       </button>
+                      {strategy.processing_status === 'processing' && processingStrategies.has(strategy.id) && (
+                        <div className="w-full mt-2">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs text-gray-400">
+                              {processingStrategies.get(strategy.id)?.stage || 'در حال پردازش...'}
+                            </span>
+                            <span className="text-xs text-gray-400">
+                              {processingStrategies.get(strategy.id)?.progress || 0}%
+                            </span>
+                          </div>
+                          <div className="w-full bg-gray-700 rounded-full h-2">
+                            <div
+                              className="bg-purple-600 h-2 rounded-full transition-all duration-300"
+                              style={{ width: `${processingStrategies.get(strategy.id)?.progress || 0}%` }}
+                            ></div>
+                          </div>
+                          {processingStrategies.get(strategy.id)?.message && (
+                            <p className="text-xs text-gray-500 mt-1">
+                              {processingStrategies.get(strategy.id)?.message}
+                            </p>
+                          )}
+                        </div>
+                      )}
                       <button
                         onClick={() => toggleStrategy(strategy.id)}
                         className={`px-3 py-1.5 rounded-lg transition text-xs font-medium ${
@@ -514,10 +581,27 @@ export default function Strategies() {
                     {/* Strategy Data and Analysis Section */}
                     {strategy.processing_status === 'processed' && strategy.parsed_strategy_data && (
                 <>
-                  <div className="text-green-400 text-xs mb-3">
-                    اعتماد: {(strategy.parsed_strategy_data.confidence_score * 100).toFixed(0)}% | 
-                    نماد: {strategy.parsed_strategy_data.symbol || 'تعیین نشده'} | 
-                    تایم‌فریم: {strategy.parsed_strategy_data.timeframe || 'تعیین نشده'}
+                  <div className="bg-green-900/20 border border-green-700 rounded-lg p-3 mb-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-green-400 text-lg">✓</span>
+                      <span className="text-green-400 font-semibold">نتیجه پردازش:</span>
+                    </div>
+                    <div className="text-gray-300 text-xs space-y-1">
+                      <div>اعتماد: <span className="text-yellow-400 font-medium">{(strategy.parsed_strategy_data.confidence_score * 100).toFixed(0)}%</span></div>
+                      <div>نماد: <span className="text-blue-400">{strategy.parsed_strategy_data.symbol || 'تعیین نشده'}</span></div>
+                      <div>تایم‌فریم: <span className="text-blue-400">{strategy.parsed_strategy_data.timeframe || 'تعیین نشده'}</span></div>
+                      {strategy.processed_at && (
+                        <div className="text-gray-500 text-xs mt-2 pt-2 border-t border-gray-700">
+                          تاریخ پردازش: {new Date(strategy.processed_at).toLocaleDateString('fa-IR', { 
+                            year: 'numeric', 
+                            month: 'long', 
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                   
                   {/* تحلیل استراتژی - Full Width */}

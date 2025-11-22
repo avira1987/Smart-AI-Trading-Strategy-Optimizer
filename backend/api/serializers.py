@@ -22,6 +22,7 @@ from core.models import (
     StrategyOptimization,
 )
 from core.models import Wallet, Transaction, AIRecommendation, SystemSettings, UserGoldAPIAccess, GoldAPIAccessRequest
+from core.models import UserScore, Achievement, UserAchievement
 from django.contrib.auth.models import User
 import re
 
@@ -144,7 +145,7 @@ class APIConfigurationSerializer(serializers.ModelSerializer):
 class SystemSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = SystemSettings
-        fields = ['live_trading_enabled']
+        fields = ['live_trading_enabled', 'use_ai_cache']
 
 
 class PublicSystemSettingsSerializer(serializers.Serializer):
@@ -1056,3 +1057,54 @@ class AIRecommendationSerializer(serializers.ModelSerializer):
         if request and request.user and request.user.is_authenticated:
             return obj.purchased_by == request.user
         return False
+
+
+class UserScoreSerializer(serializers.ModelSerializer):
+    """Serializer for user scores"""
+    username = serializers.CharField(source='user.username', read_only=True)
+    rank = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = UserScore
+        fields = [
+            'id', 'user', 'username', 'total_points', 'level', 'backtests_completed',
+            'strategies_created', 'optimizations_completed', 'best_return', 'total_trades',
+            'rank', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def get_rank(self, obj):
+        """Calculate user rank"""
+        from core.gamification import get_user_rank
+        return get_user_rank(obj.user)
+
+
+class AchievementSerializer(serializers.ModelSerializer):
+    """Serializer for achievements"""
+    is_unlocked = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Achievement
+        fields = [
+            'id', 'code', 'name', 'description', 'icon', 'points_reward',
+            'category', 'condition_type', 'condition_value', 'is_active',
+            'is_unlocked', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+    
+    def get_is_unlocked(self, obj):
+        """Check if current user has unlocked this achievement"""
+        request = self.context.get('request')
+        if request and request.user and request.user.is_authenticated:
+            return UserAchievement.objects.filter(user=request.user, achievement=obj).exists()
+        return False
+
+
+class UserAchievementSerializer(serializers.ModelSerializer):
+    """Serializer for user achievements"""
+    achievement = AchievementSerializer(read_only=True)
+    
+    class Meta:
+        model = UserAchievement
+        fields = ['id', 'user', 'achievement', 'unlocked_at']
+        read_only_fields = ['id', 'unlocked_at']

@@ -15,6 +15,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 from .provider_manager import get_provider_manager
+from .text_chunker import get_chunker
 
 # Constants & configuration defaults
 CACHE_TTL_SECONDS = 60 * 60 * 24  # 24 hours
@@ -23,7 +24,8 @@ RATE_LIMIT_WINDOW_SECONDS = 60
 MAX_INPUT_TOKENS = 32000
 MAX_OUTPUT_TOKENS = 8000
 DISABLED_MESSAGE = "AI analysis unavailable. Please configure your AI provider (OpenAI ChatGPT or Gemini) in Settings."
-SERVICE_UNAVAILABLE_MESSAGE = "AI service temporarily unavailable."
+PROVIDERS_FAILED_MESSAGE = "کلید ChatGPT (OpenAI) تنظیم نشده یا نامعتبر است. لطفاً در تنظیمات > پیکربندی API، کلید معتبر OpenAI را وارد کنید."
+SERVICE_UNAVAILABLE_MESSAGE = "سرویس هوش مصنوعی موقتاً در دسترس نیست."
 JSON_ONLY_SYSTEM_PROMPT = (
     "You are an assistant that must respond with strictly valid JSON output. "
     "Do not include explanations, markdown fences, or any text outside the JSON."
@@ -120,6 +122,44 @@ def _build_base_response(
         for key, value in extra.items():
             payload[key] = value
     return payload
+
+
+def _resolve_provider_from_attempts(attempts: Optional[List[Dict[str, Any]]]) -> Optional[str]:
+    """Best-effort extraction of provider name from serialized attempts."""
+    if not attempts:
+        return None
+
+    for attempt in attempts:
+        provider = attempt.get("provider")
+        if provider and attempt.get("success"):
+            return provider
+
+    for attempt in attempts:
+        provider = attempt.get("provider")
+        if provider:
+            return provider
+
+    return None
+
+
+def resolve_ai_provider(result_payload: Dict[str, Any]) -> Optional[str]:
+    """
+    Determine the most accurate provider label from an AI result payload.
+
+    Preference order:
+        1. Explicit ai_provider / provider fields
+        2. Successful provider_attempts entries
+        3. Any provider entry in attempts
+    """
+    provider = result_payload.get("ai_provider") or result_payload.get("provider")
+    if provider:
+        return provider
+
+    attempts = result_payload.get("provider_attempts")
+    if isinstance(attempts, list):
+        return _resolve_provider_from_attempts(attempts)
+
+    return None
 
 
 def _translate_ai_error_message(error_message: Optional[str]) -> str:
@@ -233,19 +273,51 @@ def _call_gemini(
     if user and getattr(user, "is_authenticated", False):
         user_id = getattr(user, "pk", None) or getattr(user, "id", None)
     
-    logger.info(
+    # Reduced logging - too many logs in console
+    logger.debug(
         f"_call_gemini called (cache_namespace={cache_namespace}, user_id={user_id}, "
         f"prompt_length={len(prompt)}, cache_key_length={len(cache_key)})"
     )
     
     manager = get_provider_manager(user=user)
     digest = _hash_text(cache_key)
-    cached = _load_cache(cache_namespace, digest)
-    if cached:
-        logger.info(f"Cache hit for {cache_namespace} (user_id={user_id})")
-        return cached
+    
+    # Check if cache is enabled in system settings
+    # Always read directly from DB to get the latest value (bypass any ORM cache)
+    try:
+        from core.models import SystemSettings
+        # Read directly from database, not from cache
+        system_settings = SystemSettings.objects.get(pk=1)
+        use_cache = system_settings.use_ai_cache
+        logger.debug(f"SystemSettings.use_ai_cache = {use_cache} (user_id={user_id}, cache_namespace={cache_namespace})")
+    except SystemSettings.DoesNotExist:
+        # If settings don't exist, create with default (cache enabled)
+        system_settings = SystemSettings.objects.create(pk=1, use_ai_cache=True)
+        use_cache = True
+        logger.info(f"SystemSettings created with default use_ai_cache=True (user_id={user_id})")
+    except Exception as e:
+        logger.warning(f"Failed to load SystemSettings, defaulting to cache enabled: {e}")
+        use_cache = True
+    
+    # Only use cache if enabled in settings
+    if use_cache:
+        cached = _load_cache(cache_namespace, digest)
+        if cached:
+            logger.info(f"Cache hit for {cache_namespace} (user_id={user_id}) - returning cached result")
+            return cached
+        logger.debug(f"Cache miss for {cache_namespace} (user_id={user_id})")
+    else:
+        logger.debug(f"Cache disabled for {cache_namespace} (user_id={user_id})")
+        # Delete cache file if it exists (to ensure fresh API calls)
+        cache_path = _cache_file(cache_namespace, digest)
+        if cache_path.exists():
+            try:
+                cache_path.unlink()
+                logger.debug(f"Deleted existing cache file for {cache_namespace} (user_id={user_id})")
+            except Exception as e:
+                logger.warning(f"Failed to delete cache file {cache_path}: {e}")
 
-    logger.info(f"Cache miss for {cache_namespace} (user_id={user_id}), checking provider availability")
+    logger.debug(f"Checking provider availability for {cache_namespace} (user_id={user_id})")
     if not manager.has_available_provider():
         logger.warning(f"No available providers (user_id={user_id}, cache_namespace={cache_namespace})")
         return _build_base_response(
@@ -273,12 +345,88 @@ def _call_gemini(
             extra={"error": "empty_prompt"}
         )
     
-    logger.info(f"Calling manager.generate() (user_id={user_id}, cache_namespace={cache_namespace})")
+    # Check if prompt needs chunking
+    chunker = get_chunker()
+    if chunker and chunker.should_chunk(prompt):
+        logger.info(f"Prompt exceeds token limit, chunking into smaller pieces (user_id={user_id}, cache_namespace={cache_namespace})")
+        chunks = chunker.chunk_text(prompt)
+        logger.info(f"Prompt chunked into {len(chunks)} pieces (user_id={user_id})")
+        
+        # Process each chunk separately
+        chunk_results = []
+        for i, chunk in enumerate(chunks):
+            logger.debug(f"Processing chunk {i+1}/{len(chunks)} (user_id={user_id})")
+            chunk_result = manager.generate(chunk, config, metadata=metadata)
+            
+            if not chunk_result.success:
+                # If any chunk fails, return error
+                logger.warning(f"Chunk {i+1} failed: {chunk_result.error} (user_id={user_id})")
+                attempts_serialized = [
+                    {
+                        "provider": attempt.provider,
+                        "success": attempt.success,
+                        "error": attempt.error,
+                        "status_code": attempt.status_code,
+                        "latency_ms": attempt.latency_ms,
+                        "tokens_used": attempt.tokens_used,
+                    }
+                    for attempt in chunk_result.attempts
+                ]
+                return _build_base_response(
+                    ai_status="error",
+                    message=chunk_result.error or "AI processing failed for chunk",
+                    raw_output="",
+                    extra={
+                        "error": "chunk_processing_failed",
+                        "chunk_number": i + 1,
+                        "total_chunks": len(chunks),
+                        "provider_attempts": attempts_serialized
+                    }
+                )
+            
+            chunk_results.append(chunk_result.text)
+        
+        # Merge chunked responses
+        merged_text = chunker.merge_chunked_responses(chunk_results)
+        
+        # Parse the merged response
+        try:
+            parsed_result = response_parser(merged_text)
+            parsed_result["ai_status"] = "ok"
+            parsed_result["message"] = "Success"
+            parsed_result["raw_output"] = merged_text
+            
+            # Write to cache if enabled
+            if use_cache:
+                _write_cache(cache_namespace, digest, parsed_result)
+            
+            logger.info(f"Chunked processing completed successfully (user_id={user_id}, cache_namespace={cache_namespace})")
+            return parsed_result
+        except Exception as parse_exc:
+            logger.error(f"Error parsing merged chunked response: {parse_exc} (user_id={user_id})")
+            return _build_base_response(
+                ai_status="error",
+                message=f"Error parsing merged response: {str(parse_exc)}",
+                raw_output=merged_text,
+                extra={"error": "parse_error", "chunks_processed": len(chunks)}
+            )
+    
+    logger.debug(f"Calling manager.generate() (user_id={user_id}, cache_namespace={cache_namespace})")
     result = manager.generate(prompt, config, metadata=metadata)
-    logger.info(
-        f"manager.generate() returned: success={result.success}, "
-        f"error={result.error}, provider={result.provider} (user_id={user_id})"
-    )
+    # Don't log error message here if failed - already logged in provider_manager
+    # Log only success cases or error type (in English) to avoid [FA] spam
+    if result.success:
+        logger.info(f"manager.generate() succeeded: provider={result.provider} (user_id={user_id})")
+    else:
+        # Extract error type in English only
+        error_type = "Error"
+        if result.status_code == 429:
+            error_type = "RateLimit (429)"
+        elif result.status_code == 401:
+            error_type = "InvalidAPIKey (401)"
+        elif result.status_code:
+            error_type = f"Error ({result.status_code})"
+        logger.debug(f"manager.generate() failed: {error_type}, provider={result.provider} (user_id={user_id})")
 
     attempts_serialized = [
         {
@@ -293,12 +441,44 @@ def _call_gemini(
     ]
 
     if not result.success or not result.text:
+        # Log error type in English only - detailed errors are logged in provider_manager
+        # This avoids [FA] spam in console (Persian messages are replaced with [FA] by SafeUnicodeStreamHandler)
+        error_type = "unknown_error"
+        status_code = result.status_code
+        
+        # Extract error type from error message (use English messages only)
+        error_msg = result.error or ""
+        if status_code == 429 or "Rate limit" in error_msg or "429" in str(error_msg):
+            error_type = "RateLimit (429)"
+        elif status_code == 401 or "Invalid API key" in error_msg or "401" in str(error_msg):
+            error_type = "InvalidAPIKey (401)"
+        elif "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+            error_type = "Timeout"
+        elif status_code:
+            error_type = f"Error ({status_code})"
+        else:
+            error_type = "Error"
+        
+        # Log only error type in English to avoid [FA] in console
+        # Full error details are already logged in provider_manager and will be in log files
         logger.warning(
-            "AI providers failed to generate response: %s",
-            result.error or "unknown_error",
+            "AI providers failed: %s",
+            error_type,
         )
         error_text = result.error or SERVICE_UNAVAILABLE_MESSAGE
-        user_message = _translate_ai_error_message(error_text)
+        
+        # Use the error message from provider_manager if it's already in Persian
+        # Otherwise, use the default message
+        if error_text and ("کلید" in error_text or "ChatGPT" in error_text or "OpenAI" in error_text):
+            user_message = error_text
+        elif "All AI providers failed" in error_text or "No AI providers" in error_text:
+            user_message = PROVIDERS_FAILED_MESSAGE
+        else:
+            user_message = _translate_ai_error_message(error_text)
+            # Translate to Persian if needed
+            if "All AI providers failed" in user_message or "Please check your API keys" in user_message:
+                user_message = PROVIDERS_FAILED_MESSAGE
+        
         extra = {
             "error": error_text,
             "translated_error": user_message,
@@ -334,7 +514,7 @@ def _call_gemini(
     if result.tokens_used is not None:
         parsed_response.setdefault("tokens_used", result.tokens_used)
 
-    if parsed_response.get("ai_status") == "ok":
+    if parsed_response.get("ai_status") == "ok" and use_cache:
         _write_cache(cache_namespace, digest, parsed_response)
 
     return parsed_response
@@ -421,60 +601,6 @@ def parse_with_gemini(text: str, user=None) -> Dict[str, Any]:
 def call_gemini_analyzer(text: str, user=None) -> Dict[str, Any]:
     """Public helper used by tests to parse strategy text via Gemini."""
     return parse_with_gemini(text, user=user)
-
-
-def generate_basic_analysis(parsed_strategy: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate a basic analysis without AI - fallback when Gemini is not available"""
-    entry_conditions = parsed_strategy.get('entry_conditions', [])
-    exit_conditions = parsed_strategy.get('exit_conditions', [])
-    risk_management = parsed_strategy.get('risk_management', {})
-    indicators = parsed_strategy.get('indicators', [])
-    
-    summary = f"استراتژی شامل {len(entry_conditions)} شرط ورود و {len(exit_conditions)} شرط خروج است."
-    if indicators:
-        summary += f" از اندیکاتورهای {', '.join(indicators)} استفاده می‌کند."
-    
-    strengths = []
-    if entry_conditions:
-        strengths.append("دارای شرایط ورود مشخص است")
-    if exit_conditions:
-        strengths.append("دارای شرایط خروج مشخص است")
-    if risk_management:
-        strengths.append("مدیریت ریسک تعریف شده است")
-    
-    weaknesses = []
-    if not entry_conditions:
-        weaknesses.append("شرایط ورود مشخص نیست")
-    if not exit_conditions:
-        weaknesses.append("شرایط خروج مشخص نیست")
-    if not risk_management:
-        weaknesses.append("مدیریت ریسک کامل نیست")
-    
-    risk_assessment = "ریسک متوسط"
-    if not risk_management.get('stop_loss'):
-        risk_assessment = "ریسک بالا - حد ضرر تعریف نشده است"
-    
-    recommendations = []
-    if not risk_management.get('stop_loss'):
-        recommendations.append("تعریف حد ضرر برای مدیریت ریسک")
-    if len(entry_conditions) < 2:
-        recommendations.append("افزودن شرایط ورود بیشتر برای افزایش دقت")
-    
-    quality_score = 50
-    if entry_conditions and exit_conditions and risk_management:
-        quality_score = 70
-    if len(entry_conditions) > 2 and len(exit_conditions) > 1:
-        quality_score = 80
-    
-    return {
-        "summary": summary,
-        "strengths": strengths,
-        "weaknesses": weaknesses,
-        "risk_assessment": risk_assessment,
-        "recommendations": recommendations,
-        "quality_score": quality_score / 100.0,
-        "is_basic": True
-    }
 
 
 def analyze_strategy_with_gemini(parsed_strategy: Dict[str, Any], raw_text: str = None, user=None) -> Dict[str, Any]:
@@ -566,9 +692,9 @@ def analyze_strategy_with_gemini(parsed_strategy: Dict[str, Any], raw_text: str 
         user=user,
     )
 
-    provider_name = result.get("ai_provider") or result.get("provider") or "ai"
+    provider_name = resolve_ai_provider(result)
 
-    if result.get("ai_status") == "ok":
+    if result.get("ai_status") == "ok" and provider_name:
         try:
             from api.api_usage_tracker import log_api_usage
 
@@ -596,7 +722,7 @@ def analyze_strategy_with_gemini(parsed_strategy: Dict[str, Any], raw_text: str 
             )
         except Exception as log_error:
             logger.warning("Failed to log AI usage: %s", log_error)
-    elif result.get("ai_status") == "error":
+    elif result.get("ai_status") == "error" and provider_name:
         try:
             from api.api_usage_tracker import log_api_usage
             metadata = {
@@ -773,6 +899,9 @@ def parse_strategy_with_answers(
     {json.dumps(answers, ensure_ascii=False, indent=2)}
     """
     
+    # Create cache key from strategy content and answers
+    cache_key = f"{raw_text[:1000]}_{json.dumps(answers, sort_keys=True)}"
+    
     prompt = f"""
     شما یک مبدل حرفه‌ای استراتژی معاملاتی هستید. باید یک استراتژی متنی (فارسی/انگلیسی) را به یک مدل قابل اجرا تبدیل کنید.
     
@@ -872,8 +1001,8 @@ def parse_strategy_with_answers(
         total_tokens_approx = tokens_used
     
     # لاگ استفاده از API
-    provider_name = result.get("ai_provider") or result.get("provider") or "ai"
-    if result.get("ai_status") == "ok":
+    provider_name = resolve_ai_provider(result)
+    if result.get("ai_status") == "ok" and provider_name:
         try:
             from api.api_usage_tracker import log_api_usage
             log_api_usage(
@@ -998,9 +1127,9 @@ def analyze_backtest_trades_with_ai(
         user=user,
     )
 
-    provider_name = result.get("ai_provider") or result.get("provider") or "ai"
+    provider_name = resolve_ai_provider(result)
 
-    if result.get("ai_status") == "ok":
+    if result.get("ai_status") == "ok" and provider_name:
         try:
             from api.api_usage_tracker import log_api_usage
 
@@ -1027,7 +1156,7 @@ def analyze_backtest_trades_with_ai(
             )
         except Exception as log_error:
             logger.warning("Failed to log AI usage: %s", log_error)
-    elif result.get("ai_status") == "error":
+    elif result.get("ai_status") == "error" and provider_name:
         try:
             from api.api_usage_tracker import log_api_usage
             log_api_usage(

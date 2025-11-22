@@ -824,16 +824,16 @@ const StrategyMarketplace = () => {
         <div className="bg-gray-800 rounded-xl p-8 border border-gray-700 text-center text-white">در حال بارگذاری...</div>
       ) : (
         <>
-          {activeTab === 'explore' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 items-stretch">
-              {listings.length === 0 && (
-                <div className="bg-gray-800 rounded-xl p-8 border border-gray-700 text-center text-gray-300">
-                  هنوز استراتژی‌ای در مارکت‌پلیس منتشر نشده است.
-                </div>
-              )}
-              {listings.map(renderMarketplaceCard)}
-            </div>
-          )}
+          {activeTab === 'explore' &&
+            (listings.length === 0 ? (
+              <div className="w-full bg-gray-800 rounded-xl p-8 border border-gray-700 text-center text-gray-300">
+                هنوز استراتژی‌ای در مارکت‌پلیس منتشر نشده است.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 items-stretch">
+                {listings.map(renderMarketplaceCard)}
+              </div>
+            ))}
 
           {activeTab === 'myListings' && (
             <>

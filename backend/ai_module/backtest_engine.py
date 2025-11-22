@@ -6,9 +6,49 @@ from datetime import datetime
 import json
 import logging
 import traceback
+import sys
 from .technical_indicators import calculate_all_indicators
 
 logger = logging.getLogger(__name__)
+
+def _safe_log_text(text: str, max_length: int = 200) -> str:
+    """
+    Safely log text that may contain Persian/Farsi characters.
+    Tries to encode properly, falls back to repr if needed.
+    """
+    if not text:
+        return ""
+    
+    try:
+        # Try to encode as UTF-8 and decode back to ensure it's valid
+        text_encoded = text.encode('utf-8', errors='replace').decode('utf-8', errors='replace')
+        if len(text_encoded) > max_length:
+            return text_encoded[:max_length] + "..."
+        return text_encoded
+    except Exception:
+        # Fallback to repr if encoding fails
+        try:
+            text_repr = repr(text)
+            if len(text_repr) > max_length:
+                return text_repr[:max_length] + "..."
+            return text_repr
+        except Exception:
+            return f"[Text with {len(text)} characters, encoding error]"
+
+def _safe_log_persian(logger_func, message: str, *args, **kwargs):
+    """
+    Safely log Persian/Farsi text by ensuring proper encoding.
+    """
+    try:
+        # Ensure message is properly encoded
+        safe_message = _safe_log_text(message, max_length=1000)
+        logger_func(safe_message, *args, **kwargs)
+    except Exception as e:
+        # Fallback: log error about encoding issue
+        try:
+            logger_func(f"[Encoding error in log message: {str(e)}] Original: {repr(message)[:100]}")
+        except Exception:
+            logger_func("[Encoding error: unable to log message]")
 
 class BacktestEngine:
     """Real backtesting engine"""
@@ -31,12 +71,24 @@ class BacktestEngine:
         sell_signals = 0
 
         try:
-            detailed_logger.info("=" * 80)
-            detailed_logger.info(f"شروع BacktestEngine برای نماد: {symbol}")
-            detailed_logger.info(f"تعداد داده‌ها: {len(data)} ردیف")
-            detailed_logger.info(f"سرمایه اولیه: {self.initial_capital}")
+            # Progress indicator
+            import sys
+            def log_progress(message: str, level: str = "info"):
+                """Log with progress indicator"""
+                if level == "info":
+                    logger.info(message)
+                elif level == "debug":
+                    detailed_logger.debug(message)
+                # Clear line and show progress
+                sys.stdout.write(f"\r[Backtest] {message[:70]:<70}")
+                sys.stdout.flush()
             
-            logger.info(f"Starting backtest for {symbol} with {len(data)} data points")
+            detailed_logger.debug("=" * 80)
+            detailed_logger.debug(f"Starting BacktestEngine for symbol: {symbol}")
+            detailed_logger.debug(f"Data rows: {len(data)}")
+            detailed_logger.debug(f"Initial capital: {self.initial_capital}")
+            
+            log_progress(f"Starting backtest for {symbol} ({len(data)} data points)...")
             
             # Reset engine state for fresh backtest
             self.current_capital = self.initial_capital
@@ -46,93 +98,100 @@ class BacktestEngine:
             self.max_drawdown = 0.0
             self.peak_equity = self.initial_capital
             
-            detailed_logger.info(f"وضعیت موتور بک‌تست ریست شد")
+            detailed_logger.debug("Backtest engine state reset")
             
             # Check if data is empty
             if data.empty:
                 error_msg = 'داده‌های خالی برای بک‌تست دریافت شد.'
-                detailed_logger.error(f"❌ خطا: {error_msg}")
+                detailed_logger.error(f"Error: {error_msg}")
                 logger.warning(f"Empty data frame provided for backtest")
                 return self._return_empty_results(strategy, symbol, error_msg)
             
             # Initialize technical indicators
-            detailed_logger.info("-" * 80)
-            detailed_logger.info("مرحله 1: محاسبه اندیکاتورهای تکنیکال")
-            detailed_logger.info("-" * 80)
+            log_progress("Step 1/4: Calculating technical indicators...")
+            detailed_logger.debug("-" * 80)
+            detailed_logger.debug("Step 1: Calculating technical indicators")
+            detailed_logger.debug("-" * 80)
             
             try:
-                detailed_logger.info(f"در حال محاسبه اندیکاتورها برای {len(data)} ردیف...")
+                detailed_logger.debug(f"Calculating indicators for {len(data)} rows...")
                 data = calculate_all_indicators(data)
-                detailed_logger.info(f"✅ اندیکاتورها با موفقیت محاسبه شدند")
-                detailed_logger.info(f"شکل داده بعد از اندیکاتورها: {data.shape}")
-                detailed_logger.info(f"ستون‌های موجود: {list(data.columns)[:10]}...")  # نمایش 10 ستون اول
-                logger.info(f"Indicators calculated successfully. Data shape: {data.shape}")
+                log_progress("Step 1/4: Indicators calculated ✓")
+                detailed_logger.debug("Indicators calculated successfully")
+                detailed_logger.debug(f"Data shape after indicators: {data.shape}")
+                detailed_logger.debug(f"Available columns: {list(data.columns)[:10]}...")  # Show first 10 columns
+                logger.debug(f"Indicators calculated successfully. Data shape: {data.shape}")
             except Exception as ind_error:
                 error_msg = f'خطا در محاسبه اندیکاتورها: {str(ind_error)}'
-                detailed_logger.error(f"❌ خطا در محاسبه اندیکاتورها: {str(ind_error)}")
+                detailed_logger.error(f"Error calculating indicators: {str(ind_error)}")
                 detailed_logger.error(f"Traceback: {traceback.format_exc()}")
                 logger.error(f"Error calculating indicators: {ind_error}", exc_info=True)
                 return self._return_empty_results(strategy, symbol, error_msg)
             
             # Apply strategy logic (signals and Persian reasons)
-            detailed_logger.info("-" * 80)
-            detailed_logger.info("مرحله 2: تولید سیگنال‌ها از استراتژی")
-            detailed_logger.info("-" * 80)
+            log_progress("Step 2/4: Generating signals from strategy...")
+            detailed_logger.debug("-" * 80)
+            detailed_logger.debug("Step 2: Generating signals from strategy")
+            detailed_logger.debug("-" * 80)
             
             try:
-                detailed_logger.info(f"در حال تولید سیگنال‌ها از استراتژی...")
+                detailed_logger.debug("Generating signals from strategy...")
                 signals, signal_reasons = self._generate_signals(data, strategy)
                 buy_signals = int((signals == 1).sum())
                 sell_signals = int((signals == -1).sum())
                 total_signals = buy_signals + sell_signals
                 
-                detailed_logger.info(f"✅ سیگنال‌ها تولید شدند:")
-                detailed_logger.info(f"  - سیگنال خرید: {buy_signals}")
-                detailed_logger.info(f"  - سیگنال فروش: {sell_signals}")
-                detailed_logger.info(f"  - کل سیگنال‌ها: {total_signals}")
-                detailed_logger.info(f"  - کل ردیف‌ها: {len(signals)}")
+                log_progress(f"Step 2/4: Signals generated ✓ ({buy_signals} buy, {sell_signals} sell)")
+                detailed_logger.debug("Signals generated successfully")
+                detailed_logger.debug(f"  - Buy signals: {buy_signals}")
+                detailed_logger.debug(f"  - Sell signals: {sell_signals}")
+                detailed_logger.debug(f"  - Total signals: {total_signals}")
+                detailed_logger.debug(f"  - Total rows: {len(signals)}")
                 
                 if total_signals == 0:
-                    detailed_logger.warning(f"⚠️ هشدار: هیچ سیگنالی تولید نشد! استراتژی ممکن است با داده‌ها مطابقت نداشته باشد.")
+                    detailed_logger.warning("Warning: No signals generated! Strategy may not match the data.")
                 
-                logger.info(f"Signals generated: {buy_signals} buy signals, {sell_signals} sell signals, total rows: {len(signals)}")
+                logger.debug(f"Signals generated: {buy_signals} buy signals, {sell_signals} sell signals, total rows: {len(signals)}")
             except Exception as sig_error:
                 error_msg = f'خطا در تولید سیگنال‌ها: {str(sig_error)}'
-                detailed_logger.error(f"❌ خطا در تولید سیگنال‌ها: {str(sig_error)}")
+                detailed_logger.error(f"Error generating signals: {str(sig_error)}")
                 detailed_logger.error(f"Traceback: {traceback.format_exc()}")
                 logger.error(f"Error generating signals: {sig_error}", exc_info=True)
                 return self._return_empty_results(strategy, symbol, error_msg)
             
             # Execute trades (attach entry/exit reasons)
-            detailed_logger.info("-" * 80)
-            detailed_logger.info("مرحله 3: اجرای معاملات")
-            detailed_logger.info("-" * 80)
+            log_progress("Step 3/4: Executing trades...")
+            detailed_logger.debug("-" * 80)
+            detailed_logger.debug("Step 3: Executing trades")
+            detailed_logger.debug("-" * 80)
             
             try:
-                detailed_logger.info(f"در حال اجرای معاملات با {total_signals} سیگنال...")
+                detailed_logger.debug(f"Executing trades with {total_signals} signals...")
                 self._execute_trades(data, signals, signal_reasons)
-                detailed_logger.info(f"✅ اجرای معاملات تکمیل شد:")
-                detailed_logger.info(f"  - تعداد معاملات: {len(self.trades)}")
-                logger.info(f"Trade execution completed: {len(self.trades)} trades executed")
+                log_progress(f"Step 3/4: Trades executed ✓ ({len(self.trades)} trades)")
+                detailed_logger.debug("Trade execution completed")
+                detailed_logger.debug(f"  - Total trades: {len(self.trades)}")
+                logger.debug(f"Trade execution completed: {len(self.trades)} trades executed")
                 
                 if len(self.trades) == 0:
-                    detailed_logger.warning(f"⚠️ هشدار: هیچ معامله‌ای اجرا نشد!")
+                    detailed_logger.warning("Warning: No trades executed!")
             except Exception as trade_error:
                 error_msg = f'خطا در اجرای معاملات: {str(trade_error)}'
-                detailed_logger.error(f"❌ خطا در اجرای معاملات: {str(trade_error)}")
+                detailed_logger.error(f"Error executing trades: {str(trade_error)}")
                 detailed_logger.error(f"Traceback: {traceback.format_exc()}")
                 logger.error(f"Error executing trades: {trade_error}", exc_info=True)
                 return self._return_empty_results(strategy, symbol, error_msg)
             
             # Calculate performance metrics
-            detailed_logger.info("-" * 80)
-            detailed_logger.info("مرحله 4: محاسبه متریک‌های عملکرد")
-            detailed_logger.info("-" * 80)
+            log_progress("Step 4/4: Calculating performance metrics...")
+            detailed_logger.debug("-" * 80)
+            detailed_logger.debug("Step 4: Calculating performance metrics")
+            detailed_logger.debug("-" * 80)
             
             try:
-                detailed_logger.info(f"در حال محاسبه متریک‌ها...")
+                detailed_logger.info("Calculating metrics...")
                 metrics = self._calculate_metrics()
-                detailed_logger.info(f"✅ متریک‌ها محاسبه شدند:")
+                detailed_logger.info("Metrics calculated successfully")
                 detailed_logger.info(f"  - total_trades: {metrics['total_trades']}")
                 detailed_logger.info(f"  - total_return: {metrics['total_return']:.2f}%")
                 detailed_logger.info(f"  - win_rate: {metrics['win_rate']:.2f}%")
@@ -140,7 +199,7 @@ class BacktestEngine:
                 logger.info(f"Backtest completed: {metrics['total_trades']} trades, {metrics['total_return']:.2f}% return, win_rate: {metrics['win_rate']:.2f}%")
             except Exception as metrics_error:
                 error_msg = f'خطا در محاسبه متریک‌ها: {str(metrics_error)}'
-                detailed_logger.error(f"❌ خطا در محاسبه متریک‌ها: {str(metrics_error)}")
+                detailed_logger.error(f"Error calculating metrics: {str(metrics_error)}")
                 detailed_logger.error(f"Traceback: {traceback.format_exc()}")
                 logger.error(f"Error calculating metrics: {metrics_error}", exc_info=True)
                 return self._return_empty_results(strategy, symbol, error_msg)
@@ -168,9 +227,9 @@ class BacktestEngine:
             detailed_logger = logging.getLogger('ai_module.backtest_engine')
             error_msg = f'خطای غیرمنتظره در بک‌تست: {str(e)}'
             detailed_logger.error("=" * 80)
-            detailed_logger.error(f"❌❌❌ خطای غیرمنتظره در بک‌تست ❌❌❌")
-            detailed_logger.error(f"نوع خطا: {type(e).__name__}")
-            detailed_logger.error(f"پیام خطا: {str(e)}")
+            detailed_logger.error("Unexpected error in backtest")
+            detailed_logger.error(f"Error type: {type(e).__name__}")
+            detailed_logger.error(f"Error message: {str(e)}")
             detailed_logger.error("Traceback:")
             detailed_logger.error(traceback.format_exc())
             detailed_logger.error("=" * 80)
@@ -229,7 +288,7 @@ class BacktestEngine:
         if has_custom_strategy:
             # Parse custom strategy from user's uploaded text file (PRIMARY METHOD)
             text_signals, text_reasons = self._parse_custom_strategy(data, strategy)
-            logger.info(f"Text-based strategy generated {text_signals.sum()} signals")
+            logger.debug(f"Text-based strategy generated {text_signals.sum()} signals")
         else:
             # No custom strategy found - DO NOT use automatic fallbacks
             logger.warning("No strategy found in uploaded text. Skipping automatic technical fallbacks by design.")
@@ -309,7 +368,7 @@ class BacktestEngine:
             reasons = text_reasons
             text_signal_count = int((text_signals != 0).sum())
             
-            logger.info(f"Using text-based strategy only (no technical fallbacks): {text_signal_count} signals")
+            logger.debug(f"Using text-based strategy only (no technical fallbacks): {text_signal_count} signals")
             
             # Warn if no signals were generated from extracted strategy
             if text_signal_count == 0:
@@ -578,25 +637,29 @@ class BacktestEngine:
             
             detailed_logger = logging.getLogger('ai_module.backtest_engine')
             
-            logger.info(f"Parsing custom strategy: {len(entry_conditions)} entry conditions, {len(exit_conditions)} exit conditions, indicators: {indicators}")
+            logger.debug(f"Parsing custom strategy: {len(entry_conditions)} entry conditions, {len(exit_conditions)} exit conditions, indicators: {indicators}")
             detailed_logger.debug(f"Entry conditions count: {len(entry_conditions)}, Exit conditions count: {len(exit_conditions)}")
             
             # Log what conditions we have - show full conditions for debugging
             if entry_conditions:
                 logger.info(f"Entry conditions: {len(entry_conditions)} conditions found")
-                detailed_logger.info(f"===== EXTRACTED ENTRY CONDITIONS ({len(entry_conditions)}) =====")
+                # Only log condition details in debug mode to reduce verbosity
+                detailed_logger.debug(f"===== EXTRACTED ENTRY CONDITIONS ({len(entry_conditions)}) =====")
                 for idx, cond in enumerate(entry_conditions, 1):
-                    detailed_logger.info(f"Entry {idx}: {cond[:200]}...")
-                    detailed_logger.debug(f"Entry condition {idx} (full): {cond}")
+                    safe_text = _safe_log_text(cond, max_length=200)
+                    detailed_logger.debug(f"Entry {idx}: {safe_text}")
+                    detailed_logger.debug(f"Entry condition {idx} (full): {_safe_log_text(cond, max_length=1000)}")
             else:
                 detailed_logger.warning("⚠️ NO ENTRY CONDITIONS PROVIDED!")
                 
             if exit_conditions:
                 logger.info(f"Exit conditions: {len(exit_conditions)} conditions found")
-                detailed_logger.info(f"===== EXTRACTED EXIT CONDITIONS ({len(exit_conditions)}) =====")
+                # Only log condition details in debug mode to reduce verbosity
+                detailed_logger.debug(f"===== EXTRACTED EXIT CONDITIONS ({len(exit_conditions)}) =====")
                 for idx, cond in enumerate(exit_conditions, 1):
-                    detailed_logger.info(f"Exit {idx}: {cond[:200]}...")
-                    detailed_logger.debug(f"Exit condition {idx} (full): {cond}")
+                    safe_text = _safe_log_text(cond, max_length=200)
+                    detailed_logger.debug(f"Exit {idx}: {safe_text}")
+                    detailed_logger.debug(f"Exit condition {idx} (full): {_safe_log_text(cond, max_length=1000)}")
             else:
                 detailed_logger.warning("⚠️ NO EXIT CONDITIONS PROVIDED!")
             
@@ -617,7 +680,8 @@ class BacktestEngine:
                 
                 # Try to split complex conditions into simpler parts
                 condition_parts = self._split_condition(condition.strip())
-                detailed_logger.debug(f"Processing condition (split into {len(condition_parts)} parts): {condition[:100]}...")
+                safe_condition_preview = _safe_log_text(condition, max_length=100)
+                detailed_logger.debug(f"Processing condition (split into {len(condition_parts)} parts): {safe_condition_preview}")
                 
                 for condition_part in condition_parts:
                     condition_text = condition_part.strip()
@@ -634,7 +698,8 @@ class BacktestEngine:
                     # First, try to extract indicator keywords to guide parsing
                     indicator_keywords = self._extract_indicator_keywords(condition_text)
                     if indicator_keywords:
-                        detailed_logger.debug(f"Extracted indicator keywords: {indicator_keywords} from condition: {condition_text[:80]}...")
+                        safe_condition_debug = _safe_log_text(condition_text, max_length=80)
+                        detailed_logger.debug(f"Extracted indicator keywords: {indicator_keywords} from condition: {safe_condition_debug}")
                     
                     # Parse volume-based conditions FIRST (before generic BUY/SELL)
                     if not condition_parsed and 'volume' in data.columns:
@@ -649,7 +714,8 @@ class BacktestEngine:
                                     signals[mask] = 1
                                     for idx in data.index[mask]:
                                         reasons.setdefault(idx, {})['entry_reason_fa'] = reason_text
-                                    detailed_logger.info(f"Parsed high volume entry condition: {condition_text[:50]}... -> {signal_count} signals")
+                                    safe_cond = _safe_log_text(condition_text, max_length=50)
+                                    detailed_logger.info(f"Parsed high volume entry condition: {safe_cond} -> {signal_count} signals")
                                     parsed_entry_conditions += 1
                                     condition_parsed = True
                         
@@ -664,7 +730,8 @@ class BacktestEngine:
                                     signals[mask] = 1
                                     for idx in data.index[mask]:
                                         reasons.setdefault(idx, {})['entry_reason_fa'] = reason_text
-                                    detailed_logger.info(f"Parsed low volume entry condition: {condition_text[:50]}... -> {signal_count} signals")
+                                    safe_cond = _safe_log_text(condition_text, max_length=50)
+                                    detailed_logger.info(f"Parsed low volume entry condition: {safe_cond} -> {signal_count} signals")
                                     parsed_entry_conditions += 1
                                     condition_parsed = True
                     
@@ -689,7 +756,8 @@ class BacktestEngine:
                                 signals[mask] = 1
                                 for idx in data.index[mask]:
                                     reasons.setdefault(idx, {})['entry_reason_fa'] = reason_text
-                                detailed_logger.info(f"Parsed candle pattern entry condition (3 consecutive higher lows): {condition_text[:50]}... -> {signal_count} signals")
+                                safe_cond = _safe_log_text(condition_text, max_length=50)
+                                detailed_logger.debug(f"Parsed candle pattern entry condition (3 consecutive higher lows): {safe_cond} -> {signal_count} signals")
                                 parsed_entry_conditions += 1
                                 condition_parsed = True
                         
@@ -713,7 +781,8 @@ class BacktestEngine:
                                     signals[mask] = 1
                                     for idx in data.index[mask]:
                                         reasons.setdefault(idx, {})['entry_reason_fa'] = reason_text
-                                    detailed_logger.info(f"Parsed candle pattern entry condition (3 consecutive green candles): {condition_text[:50]}... -> {signal_count} signals")
+                                    safe_cond = _safe_log_text(condition_text, max_length=50)
+                                    detailed_logger.debug(f"Parsed candle pattern entry condition (3 consecutive green candles): {safe_cond} -> {signal_count} signals")
                                     parsed_entry_conditions += 1
                                     condition_parsed = True
                     
@@ -732,7 +801,8 @@ class BacktestEngine:
                                     signals[mask] = 1
                                     for idx in data.index[mask]:
                                         reasons.setdefault(idx, {})['entry_reason_fa'] = reason_text
-                                    detailed_logger.info(f"Parsed generic BUY entry condition: {condition_text[:50]}... -> {signal_count} signals (RSI crossover < 30)")
+                                    safe_cond = _safe_log_text(condition_text, max_length=50)
+                                    detailed_logger.debug(f"Parsed generic BUY entry condition: {safe_cond} -> {signal_count} signals (RSI crossover < 30)")
                                     parsed_entry_conditions += 1
                                     condition_parsed = True
                                 else:
@@ -743,7 +813,8 @@ class BacktestEngine:
                                         signals[mask] = 1
                                         for idx in data.index[mask]:
                                             reasons.setdefault(idx, {})['entry_reason_fa'] = reason_text
-                                        detailed_logger.info(f"Parsed generic BUY entry condition (fallback): {condition_text[:50]}... -> {signal_count} signals (RSI < 35)")
+                                        safe_cond = _safe_log_text(condition_text, max_length=50)
+                                        detailed_logger.debug(f"Parsed generic BUY entry condition (fallback): {safe_cond} -> {signal_count} signals (RSI < 35)")
                                         parsed_entry_conditions += 1
                                         condition_parsed = True
                             elif 'volume' in data.columns:
@@ -756,14 +827,16 @@ class BacktestEngine:
                                         signals[mask] = 1
                                         for idx in data.index[mask]:
                                             reasons.setdefault(idx, {})['entry_reason_fa'] = reason_text
-                                        detailed_logger.info(f"Parsed volume-based BUY entry condition: {condition_text[:50]}... -> {signal_count} signals")
+                                        safe_cond = _safe_log_text(condition_text, max_length=50)
+                                        detailed_logger.info(f"Parsed volume-based BUY entry condition: {safe_cond} -> {signal_count} signals")
                                         parsed_entry_conditions += 1
                                         condition_parsed = True
                     
                     # Parse RSI conditions with custom thresholds
                     if 'rsi' in condition_lower or 'rsi' in indicator_keywords:
                         if 'rsi' not in data.columns:
-                            detailed_logger.warning(f"RSI condition found but RSI column not in data: {condition_text[:80]}")
+                            safe_cond = _safe_log_text(condition_text, max_length=80)
+                            detailed_logger.warning(f"RSI condition found but RSI column not in data: {safe_cond}")
                             continue
                         
                         # Extract numeric threshold if present
@@ -788,7 +861,8 @@ class BacktestEngine:
                             signals[mask] = 1
                             for idx in data.index[mask]:
                                 reasons.setdefault(idx, {})['entry_reason_fa'] = reason_text
-                            detailed_logger.info(f"Parsed RSI entry condition: {condition_text[:50]}... -> {signal_count} signals")
+                            safe_cond = _safe_log_text(condition_text, max_length=50)
+                            detailed_logger.info(f"Parsed RSI entry condition: {safe_cond} -> {signal_count} signals")
                             parsed_entry_conditions += 1
                             condition_parsed = True
                         elif 'بالا' in condition_lower or 'above' in condition_lower or 'بیشتر' in condition_lower or 'overbought' in condition_lower or ('rsi' in condition_lower and rsi_threshold > 50):
@@ -798,14 +872,16 @@ class BacktestEngine:
                             signals[mask] = 1
                             for idx in data.index[mask]:
                                 reasons.setdefault(idx, {})['entry_reason_fa'] = reason_text
-                            detailed_logger.info(f"Parsed RSI entry condition: {condition_text[:50]}... -> {signal_count} signals")
+                            safe_cond = _safe_log_text(condition_text, max_length=50)
+                            detailed_logger.info(f"Parsed RSI entry condition: {safe_cond} -> {signal_count} signals")
                             parsed_entry_conditions += 1
                             condition_parsed = True
                     
                     # Parse MACD conditions
                     elif 'macd' in condition_lower or 'macd' in indicator_keywords:
                         if 'macd' not in data.columns or 'macd_signal' not in data.columns:
-                            detailed_logger.warning(f"MACD condition found but MACD columns not in data: {condition_text[:80]}")
+                            safe_cond = _safe_log_text(condition_text, max_length=80)
+                            detailed_logger.warning(f"MACD condition found but MACD columns not in data: {safe_cond}")
                             continue
                         
                         if 'تقاطع' in condition_lower or 'crossover' in condition_lower or 'cross' in condition_lower or 'crosses' in condition_lower:
@@ -816,14 +892,16 @@ class BacktestEngine:
                                 signals[mask] = 1
                                 for idx in data.index[mask]:
                                     reasons.setdefault(idx, {})['entry_reason_fa'] = reason_text
-                                detailed_logger.info(f"Parsed MACD entry condition: {condition_text[:50]}... -> {signal_count} signals")
+                                safe_cond = _safe_log_text(condition_text, max_length=50)
+                                detailed_logger.info(f"Parsed MACD entry condition: {safe_cond} -> {signal_count} signals")
                                 parsed_entry_conditions += 1
                                 condition_parsed = True
                     
                     # Parse Moving Average conditions
                     elif 'moving average' in condition_lower or 'میانگین' in condition_lower or 'sma' in condition_lower or 'ema' in condition_lower or 'sma' in indicator_keywords or 'ema' in indicator_keywords:
                         if 'sma_20' not in data.columns or 'sma_50' not in data.columns:
-                            detailed_logger.warning(f"MA condition found but SMA columns not in data: {condition_text[:80]}")
+                            safe_cond = _safe_log_text(condition_text, max_length=80)
+                            detailed_logger.warning(f"MA condition found but SMA columns not in data: {safe_cond}")
                             continue
                         
                         if 'تقاطع' in condition_lower or 'crossover' in condition_lower or 'cross' in condition_lower:
@@ -834,7 +912,8 @@ class BacktestEngine:
                                 signals[mask] = 1
                                 for idx in data.index[mask]:
                                     reasons.setdefault(idx, {})['entry_reason_fa'] = reason_text
-                                detailed_logger.info(f"Parsed MA entry condition: {condition_text[:50]}... -> {signal_count} signals")
+                                safe_cond = _safe_log_text(condition_text, max_length=50)
+                                detailed_logger.info(f"Parsed MA entry condition: {safe_cond} -> {signal_count} signals")
                                 parsed_entry_conditions += 1
                                 condition_parsed = True
                     
@@ -873,7 +952,8 @@ class BacktestEngine:
                                             signals[mask] = 1
                                             for idx in data.index[mask]:
                                                 reasons.setdefault(idx, {})['entry_reason_fa'] = reason_text
-                                            detailed_logger.info(f"Parsed generic entry condition for {col}: {condition_text[:50]}... -> {signal_count} signals")
+                                            safe_cond = _safe_log_text(condition_text, max_length=50)
+                                            detailed_logger.debug(f"Parsed generic entry condition for {col}: {safe_cond} -> {signal_count} signals")
                                             parsed_entry_conditions += 1
                                             condition_parsed = True
                                             break
@@ -883,7 +963,8 @@ class BacktestEngine:
                                             signals[mask] = 1
                                             for idx in data.index[mask]:
                                                 reasons.setdefault(idx, {})['entry_reason_fa'] = reason_text
-                                            detailed_logger.info(f"Parsed generic entry condition for {col}: {condition_text[:50]}... -> {signal_count} signals")
+                                            safe_cond = _safe_log_text(condition_text, max_length=50)
+                                            detailed_logger.debug(f"Parsed generic entry condition for {col}: {safe_cond} -> {signal_count} signals")
                                             parsed_entry_conditions += 1
                                             condition_parsed = True
                                             break
@@ -909,9 +990,11 @@ class BacktestEngine:
                     
                     if not condition_parsed:
                         # Last resort: log the condition for debugging but don't generate signals
-                        logger.warning(f"Could not parse entry condition: {condition_text[:100]}")
+                        safe_condition = _safe_log_text(condition_text, max_length=100)
+                        logger.warning(f"Could not parse entry condition: {safe_condition}")
                         detailed_logger = logging.getLogger('ai_module.backtest_engine')
-                        detailed_logger.debug(f"Unparsed entry condition details: '{condition_text[:200]}', available columns: {[c for c in data.columns if any(word in condition_lower for word in c.lower().split('_'))][:5]}")
+                        safe_condition_full = _safe_log_text(condition_text, max_length=200)
+                        detailed_logger.debug(f"Unparsed entry condition details: '{safe_condition_full}', available columns: {[c for c in data.columns if any(word in condition_lower for word in c.lower().split('_'))][:5]}")
                         
                         # Try one more generic pattern: if condition contains any price/volume keywords
                         # and we have basic OHLC data, generate signals based on price action
@@ -926,7 +1009,8 @@ class BacktestEngine:
                                     signals[mask] = 1
                                     for idx in data.index[mask]:
                                         reasons.setdefault(idx, {})['entry_reason_fa'] = f"{reason_text} (generic price action)"
-                                    detailed_logger.info(f"Parsed generic price action entry: {condition_text[:50]}... -> {signal_count} signals")
+                                    safe_condition_short = _safe_log_text(condition_text, max_length=50)
+                                    detailed_logger.debug(f"Parsed generic price action entry: {safe_condition_short} -> {signal_count} signals")
                                     parsed_entry_conditions += 1
                                     condition_parsed = True
             
@@ -937,7 +1021,8 @@ class BacktestEngine:
                 
                 # Try to split complex conditions into simpler parts
                 condition_parts = self._split_condition(condition.strip())
-                detailed_logger.debug(f"Processing exit condition (split into {len(condition_parts)} parts): {condition[:100]}...")
+                safe_condition_exit = _safe_log_text(condition, max_length=100)
+                detailed_logger.debug(f"Processing exit condition (split into {len(condition_parts)} parts): {safe_condition_exit}")
                 
                 for condition_part in condition_parts:
                     condition_text = condition_part.strip()
@@ -954,7 +1039,8 @@ class BacktestEngine:
                     # First, try to extract indicator keywords to guide parsing
                     indicator_keywords = self._extract_indicator_keywords(condition_text)
                     if indicator_keywords:
-                        detailed_logger.debug(f"Extracted indicator keywords: {indicator_keywords} from exit condition: {condition_text[:80]}...")
+                        safe_cond_exit = _safe_log_text(condition_text, max_length=80)
+                        detailed_logger.debug(f"Extracted indicator keywords: {indicator_keywords} from exit condition: {safe_cond_exit}")
                     
                     # Parse candle pattern conditions for exit (سه کندل سبز پشت‌سر‌هم)
                     if not condition_parsed and 'close' in data.columns and 'open' in data.columns:
@@ -977,7 +1063,8 @@ class BacktestEngine:
                                 signals[mask] = -1
                                 for idx in data.index[mask]:
                                     reasons.setdefault(idx, {})['exit_reason_fa'] = reason_text
-                                detailed_logger.info(f"Parsed candle pattern exit condition (3 consecutive green candles): {condition_text[:50]}... -> {signal_count} signals")
+                                safe_cond = _safe_log_text(condition_text, max_length=50)
+                                detailed_logger.debug(f"Parsed candle pattern exit condition (3 consecutive green candles): {safe_cond} -> {signal_count} signals")
                                 parsed_exit_conditions += 1
                                 condition_parsed = True
                     
@@ -995,7 +1082,8 @@ class BacktestEngine:
                                     signals[mask] = -1
                                     for idx in data.index[mask]:
                                         reasons.setdefault(idx, {})['exit_reason_fa'] = reason_text
-                                    detailed_logger.info(f"Parsed generic SELL exit condition: {condition_text[:50]}... -> {signal_count} signals (RSI crossover > 70)")
+                                    safe_cond = _safe_log_text(condition_text, max_length=50)
+                                    detailed_logger.debug(f"Parsed generic SELL exit condition: {safe_cond} -> {signal_count} signals (RSI crossover > 70)")
                                     parsed_exit_conditions += 1
                                     condition_parsed = True
                                 else:
@@ -1006,14 +1094,16 @@ class BacktestEngine:
                                         signals[mask] = -1
                                         for idx in data.index[mask]:
                                             reasons.setdefault(idx, {})['exit_reason_fa'] = reason_text
-                                        detailed_logger.info(f"Parsed generic SELL exit condition (fallback): {condition_text[:50]}... -> {signal_count} signals (RSI > 65)")
+                                        safe_cond = _safe_log_text(condition_text, max_length=50)
+                                        detailed_logger.debug(f"Parsed generic SELL exit condition (fallback): {safe_cond} -> {signal_count} signals (RSI > 65)")
                                         parsed_exit_conditions += 1
                                         condition_parsed = True
                     
                     # Parse RSI conditions
                     if 'rsi' in condition_lower or 'rsi' in indicator_keywords:
                         if 'rsi' not in data.columns:
-                            detailed_logger.warning(f"RSI exit condition found but RSI column not in data: {condition_text[:80]}")
+                            safe_cond = _safe_log_text(condition_text, max_length=80)
+                            detailed_logger.warning(f"RSI exit condition found but RSI column not in data: {safe_cond}")
                             continue
                         
                         rsi_numbers = re.findall(r'\d+', condition_text)
@@ -1035,7 +1125,8 @@ class BacktestEngine:
                             signals[mask] = -1
                             for idx in data.index[mask]:
                                 reasons.setdefault(idx, {})['exit_reason_fa'] = reason_text
-                            detailed_logger.info(f"Parsed RSI exit condition: {condition_text[:50]}... -> {signal_count} signals")
+                            safe_cond = _safe_log_text(condition_text, max_length=50)
+                            detailed_logger.info(f"Parsed RSI exit condition: {safe_cond} -> {signal_count} signals")
                             parsed_exit_conditions += 1
                             condition_parsed = True
                         elif 'زیر' in condition_lower or 'below' in condition_lower or 'کمتر' in condition_lower or 'oversold' in condition_lower:
@@ -1044,14 +1135,16 @@ class BacktestEngine:
                             signals[mask] = -1
                             for idx in data.index[mask]:
                                 reasons.setdefault(idx, {})['exit_reason_fa'] = reason_text
-                            detailed_logger.info(f"Parsed RSI exit condition: {condition_text[:50]}... -> {signal_count} signals")
+                            safe_cond = _safe_log_text(condition_text, max_length=50)
+                            detailed_logger.info(f"Parsed RSI exit condition: {safe_cond} -> {signal_count} signals")
                             parsed_exit_conditions += 1
                             condition_parsed = True
                     
                     # Parse MACD conditions
                     elif 'macd' in condition_lower or 'macd' in indicator_keywords:
                         if 'macd' not in data.columns or 'macd_signal' not in data.columns:
-                            detailed_logger.warning(f"MACD exit condition found but MACD columns not in data: {condition_text[:80]}")
+                            safe_cond = _safe_log_text(condition_text, max_length=80)
+                            detailed_logger.warning(f"MACD exit condition found but MACD columns not in data: {safe_cond}")
                             continue
                         
                         if 'تقاطع' in condition_lower or 'crossover' in condition_lower or 'cross' in condition_lower:
@@ -1062,14 +1155,16 @@ class BacktestEngine:
                                 signals[mask] = -1
                                 for idx in data.index[mask]:
                                     reasons.setdefault(idx, {})['exit_reason_fa'] = reason_text
-                                detailed_logger.info(f"Parsed MACD exit condition: {condition_text[:50]}... -> {signal_count} signals")
+                                safe_cond = _safe_log_text(condition_text, max_length=50)
+                                detailed_logger.info(f"Parsed MACD exit condition: {safe_cond} -> {signal_count} signals")
                                 parsed_exit_conditions += 1
                                 condition_parsed = True
                     
                     # Parse Moving Average conditions
                     elif 'moving average' in condition_lower or 'میانگین' in condition_lower or 'sma' in condition_lower or 'ema' in condition_lower or 'sma' in indicator_keywords or 'ema' in indicator_keywords:
                         if 'sma_20' not in data.columns or 'sma_50' not in data.columns:
-                            detailed_logger.warning(f"MA exit condition found but SMA columns not in data: {condition_text[:80]}")
+                            safe_cond = _safe_log_text(condition_text, max_length=80)
+                            detailed_logger.warning(f"MA exit condition found but SMA columns not in data: {safe_cond}")
                             continue
                         
                         if 'تقاطع' in condition_lower or 'crossover' in condition_lower or 'cross' in condition_lower:
@@ -1080,7 +1175,8 @@ class BacktestEngine:
                                 signals[mask] = -1
                                 for idx in data.index[mask]:
                                     reasons.setdefault(idx, {})['exit_reason_fa'] = reason_text
-                                detailed_logger.info(f"Parsed MA exit condition: {condition_text[:50]}... -> {signal_count} signals")
+                                safe_cond = _safe_log_text(condition_text, max_length=50)
+                                detailed_logger.info(f"Parsed MA exit condition: {safe_cond} -> {signal_count} signals")
                                 parsed_exit_conditions += 1
                                 condition_parsed = True
                     
@@ -1115,7 +1211,7 @@ class BacktestEngine:
                                             signals[mask] = -1
                                             for idx in data.index[mask]:
                                                 reasons.setdefault(idx, {})['exit_reason_fa'] = reason_text
-                                            detailed_logger.info(f"Parsed generic exit condition for {col}: {condition_text[:50]}... -> {signal_count} signals")
+                                            detailed_logger.debug(f"Parsed generic exit condition for {col}: {condition_text[:50]}... -> {signal_count} signals")
                                             parsed_exit_conditions += 1
                                             condition_parsed = True
                                             break
@@ -1125,24 +1221,26 @@ class BacktestEngine:
                                             signals[mask] = -1
                                             for idx in data.index[mask]:
                                                 reasons.setdefault(idx, {})['exit_reason_fa'] = reason_text
-                                            detailed_logger.info(f"Parsed generic exit condition for {col}: {condition_text[:50]}... -> {signal_count} signals")
+                                            detailed_logger.debug(f"Parsed generic exit condition for {col}: {condition_text[:50]}... -> {signal_count} signals")
                                             parsed_exit_conditions += 1
                                             condition_parsed = True
                                             break
                     
                     if not condition_parsed:
-                        detailed_logger.warning(f"Could not parse exit condition: {condition_text[:100]}")
-                        detailed_logger.debug(f"Unparsed exit condition details: '{condition_text[:200]}', available columns: {[c for c in data.columns if any(word in condition_lower for word in c.lower().split('_'))][:5]}")
+                        safe_cond_warn = _safe_log_text(condition_text, max_length=100)
+                        safe_cond_debug = _safe_log_text(condition_text, max_length=200)
+                        detailed_logger.warning(f"Could not parse exit condition: {safe_cond_warn}")
+                        detailed_logger.debug(f"Unparsed exit condition details: '{safe_cond_debug}', available columns: {[c for c in data.columns if any(word in condition_lower for word in c.lower().split('_'))][:5]}")
             
             # Summary of parsing results
             logger.info(f"Parsed {parsed_entry_conditions} entry conditions and {parsed_exit_conditions} exit conditions successfully")
             detailed_logger.info("=" * 80)
-            detailed_logger.info(f"===== PARSING SUMMARY =====")
-            detailed_logger.info(f"Entry conditions extracted by NLP: {len(entry_conditions)}")
-            detailed_logger.info(f"Entry conditions successfully parsed: {parsed_entry_conditions}")
-            detailed_logger.info(f"Exit conditions extracted by NLP: {len(exit_conditions)}")
-            detailed_logger.info(f"Exit conditions successfully parsed: {parsed_exit_conditions}")
-            detailed_logger.info(f"Total signals generated: {(signals == 1).sum()} buy, {(signals == -1).sum()} sell")
+            detailed_logger.debug(f"===== PARSING SUMMARY =====")
+            detailed_logger.debug(f"Entry conditions extracted by NLP: {len(entry_conditions)}")
+            detailed_logger.debug(f"Entry conditions successfully parsed: {parsed_entry_conditions}")
+            detailed_logger.debug(f"Exit conditions extracted by NLP: {len(exit_conditions)}")
+            detailed_logger.debug(f"Exit conditions successfully parsed: {parsed_exit_conditions}")
+            detailed_logger.debug(f"Total signals generated: {(signals == 1).sum()} buy, {(signals == -1).sum()} sell")
             detailed_logger.info("=" * 80)
             
             # If no signals found, try fallback strategies
@@ -1255,7 +1353,7 @@ class BacktestEngine:
         sell_signals = int((signals == -1).sum())
         
         total_signals = buy_signals + sell_signals
-        logger.info(f"Final signal count: {total_signals} total ({buy_signals} buy, {sell_signals} sell)")
+        logger.debug(f"Final signal count: {total_signals} total ({buy_signals} buy, {sell_signals} sell)")
         
         return signals, reasons
     
@@ -1379,7 +1477,7 @@ class BacktestEngine:
                     }
                     self.trades.append(trade)
                     self.current_capital *= (1 + pnl)
-                    logger.info(f"Auto-closed position at end: pnl={pnl:.4f}")
+                    logger.debug(f"Auto-closed position at end: pnl={pnl:.4f}")
                 except Exception as close_error:
                     logger.error(f"Error auto-closing position: {close_error}")
 
@@ -1392,8 +1490,8 @@ class BacktestEngine:
             buy_count = int((signals == 1).sum())
             sell_count = int((signals == -1).sum())
             total_signals = len(signals)
-            logger.info(f"Signals summary -> buys: {buy_count}, sells: {sell_count}, total signals: {total_signals}, data rows: {len(data)}")
-            logger.info(f"Trades executed: {len(self.trades)}, final capital: {self.current_capital:.2f}, initial: {self.initial_capital:.2f}")
+            logger.debug(f"Signals summary -> buys: {buy_count}, sells: {sell_count}, total signals: {total_signals}, data rows: {len(data)}")
+            logger.debug(f"Trades executed: {len(self.trades)}, final capital: {self.current_capital:.2f}, initial: {self.initial_capital:.2f}")
         except Exception as diag_error:
             logger.warning(f"Error in diagnostics: {diag_error}")
     
@@ -1478,19 +1576,45 @@ class BacktestEngine:
             }
 
     def _build_persian_description(self, symbol: str) -> str:
-        """Create a concise Persian description summarizing reasons of entries/exits for the test result."""
+        """Create a concise Persian description summarizing the backtest results."""
         if not self.trades:
-            return f"برای نماد {symbol} هیچ معامله‌ای در این بک‌تست انجام نشد."
-        lines: List[str] = [f"گزارش خلاصه معاملات برای نماد {symbol}:"]
-        for idx, t in enumerate(self.trades, start=1):
-            entry_reason = t.get('entry_reason_fa') or '—'
-            exit_reason = t.get('exit_reason_fa') or '—'
-            pnl_pct = f"{t.get('pnl_percent', 0):.2f}%"
-            lines.append(f"معامله {idx}: ورود {t['entry_date']}، خروج {t['exit_date']}، سود/زیان: {pnl_pct}. دلیل ورود: {entry_reason} | دلیل خروج: {exit_reason}")
-        return "\n".join(lines)
+            return f"برای نماد {symbol} هیچ معامله‌ای در این بک‌تست انجام نشد. ممکن است شرایط ورود با داده‌های موجود همخوانی نداشته باشند."
+        
+        # Calculate summary metrics
+        total_trades = len(self.trades)
+        winning_trades = sum(1 for t in self.trades if t.get('pnl', 0) > 0)
+        losing_trades = total_trades - winning_trades
+        total_pnl = sum(t.get('pnl_percent', 0) for t in self.trades)
+        
+        # Build a simple, user-friendly summary
+        description = f"بک‌تست برای نماد {symbol} با {total_trades} معامله انجام شد. "
+        
+        if winning_trades > 0 and losing_trades > 0:
+            description += f"{winning_trades} معامله سودآور و {losing_trades} معامله زیان‌ده بود. "
+        elif winning_trades > 0:
+            description += f"همه معاملات سودآور بودند. "
+        elif losing_trades > 0:
+            description += f"همه معاملات زیان‌ده بودند. "
+        
+        if total_pnl > 0:
+            description += f"مجموع بازدهی: +{total_pnl:.2f}%"
+        elif total_pnl < 0:
+            description += f"مجموع بازدهی: {total_pnl:.2f}%"
+        else:
+            description += f"مجموع بازدهی: صفر"
+        
+        return description
 
-def run_simple_backtest(data: pd.DataFrame, strategy_type: str = 'rsi') -> Dict[str, Any]:
-    """Run a simple backtest with predefined strategy"""
+def run_simple_backtest(data: pd.DataFrame, strategy_type: str = 'rsi', symbol: str = None) -> Dict[str, Any]:
+    """
+    Run a simple backtest with predefined strategy.
+    
+    Args:
+        data: Historical price data
+        strategy_type: Type of strategy (e.g., 'rsi', 'macd')
+        symbol: Trading symbol (e.g., 'EUR/USD', 'XAU/USD'). 
+                If None, will try to extract from data or use default 'XAU/USD'
+    """
     engine = BacktestEngine()
     
     # Create simple strategy based on type
@@ -1501,4 +1625,16 @@ def run_simple_backtest(data: pd.DataFrame, strategy_type: str = 'rsi') -> Dict[
         'strategy_type': strategy_type
     }
     
-    return engine.run_backtest(data, strategy, 'EUR/USD')
+    # Determine symbol: use provided, or extract from strategy, or use default
+    if symbol is None:
+        # Try to get symbol from strategy if available
+        symbol = strategy.get('symbol')
+        if not symbol:
+            # Try to infer from data if it has symbol info
+            if hasattr(data, 'attrs') and 'symbol' in data.attrs:
+                symbol = data.attrs['symbol']
+            else:
+                # Default to XAU/USD (Gold) as it's the most common in this system
+                symbol = 'XAU/USD'
+    
+    return engine.run_backtest(data, strategy, symbol)

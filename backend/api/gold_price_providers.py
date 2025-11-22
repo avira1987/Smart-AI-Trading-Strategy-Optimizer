@@ -472,48 +472,11 @@ class GoldPriceManager:
     """مدیریت دریافت قیمت طلا از منابع مختلف"""
     
     def __init__(self):
-        self.nerkh_provider = None
         self.mt5_provider = MT5GoldPriceProvider()
-        self.twelvedata_provider = TwelveDataProvider()
-        self.financialmodelingprep_provider = FinancialModelingPrepProvider()
-        
-        # سعی کنیم nerkh را تنظیم کنیم (از environment variable یا APIConfiguration)
-        nerkh_key = os.getenv('NERKH_API_KEY')
-        if not nerkh_key and APIConfiguration:
-            try:
-                api_config = APIConfiguration.objects.filter(
-                    provider='nerkh',
-                    is_active=True,
-                    user__isnull=True,
-                ).first()
-                if api_config:
-                    nerkh_key = api_config.api_key
-                    logger.info("Loaded Nerkh API key from APIConfiguration")
-            except Exception as e:
-                logger.warning(f"Failed to load Nerkh API key from database: {e}")
-        
-        if nerkh_key:
-            self.nerkh_provider = NerkhProvider(nerkh_key)
     
-    def get_price(self, prefer_mt5: bool = False, prefer_twelvedata: bool = False, prefer_fmp: bool = False) -> Dict[str, Any]:
+    def get_price(self, prefer_mt5: bool = True, prefer_twelvedata: bool = False, prefer_fmp: bool = False) -> Dict[str, Any]:
         """
-        دریافت قیمت طلا با اولویت:
-        1. Financial Modeling Prep (اگر prefer_fmp=True و API key تنظیم شده)
-        2. Twelve Data (اگر prefer_twelvedata=True و API key تنظیم شده)
-        3. MT5 (اگر prefer_mt5=True یا MT5 در دسترس باشد)
-        4. Financial Modeling Prep (به صورت پیش‌فرض قبل از Twelve Data)
-        5. Twelve Data (به صورت پیش‌فرض)
-        6. API های رایگان جایگزین
-        7. nerkh.io (اگر endpoint پیدا شد)
-        
-        Returns:
-            {
-                'success': bool,
-                'price': float (bid, ask, last),
-                'source': str,
-                'data': dict,
-                'error': str
-            }
+        دریافت قیمت طلا فقط از MetaTrader 5
         """
         result = {
             'success': False,
@@ -524,104 +487,15 @@ class GoldPriceManager:
             'timestamp': datetime.now().isoformat()
         }
         
-        # 1. اول Financial Modeling Prep را چک کنیم (اگر prefer_fmp=True)
-        if prefer_fmp:
-            price_data, error = self.financialmodelingprep_provider.get_price()
-            if price_data:
-                result['success'] = True
-                result['price'] = price_data['last']
-                result['source'] = 'financialmodelingprep'
-                result['data'] = price_data
-                return result
-            elif prefer_fmp:
-                result['error'] = f"Financial Modeling Prep not available: {error}"
-                return result
+        price_data, error = self.mt5_provider.get_price()
+        if price_data:
+            result['success'] = True
+            result['price'] = price_data['last']
+            result['source'] = 'mt5'
+            result['data'] = price_data
+            return result
         
-        # 2. Twelve Data را چک کنیم (اگر prefer_twelvedata=True)
-        if prefer_twelvedata:
-            price_data, error = self.twelvedata_provider.get_realtime_quote()
-            if price_data:
-                result['success'] = True
-                result['price'] = price_data['last']
-                result['source'] = 'twelvedata'
-                result['data'] = price_data
-                return result
-            elif prefer_twelvedata:
-                result['error'] = f"TwelveData not available: {error}"
-                return result
-        
-        # 3. MT5 را چک کنیم (اگر prefer_mt5)
-        if prefer_mt5:
-            price_data, error = self.mt5_provider.get_price()
-            if price_data:
-                result['success'] = True
-                result['price'] = price_data['last']
-                result['source'] = 'mt5'
-                result['data'] = price_data
-                return result
-            else:
-                result['error'] = f"MT5 not available: {error}"
-                # به fallback ادامه می‌دهیم
-        
-        # 4. Financial Modeling Prep (به صورت پیش‌فرض)
-        if not prefer_mt5:
-            price_data, error = self.financialmodelingprep_provider.get_price()
-            if price_data:
-                result['success'] = True
-                result['price'] = price_data['last']
-                result['source'] = 'financialmodelingprep'
-                result['data'] = price_data
-                return result
-        
-        # 5. Twelve Data (به صورت پیش‌فرض)
-        if not prefer_mt5:
-            price_data, error = self.twelvedata_provider.get_realtime_quote()
-            if price_data:
-                result['success'] = True
-                result['price'] = price_data['last']
-                result['source'] = 'twelvedata'
-                result['data'] = price_data
-                return result
-        
-        # 6. API های جایگزین رایگان
-        free_providers = [
-            ('ExchangeRate-API', FreeAPIProvider.get_from_exchangerate_api),
-            ('MetalsAPI', FreeAPIProvider.get_from_metalsapi_free),
-            ('Fixer.io', FreeAPIProvider.get_from_fixer_io),
-            ('OpenExchangeRates', FreeAPIProvider.get_from_openexchangerates),
-        ]
-        
-        for name, provider_func in free_providers:
-            price, error = provider_func()
-            if price:
-                result['success'] = True
-                result['price'] = price
-                result['source'] = name.lower().replace('.', '').replace('-', '_')
-                result['data'] = {'price': price}
-                return result
-        
-        # 7. nerkh.io (اگر endpoint پیدا شد)
-        if self.nerkh_provider:
-            price, error = self.nerkh_provider.get_price()
-            if price:
-                result['success'] = True
-                result['price'] = price
-                result['source'] = 'nerkh'
-                result['data'] = {'price': price}
-                return result
-        
-        # 8. در نهایت MT5 را امتحان کنیم (اگر هنوز امتحان نشده)
-        if not prefer_mt5:
-            price_data, error = self.mt5_provider.get_price()
-            if price_data:
-                result['success'] = True
-                result['price'] = price_data['last']
-                result['source'] = 'mt5'
-                result['data'] = price_data
-                return result
-        
-        # همه منابع ناموفق
-        result['error'] = "All price providers failed"
+        result['error'] = error or "MT5 price provider unavailable"
         return result
     
     def is_mt5_available(self) -> bool:
@@ -650,19 +524,16 @@ class GoldPriceManager:
         price_data = None
         error = None
         
-        if provider_key in ['twelvedata', 'twelve_data', 'twelve-data']:
-            price_data, error = self.twelvedata_provider.get_realtime_quote(api_key=api_key)
-            provider_slug = 'twelvedata'
-        elif provider_key in ['financialmodelingprep', 'financial_modeling_prep', 'fmp']:
-            price_data, error = self.financialmodelingprep_provider.get_price(api_key=api_key)
-            provider_slug = 'financialmodelingprep'
+        if provider_key in ['mt5', 'meta_trader', 'metatrader5']:
+            price_data, error = self.mt5_provider.get_price()
+            provider_slug = 'mt5'
         else:
             result['error'] = 'unsupported_provider'
             return result
         
         if price_data:
             result['success'] = True
-            result['price'] = price_data.get('last') or price_data.get('price')
+            result['price'] = price_data.get('last')
             result['source'] = provider_slug
             result['data'] = price_data
             return result

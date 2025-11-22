@@ -75,3 +75,51 @@ class APIConfigurationOpenAITest(TestCase):
         self.assertEqual(body["status"], "error")
         self.assertIn("AI provider test failed", body["message"])
 
+
+class APIConfigurationChatGPTAliasTest(TestCase):
+    def setUp(self) -> None:
+        self.user = User.objects.create_user(
+            username="chatgpt-user", email="chatgpt@example.com", password="pass12345"
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def test_can_create_chatgpt_configuration_via_api(self):
+        payload = {
+            "provider": "chatgpt",
+            "api_key": "sk-live-chatgpt-1234567890abcdef123456",
+            "is_active": True,
+        }
+        response = self.client.post(reverse("api-list"), payload, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(
+            APIConfiguration.objects.filter(provider="chatgpt", user=self.user).exists()
+        )
+
+    @patch("api.views.get_registered_providers")
+    def test_chatgpt_alias_uses_openai_provider_in_test_endpoint(self, mock_providers):
+        provider_result = ProviderResult(
+            success=True,
+            text='{"status":"ok"}',
+            raw_response={"choices": []},
+        )
+        dummy_provider = _DummyOpenAIProvider(provider_result)
+        mock_providers.return_value = {
+            "openai": dummy_provider,
+            "chatgpt": dummy_provider,
+        }
+
+        config = APIConfiguration.objects.create(
+            provider="chatgpt",
+            api_key="sk-live-chatgpt-abcdef1234567890",
+            is_active=True,
+            user=self.user,
+        )
+
+        response = self.client.post(reverse("api-test", kwargs={"pk": config.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["provider"], "chatgpt")
+        self.assertEqual(body["status"], "success")

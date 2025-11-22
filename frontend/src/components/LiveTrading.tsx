@@ -5,6 +5,8 @@ import { useSymbol } from '../context/SymbolContext'
 import AutoTradingSettings from './AutoTradingSettings'
 import { useRateLimit } from '../hooks/useRateLimit'
 
+const REFRESH_INTERVAL_MS = 30000
+
 export default function LiveTrading() {
   const [strategies, setStrategies] = useState<TradingStrategy[]>([])
   const [trades, setTrades] = useState<LiveTrade[]>([])
@@ -30,8 +32,11 @@ export default function LiveTrading() {
   useEffect(() => {
     loadData()
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        return
+      }
       refreshData()
-    }, 10000) // Refresh every 10 seconds
+    }, REFRESH_INTERVAL_MS)
     return () => clearInterval(interval)
   }, [])
 

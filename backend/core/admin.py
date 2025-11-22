@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import APIConfiguration, TradingStrategy, Job, Result, LiveTrade, AutoTradingSettings
 from .models import UserProfile, OTPCode, Device, Ticket, TicketMessage, StrategyOptimization
 from .models import Wallet, Transaction, AIRecommendation, SystemSettings, GoldPriceSubscription, UserGoldAPIAccess, GoldAPIAccessRequest
-from .models import APIUsageLog
+from .models import APIUsageLog, UserScore, Achievement, UserAchievement
 
 
 @admin.register(APIConfiguration)
@@ -246,8 +246,8 @@ class GoldAPIAccessRequestAdmin(admin.ModelAdmin):
 @admin.register(SystemSettings)
 class SystemSettingsAdmin(admin.ModelAdmin):
     """Admin برای تنظیمات سیستم"""
-    list_display = ['id', 'live_trading_enabled', 'updated_at']
-    list_filter = ['live_trading_enabled']
+    list_display = ['id', 'live_trading_enabled', 'use_ai_cache', 'updated_at']
+    list_filter = ['live_trading_enabled', 'use_ai_cache']
     readonly_fields = ['created_at', 'updated_at']
     
     def has_add_permission(self, request):
@@ -266,6 +266,10 @@ class SystemSettingsAdmin(admin.ModelAdmin):
         ('ویژگی‌های وب‌سایت', {
             'fields': ('live_trading_enabled',),
             'description': 'کنترل نمایش بخش‌های حساس برای کاربران'
+        }),
+        ('تنظیمات هوش مصنوعی', {
+            'fields': ('use_ai_cache',),
+            'description': 'کنترل استفاده از کش برای پردازش تبدیل متن انسانی به مدل هوش مصنوعی'
         }),
         ('اطلاعات سیستم', {
             'fields': ('created_at', 'updated_at'),
@@ -318,4 +322,49 @@ class APIUsageLogAdmin(admin.ModelAdmin):
     def has_change_permission(self, request, obj=None):
         # جلوگیری از ویرایش لاگ‌ها
         return False
+
+
+@admin.register(UserScore)
+class UserScoreAdmin(admin.ModelAdmin):
+    """Admin برای امتیازات کاربران"""
+    list_display = ['user', 'total_points', 'level', 'backtests_completed', 'best_return', 'updated_at']
+    list_filter = ['level', 'created_at']
+    search_fields = ['user__username', 'user__email']
+    readonly_fields = ['created_at', 'updated_at']
+    ordering = ['-total_points']
+    fieldsets = (
+        ('اطلاعات کاربر', {
+            'fields': ('user',)
+        }),
+        ('امتیازات', {
+            'fields': ('total_points', 'level')
+        }),
+        ('آمار', {
+            'fields': ('backtests_completed', 'strategies_created', 'optimizations_completed', 'total_trades', 'best_return')
+        }),
+        ('زمان‌ها', {
+            'fields': ('created_at', 'updated_at'),
+            'classes': ('collapse',)
+        }),
+    )
+
+
+@admin.register(Achievement)
+class AchievementAdmin(admin.ModelAdmin):
+    """Admin برای دستاوردها"""
+    list_display = ['icon', 'name', 'category', 'condition_type', 'condition_value', 'points_reward', 'is_active', 'created_at']
+    list_filter = ['category', 'condition_type', 'is_active', 'created_at']
+    search_fields = ['name', 'description', 'code']
+    readonly_fields = ['created_at']
+    ordering = ['category', 'points_reward']
+
+
+@admin.register(UserAchievement)
+class UserAchievementAdmin(admin.ModelAdmin):
+    """Admin برای دستاوردهای کاربران"""
+    list_display = ['user', 'achievement', 'unlocked_at']
+    list_filter = ['achievement__category', 'unlocked_at']
+    search_fields = ['user__username', 'achievement__name']
+    readonly_fields = ['unlocked_at']
+    ordering = ['-unlocked_at']
 

@@ -12,6 +12,7 @@ import Login from './pages/Login'
 import Tickets from './pages/Tickets'
 import Profile from './pages/Profile'
 import AdminSecurity from './pages/AdminSecurity'
+import SystemSettings from './pages/SystemSettings'
 import FreeGoldAPIGuide from './pages/FreeGoldAPIGuide'
 import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -108,6 +109,14 @@ function App() {
                       element={
                         <ProtectedRoute>
                           <AdminSecurity />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/admin/settings"
+                      element={
+                        <ProtectedRoute>
+                          <SystemSettings />
                         </ProtectedRoute>
                       }
                     />

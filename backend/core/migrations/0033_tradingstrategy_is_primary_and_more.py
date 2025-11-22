@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('core', '0032_remove_ddnsconfiguration'),
+        ('core', '0031_alter_apiconfiguration_provider'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

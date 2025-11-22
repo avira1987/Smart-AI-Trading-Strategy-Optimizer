@@ -9,17 +9,20 @@ from .mt5_client import fetch_mt5_candles, is_mt5_available, map_user_symbol_to_
 import time
 import os
 import logging
+import re
+import pandas as pd
 from typing import Any, List
 
 logger = logging.getLogger(__name__)
 
 
 def _mt5_symbol_from(symbol: Any) -> str:
-    """Convert arbitrary symbol input to MT5 format (e.g., 'EUR/USD' -> 'EURUSD')."""
+    """Convert arbitrary symbol input to MT5 format (e.g., 'XAU/USD' -> 'XAUUSD')."""
     try:
-        s = str(symbol) if symbol is not None else 'EUR/USD'
+        # Default to XAU/USD (Gold) as it's the primary symbol for this trading system
+        s = str(symbol) if symbol is not None else 'XAU/USD'
     except Exception:
-        s = 'EUR/USD'
+        s = 'XAU/USD'
     return s.replace('/', '')
 
 def _normalize_timeframe(timeframe: str) -> str:
@@ -203,13 +206,15 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             return f"Backtest failed for job {job_id}: {error_msg}"
         
         # Get historical data window and symbol
-        symbol = (symbol_override or parsed_strategy.get('symbol') or 'EUR/USD')
+        # Default to XAU/USD (Gold) as it's the primary symbol for this trading system
+        symbol = (symbol_override or parsed_strategy.get('symbol') or 'XAU/USD')
         days = int(timeframe_days) if timeframe_days else 365
         start_date = (timezone.now() - timezone.timedelta(days=days)).strftime('%Y-%m-%d')
         end_date = timezone.now().strftime('%Y-%m-%d')
         
-        # Extract and normalize timeframe from strategy
+        # Extract exact timeframe from strategy (do not normalize - use as-is)
         strategy_timeframe = parsed_strategy.get('timeframe')
+        # Normalize timeframe for MT5 usage
         normalized_timeframe = _normalize_timeframe(strategy_timeframe) if strategy_timeframe else 'M15'
         
         detailed_logger.info(f"پارامترهای دریافت داده:")
@@ -218,84 +223,36 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
         detailed_logger.info(f"  - end_date: {end_date}")
         detailed_logger.info(f"  - days: {days}")
         detailed_logger.info(f"  - strategy_timeframe: {strategy_timeframe or 'تعیین نشده'}")
-        detailed_logger.info(f"  - normalized_timeframe: {normalized_timeframe}")
         
-        # Try to get data from any available provider
-        detailed_logger.info(f"در حال دریافت داده از ارائه‌دهندگان موجود...")
-        data, provider_used = data_manager.get_data_from_any_provider(symbol, start_date, end_date, user=user)
-        
-        if not data.empty:
-            detailed_logger.info(f"✅ دریافت داده انجام شد از {provider_used}: {len(data)} ردیف")
-            logger.info(f"Backtest job {job_id}: Received {len(data)} rows from {provider_used} for symbol={symbol}")
-        else:
-            # If no provider worked, try MT5 as last resort (only if available)
-            detailed_logger.warning("⚠️ هشدار: هیچ ارائه‌دهنده API خارجی داده برنگرداند!")
-            detailed_logger.warning("هیچ ارائه‌دهنده API داده برنگرداند؛ در حال تلاش MT5 به عنوان آخرین راه...")
-            logger.warning("No API provider returned data; attempting MT5 fallback as last resort")
-            mt5_ok, mt5_msg = is_mt5_available()
-            if mt5_ok:
-                # Map user symbol to server symbol for backtesting (e.g., XAUUSD -> XAUUSD_l)
-                base_mt5_symbol = _mt5_symbol_from(symbol)
-                mt5_symbol = map_user_symbol_to_server_symbol(base_mt5_symbol, for_backtest=True)
-                detailed_logger.info(f"MT5 fallback: نماد کاربر '{symbol}' به نماد سرور '{mt5_symbol}' تبدیل شد")
-                logger.info(f"MT5 fallback: mapped user symbol '{symbol}' to server symbol '{mt5_symbol}' for backtest")
-                # Calculate dynamic count based on timeframe and days
-                minutes_in_day = 24 * 60
-                # Map timeframe to minutes per bar
-                timeframe_minutes = {
-                    'M1': 1,
-                    'M5': 5,
-                    'M15': 15,
-                    'M30': 30,
-                    'H1': 60,
-                    'H4': 240,
-                    'D1': 1440
-                }
-                minutes_per_bar = timeframe_minutes.get(normalized_timeframe, 15)
-                bars_per_day = minutes_in_day // minutes_per_bar
-                count = days * bars_per_day
-                detailed_logger.info(f"MT5 fallback: درخواست {count} کندل برای {days} روز با تایم‌فریم {normalized_timeframe} برای نماد {mt5_symbol}")
-                logger.info(f"MT5 fallback: requesting count={count} for days={days} timeframe={normalized_timeframe} symbol={mt5_symbol}")
-                mt5_df, mt5_err = fetch_mt5_candles(mt5_symbol, timeframe=normalized_timeframe, count=count)
-                if mt5_err is None and not mt5_df.empty:
-                    data = mt5_df
-                    provider_used = 'mt5'
-                    # Add MT5 to available_providers list since it was used
-                    if 'mt5' not in available_providers:
-                        available_providers.append('mt5')
-                    detailed_logger.warning("⚠️ توجه: از MetaTrader 5 (MT5) برای دریافت داده استفاده شد. این داده از بروکر محلی شما است، نه از API های خارجی.")
-                    detailed_logger.info(f"✅ MT5 fallback موفق: {len(data)} کندل برای {mt5_symbol}")
-                    logger.warning("MT5 fallback used - data is from local MT5 terminal, not external APIs")
-                    logger.info(f"MT5 fallback succeeded with {len(data)} candles for {mt5_symbol}")
-                    
-                    # لاگ استفاده از MT5
-                    try:
-                        import time
-                        from api.api_usage_tracker import log_api_usage
-                        log_api_usage(
-                            provider='mt5',
-                            endpoint=f"fetch_mt5_candles/{mt5_symbol}",
-                            request_type='GET',
-                            status_code=200,
-                            success=True,
-                            user=user,
-                            metadata={
-                                'symbol': mt5_symbol,
-                                'timeframe': normalized_timeframe,
-                                'count': count,
-                                'data_points': len(mt5_df)
-                            }
-                        )
-                    except Exception as log_error:
-                        logger.warning(f"Failed to log MT5 API usage: {log_error}")
-                else:
-                    logger.error(f"MT5 fallback failed or returned empty data: {mt5_err}")
-                    # Continue to error handling below
-            else:
-                logger.warning(f"MT5 not available: {mt5_msg}")
+        # دریافت داده از MT5 با تایم‌فریم دقیق استراتژی
+        # DataProviderManager خودش تشخیص می‌دهد که آیا تایم‌فریم استاندارد است یا نه
+        detailed_logger.info(f"در حال دریافت داده از MT5 با تایم‌فریم دقیق استراتژی...")
+        try:
+            # تبدیل strategy_timeframe به interval برای استفاده در get_historical_data
+            interval = strategy_timeframe if strategy_timeframe else "1day"
+            data, provider_used = data_manager.get_historical_data(
+                symbol,
+                timeframe_days=days,
+                interval=interval,
+                include_latest=True,
+                user=user,
+                return_provider=True,
+            )
             
-            # If still no data, return clear error message
-            if data.empty:
+            if not data.empty:
+                detailed_logger.info(f"✅ دریافت داده انجام شد از {provider_used}: {len(data)} ردیف")
+                logger.info(f"Backtest job {job_id}: Received {len(data)} rows from {provider_used} for symbol={symbol} with timeframe={strategy_timeframe}")
+            else:
+                detailed_logger.warning("⚠️ هیچ داده‌ای از MT5 دریافت نشد")
+                logger.warning(f"Backtest job {job_id}: No data received from MT5")
+        except Exception as data_error:
+            detailed_logger.error(f"❌ خطا در دریافت داده: {str(data_error)}")
+            logger.error(f"Backtest job {job_id}: Error getting data: {data_error}")
+            data = pd.DataFrame()
+            provider_used = None
+        
+        # اگر هنوز داده نداریم، خطا برمی‌گردانیم
+        if data.empty:
                 error_msg = (
                     f"نمی‌توان داده بازار را دریافت کرد. "
                     f"لطفاً مطمئن شوید که حداقل یک API key تنظیم شده است: "
@@ -592,6 +549,32 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                     data_sources_text += f"• ارائه‌دهنده در دسترس: {provider_display_single}\n"
             data_sources_text += "\n"
             
+            # Helper function to clean text - remove JSON artifacts and symbols
+            def clean_text(text: str) -> str:
+                """Clean text by removing JSON artifacts, symbols, and formatting issues."""
+                if not text or not isinstance(text, str):
+                    return ''
+                
+                # Remove common JSON artifacts
+                text = text.replace('{', '').replace('}', '')
+                text = text.replace('[', '').replace(']', '')
+                text = text.replace('"', '').replace("'", '')
+                text = text.replace('\\n', '\n').replace('\\t', ' ')
+                
+                # Remove excessive separators
+                text = re.sub(r'={3,}', '', text)  # Remove long separator lines
+                text = re.sub(r'-{3,}', '', text)  # Remove long dash lines
+                text = re.sub(r'_{3,}', '', text)  # Remove long underscore lines
+                
+                # Clean up multiple newlines
+                text = re.sub(r'\n{3,}', '\n\n', text)
+                
+                # Remove leading/trailing whitespace from each line
+                lines = [line.strip() for line in text.split('\n') if line.strip()]
+                text = '\n'.join(lines)
+                
+                return text.strip()
+            
             # Combine original description with AI analysis and data sources
             # Ensure original_description is always a string (not dict/JSON)
             original_description_raw = result_data.get('description_fa', result_data.get('error', ''))
@@ -600,51 +583,66 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             # Convert to string if it's not already - always ensure it's a readable text, not JSON
             if original_description_raw:
                 if isinstance(original_description_raw, dict):
-                    # If it's a dict, convert to readable Persian text format
-                    # This should not happen normally, but handle it gracefully
+                    # Convert dict to readable Persian text format
                     lines = []
                     for key, value in original_description_raw.items():
                         if isinstance(value, (dict, list)):
-                            import json
-                            value_str = json.dumps(value, ensure_ascii=False, indent=2)
+                            # Skip nested structures in description - they're not user-friendly
+                            continue
                         else:
-                            value_str = str(value)
-                        lines.append(f"{key}: {value_str}")
+                            value_str = str(value).strip()
+                            if value_str and not value_str.startswith('{') and not value_str.startswith('['):
+                                lines.append(f"{value_str}")
                     original_description = '\n'.join(lines)
                 elif isinstance(original_description_raw, (list, tuple)):
-                    # If it's a list, join it with newlines
-                    original_description = '\n'.join(str(item) for item in original_description_raw)
+                    # If it's a list, join with newlines and filter out non-string items
+                    lines = [str(item).strip() for item in original_description_raw 
+                            if item and str(item).strip() and not str(item).strip().startswith('{')]
+                    original_description = '\n'.join(lines)
                 else:
                     # It's already a string or can be converted
                     original_description = str(original_description_raw).strip()
+            
+            # Clean the original description
+            original_description = clean_text(original_description)
             
             # Ensure ai_analysis is always a string (not dict/JSON)
             ai_analysis_str = ''
             if ai_analysis:
                 if isinstance(ai_analysis, dict):
-                    # Convert dict to readable text format
-                    lines = []
-                    for key, value in ai_analysis.items():
-                        if isinstance(value, (dict, list)):
-                            import json
-                            value_str = json.dumps(value, ensure_ascii=False, indent=2)
-                        else:
-                            value_str = str(value)
-                        lines.append(f"{key}: {value_str}")
-                    ai_analysis_str = '\n'.join(lines)
+                    # Only extract analysis_text or raw_output from dict, ignore other keys
+                    ai_analysis_str = ai_analysis.get('analysis_text') or ai_analysis.get('raw_output') or ''
+                    if not ai_analysis_str:
+                        # Fallback: try to extract meaningful text values
+                        lines = []
+                        for key, value in ai_analysis.items():
+                            if key in ['analysis_text', 'raw_output', 'message']:
+                                if isinstance(value, str) and value.strip():
+                                    lines.append(value.strip())
+                        ai_analysis_str = '\n'.join(lines)
                 elif isinstance(ai_analysis, (list, tuple)):
-                    ai_analysis_str = '\n'.join(str(item) for item in ai_analysis)
+                    # Filter out non-string items and JSON artifacts
+                    lines = [str(item).strip() for item in ai_analysis 
+                            if item and str(item).strip() and not str(item).strip().startswith('{')]
+                    ai_analysis_str = '\n'.join(lines)
                 else:
                     ai_analysis_str = str(ai_analysis).strip()
             
-            # Build final description consistently - always in readable Persian text format
+            # Clean the AI analysis text
+            ai_analysis_str = clean_text(ai_analysis_str)
+            
+            # Build final description consistently - clean and user-friendly format
+            # Only include original_description if it's meaningful and not redundant
             if ai_analysis_str:
-                if original_description:
-                    final_description = f"{original_description}\n\n{'=' * 80}\n\n📊 تحلیل هوش مصنوعی نتایج بک‌تست:\n\n{ai_analysis_str}{data_sources_text}"
-                else:
-                    final_description = f"📊 تحلیل هوش مصنوعی نتایج بک‌تست:\n\n{ai_analysis_str}{data_sources_text}"
+                # If we have AI analysis, we don't need the basic description (it's redundant)
+                final_description = f"📊 تحلیل هوش مصنوعی نتایج بک‌تست:\n\n{ai_analysis_str}"
+                # Only add data sources if needed (data_sources is shown separately in UI)
+                # Skip data_sources_text to avoid duplication
+            elif original_description:
+                final_description = original_description
+                # Skip data_sources_text here too
             else:
-                final_description = f"{original_description}{data_sources_text}" if original_description else data_sources_text.strip()
+                final_description = data_sources_text.strip() if data_sources_text else ""
             
             # Create result with error handling
             result = Result.objects.create(
@@ -660,6 +658,17 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                 trades_details=result_data.get('trades', []),
                 data_sources=data_sources_info
             )
+            
+            # Award gamification points
+            try:
+                from core.gamification import award_backtest_points
+                if user:
+                    gamification_result = award_backtest_points(user, result)
+                    logger.info(f"[GAMIFICATION] User {user.username} earned {gamification_result['points_awarded']} points. Total: {gamification_result['total_points']}, Level: {gamification_result['level']}")
+                    if gamification_result['new_achievements']:
+                        logger.info(f"[GAMIFICATION] User {user.username} unlocked {len(gamification_result['new_achievements'])} new achievements")
+            except Exception as gamification_error:
+                logger.warning(f"[GAMIFICATION] Failed to award points: {gamification_error}", exc_info=True)
             
             job.result = result
             job.status = 'completed'
@@ -893,7 +902,8 @@ def run_optimization_task(optimization_id):
         
         # Get historical data
         settings = optimization.optimization_settings or {}
-        symbol = settings.get('symbol') or strategy.parsed_strategy_data.get('symbol', 'EURUSD')
+        # Default to XAU/USD (Gold) as it's the primary symbol for this trading system
+        symbol = settings.get('symbol') or strategy.parsed_strategy_data.get('symbol') or 'XAU/USD'
         timeframe_days = settings.get('timeframe_days', 365)
         
         logger.info(f"Fetching historical data: symbol={symbol}, days={timeframe_days}")

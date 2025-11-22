@@ -4,7 +4,7 @@ Lightweight in-memory rate limiting (can be upgraded to Redis later)
 """
 import time
 from collections import defaultdict
-from typing import Dict, Tuple
+from typing import Dict, Tuple, List, Optional
 from django.http import JsonResponse
 from django.utils.deprecation import MiddlewareMixin
 import logging
@@ -98,6 +98,66 @@ class RateLimiter:
             # Remove empty histories
             if not self.requests[identifier]:
                 del self.requests[identifier]
+
+    def get_blocked_snapshot(self, *, limit: Optional[int] = 200):
+        """Return blocked IPs summary with optional limit."""
+        current_time = time.time()
+        active_blocks: List[Dict[str, float]] = []
+        for ip, unblock_time in self.blocked_ips.items():
+            if current_time < unblock_time:
+                remaining_seconds = max(int(unblock_time - current_time), 0)
+                active_blocks.append(
+                    {
+                        'ip': ip,
+                        'blocked_until': unblock_time,
+                        'remaining_seconds': remaining_seconds,
+                    }
+                )
+        active_blocks.sort(key=lambda entry: entry['remaining_seconds'])
+        total = len(active_blocks)
+        if limit is not None:
+            active_blocks = active_blocks[:limit]
+        return active_blocks, total
+
+    def get_recent_activity_snapshot(
+        self,
+        *,
+        window_seconds: int = 300,
+        limit: Optional[int] = 200,
+    ):
+        """Return recent request stats for identifiers within the window."""
+        current_time = time.time()
+        cutoff = current_time - window_seconds
+        stats: List[Dict[str, float]] = []
+
+        for identifier, request_times in self.requests.items():
+            recent_count = 0
+            last_request = None
+            first_request = None
+
+            for timestamp in reversed(request_times):
+                if timestamp <= cutoff:
+                    break
+                recent_count += 1
+                if last_request is None:
+                    last_request = timestamp
+                first_request = timestamp
+
+            if recent_count:
+                stats.append(
+                    {
+                        'ip': identifier,
+                        'requests_count': recent_count,
+                        'last_request': last_request,
+                        'first_request': first_request,
+                    }
+                )
+
+        stats.sort(key=lambda entry: entry['last_request'], reverse=True)
+        total = len(stats)
+        if limit is not None:
+            stats = stats[:limit]
+        return stats, total
 
 
 # Global rate limiter instance

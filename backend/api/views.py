@@ -13,7 +13,7 @@ from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from django.contrib.auth.models import User
 from django.conf import settings
-from ai_module.gemini_client import JSON_ONLY_SYSTEM_PROMPT
+from ai_module.gemini_client import JSON_ONLY_SYSTEM_PROMPT, resolve_ai_provider
 from ai_module.providers import get_registered_providers
 from .permissions import IsAdminOrStaff
 from .api_usage_tracker import get_api_usage_stats
@@ -32,6 +32,15 @@ from core.models import (
     SystemSettings,
 )
 from core.models import Wallet, Transaction, AIRecommendation
+from core.models import UserScore, Achievement, UserAchievement
+from core.gamification import (
+    get_or_create_user_score,
+    award_backtest_points,
+    check_and_award_achievements,
+    get_user_rank,
+    get_leaderboard,
+    initialize_default_achievements
+)
 from .serializers import (
     APIConfigurationSerializer,
     TradingStrategySerializer,
@@ -53,6 +62,9 @@ from .serializers import (
     StrategyListingAccessSerializer,
     SystemSettingsSerializer,
     PublicSystemSettingsSerializer,
+    UserScoreSerializer,
+    AchievementSerializer,
+    UserAchievementSerializer,
 )
 from .data_providers import DataProviderManager
 from .tasks import run_backtest_task, run_demo_trade_task, run_auto_trading
@@ -98,6 +110,44 @@ class SystemSettingsView(APIView):
         serializer.save()
 
         return Response(serializer.data)
+
+
+class ClearAICacheView(APIView):
+    """Endpoint برای پاک کردن کش AI (فقط ادمین)"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        if not (request.user.is_staff or request.user.is_superuser):
+            return Response({'detail': 'فقط ادمین می‌تواند کش را پاک کند'}, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            from pathlib import Path
+            from ai_module.gemini_client import _CACHE_DIR
+            
+            cache_dir = _CACHE_DIR
+            deleted_count = 0
+            
+            if cache_dir.exists():
+                for cache_file in cache_dir.rglob("*.json"):
+                    try:
+                        cache_file.unlink()
+                        deleted_count += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to delete cache file {cache_file}: {e}")
+            
+            logger.info(f"Admin {request.user.username} cleared {deleted_count} AI cache files")
+            return Response({
+                'status': 'success',
+                'message': f'{deleted_count} فایل کش پاک شد',
+                'deleted_count': deleted_count
+            })
+        except Exception as e:
+            logger.error(f"Error clearing AI cache: {e}")
+            return Response({
+                'status': 'error',
+                'message': f'خطا در پاک کردن کش: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class APIConfigurationViewSet(viewsets.ModelViewSet):
     """ViewSet for managing API configurations"""
@@ -197,18 +247,48 @@ class APIConfigurationViewSet(viewsets.ModelViewSet):
     
     def perform_create(self, serializer):
         provider = serializer.validated_data.get('provider')
-        user = self.request.user if self.request.user.is_authenticated else None
-        owner = None
-        if provider not in self.BACKEND_PROVIDERS and user and user.is_authenticated:
-            owner = user
+        request_user = self.request.user if self.request.user.is_authenticated else None
+        assign_system_owner = self._should_assign_system_owner(
+            provider=provider,
+            request_user=request_user,
+            current_owner=None,
+        )
+        owner = None if assign_system_owner else request_user
         serializer.save(user=owner)
 
     def perform_update(self, serializer):
         provider = serializer.validated_data.get('provider', serializer.instance.provider)
-        owner = serializer.instance.user
-        if provider in self.BACKEND_PROVIDERS:
-            owner = None
+        request_user = self.request.user if self.request.user.is_authenticated else None
+        current_owner = serializer.instance.user
+        assign_system_owner = self._should_assign_system_owner(
+            provider=provider,
+            request_user=request_user,
+            current_owner=current_owner,
+        )
+        owner = None if assign_system_owner else current_owner
         serializer.save(user=owner)
+
+    def _should_assign_system_owner(self, provider, request_user, current_owner):
+        """
+        Determine whether the API key should be saved as a system-wide key (user=None).
+        Admin-created keys for AI providers should be system-wide unless the admin explicitly
+        edits another user's key. Backend providers are always system-owned.
+        """
+        if provider in self.BACKEND_PROVIDERS:
+            return True
+
+        if not request_user or not request_user.is_authenticated:
+            return False
+
+        if not (request_user.is_staff or request_user.is_superuser):
+            return False
+
+        # Admin-created keys (no current owner) should be system-wide.
+        if current_owner is None:
+            return True
+
+        # Allow admins to keep their own personal keys if they edit someone else's.
+        return current_owner.id == request_user.id if hasattr(current_owner, "id") else False
     
     @action(detail=True, methods=['post'])
     def test(self, request, pk=None):
@@ -514,7 +594,7 @@ class APIConfigurationViewSet(viewsets.ModelViewSet):
 
         # Original code for data providers
         try:
-            data_manager = DataProviderManager()
+            data_manager = DataProviderManager(user=request.user)
             # Override provider key with the key stored in DB for this config
             if api_config.provider in data_manager.providers:
                 provider_instance = data_manager.providers[api_config.provider]
@@ -541,7 +621,7 @@ class APIConfigurationViewSet(viewsets.ModelViewSet):
     def available_providers(self, request):
         """Get list of available data providers"""
         try:
-            data_manager = DataProviderManager()
+            data_manager = DataProviderManager(user=request.user)
             providers = data_manager.get_available_providers()
             
             return Response({
@@ -718,9 +798,10 @@ class BacktestPrecheckView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             parsed = parse_strategy_file(strategy.strategy_file.path, user=request.user)
-            symbol = parsed.get('symbol', 'EUR/USD')
+            # Default to XAU/USD (Gold) as it's the primary symbol for this trading system
+            symbol = parsed.get('symbol') or 'XAU/USD'
 
-            data_manager = DataProviderManager()
+            data_manager = DataProviderManager(user=request.user)
             available = data_manager.get_available_providers()
             
             # If no providers found, API key should be set via environment variable or APIConfiguration
@@ -846,6 +927,7 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
     def process(self, request, pk=None):
         """Process strategy file to extract and parse strategy data"""
         from django.utils import timezone
+        from django.core.cache import cache
         from ai_module.nlp_parser import parse_strategy_file, extract_text_from_file
         from ai_module.gemini_client import analyze_strategy_with_gemini
         
@@ -865,6 +947,14 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             strategy.processing_error = ''
             strategy.save()
             
+            # Initialize progress tracking
+            progress_key = f'strategy_process_progress_{strategy.id}'
+            cache.set(progress_key, {
+                'progress': 0,
+                'stage': 'شروع پردازش',
+                'message': 'در حال آماده‌سازی...'
+            }, 600)  # 10 minutes TTL
+            
             # Parse strategy file
             strategy_file_path = strategy.strategy_file.path
             
@@ -880,12 +970,31 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                     'error': 'FileNotFoundError'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
+            logger.info(f"[STRATEGY PROCESS] Starting parse_strategy_file for strategy {strategy.id}, file: {strategy_file_path}")
+            logger.info(f"[STRATEGY PROCESS] User: {request.user.username if request.user.is_authenticated else 'Anonymous'}")
+            
+            # Update progress: Parsing stage
+            cache.set(progress_key, {
+                'progress': 20,
+                'stage': 'تجزیه فایل',
+                'message': 'در حال تجزیه فایل استراتژی...'
+            }, 600)
+            
             try:
                 parsed_data = parse_strategy_file(strategy_file_path, user=request.user)
+                logger.debug(f"[STRATEGY PROCESS] parse_strategy_file completed for strategy {strategy.id}")
+                logger.debug(f"[STRATEGY PROCESS] Parsing result: method={parsed_data.get('parsing_method')}, has_error={'error' in parsed_data}")
+                
+                # Update progress: Parsing completed
+                cache.set(progress_key, {
+                    'progress': 40,
+                    'stage': 'تجزیه کامل شد',
+                    'message': 'فایل استراتژی با موفقیت تجزیه شد'
+                }, 600)
             except Exception as parse_error:
                 import traceback
                 error_trace = traceback.format_exc()
-                logger.error(f"Error in parse_strategy_file for {strategy_file_path}: {str(parse_error)}\n{error_trace}")
+                logger.error(f"[STRATEGY PROCESS] Error in parse_strategy_file for {strategy_file_path}: {str(parse_error)}\n{error_trace}")
                 strategy.processing_status = 'failed'
                 strategy.processing_error = f'Parse error: {str(parse_error)}'
                 strategy.save()
@@ -898,14 +1007,66 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             
             # Check if parsing was successful
             if 'error' in parsed_data and parsed_data.get('error'):
+                error_message = parsed_data['error']
+                
+                # Check if this is a Rate Limit error
+                is_rate_limit = False
+                status_code = parsed_data.get('status_code')
+                
+                # Check status code from provider attempts
+                if status_code == 429:
+                    is_rate_limit = True
+                
+                # Check error message for rate limit
+                error_lower = error_message.lower()
+                if 'rate limit' in error_lower or 'rate_limit' in error_lower or '429' in str(error_message):
+                    is_rate_limit = True
+                
+                # Check provider attempts
+                provider_attempts = parsed_data.get('provider_attempts', [])
+                if provider_attempts and len(provider_attempts) > 0:
+                    attempt_status_code = provider_attempts[0].get('status_code')
+                    if attempt_status_code == 429:
+                        is_rate_limit = True
+                
+                # Update progress: Error
+                from django.core.cache import cache
+                progress_key = f'strategy_process_progress_{strategy.id}'
+                cache.set(progress_key, {
+                    'progress': 0,
+                    'stage': 'خطا',
+                    'message': f'خطا در تجزیه: {error_message[:100]}'
+                }, 600)
+                
                 strategy.processing_status = 'failed'
-                strategy.processing_error = parsed_data['error']
+                strategy.processing_error = error_message
                 strategy.save()
-                return Response({
-                    'status': 'failed',
-                    'message': f'Error parsing strategy: {parsed_data["error"]}',
-                    'parsed_data': parsed_data
-                }, status=status.HTTP_400_BAD_REQUEST)
+                
+                # Return appropriate response based on error type
+                if is_rate_limit:
+                    # Log in English only - avoid [FA] spam in console
+                    logger.warning(
+                        f"Rate Limit detected in parsing for Strategy {strategy.id}: status_code={status_code}"
+                    )
+                    return Response({
+                        'status': 'error',
+                        'message': error_message,
+                        'error': 'rate_limit',
+                        'error_type': 'RateLimitError',
+                        'strategy': {
+                            'id': strategy.id,
+                            'name': strategy.name,
+                            'processing_status': 'failed',
+                            'processing_error': error_message
+                        },
+                        'suggestion': 'لطفاً چند دقیقه صبر کنید و دوباره تلاش کنید. یا از ارائه‌دهنده AI دیگری استفاده کنید.'
+                    }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+                else:
+                    return Response({
+                        'status': 'failed',
+                        'message': f'Error parsing strategy: {error_message}',
+                        'parsed_data': parsed_data
+                    }, status=status.HTTP_400_BAD_REQUEST)
             
             # Generate strategy analysis - try Gemini first, fallback to basic analysis
             analysis = None
@@ -932,7 +1093,7 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             # دریافت لیست ارائه‌دهندگان داده در دسترس
             try:
                 from api.data_providers import DataProviderManager
-                data_manager = DataProviderManager()
+                data_manager = DataProviderManager(user=request.user)
                 available_providers = data_manager.get_available_providers()
                 analysis_sources_info['data_sources']['available_providers'] = available_providers
                 analysis_sources_info['data_sources']['providers_count'] = len(available_providers)
@@ -942,108 +1103,169 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                 analysis_sources_info['data_sources']['available_providers'] = []
                 analysis_sources_info['data_sources']['providers_error'] = str(provider_error)
             
-            try:
-                from ai_module.gemini_client import generate_basic_analysis, analyze_strategy_with_gemini
-                from ai_module.nlp_parser import extract_text_from_file
-                
-                logger.info(f"Starting analysis generation for strategy {strategy.id}")
-                raw_text = extract_text_from_file(strategy_file_path)
-                logger.info(f"Extracted {len(raw_text)} characters for analysis")
-                analysis_sources_info['text_length'] = len(raw_text)
-                
-                # اضافه کردن اطلاعات مربوط به متن استخراج شده
-                analysis_sources_info['data_sources']['source_file_length'] = len(raw_text)
-                
-                # Get user from request for API logging
-                user = None
-                if request.user and request.user.is_authenticated:
-                    user = request.user
-                
-                # Try AI analysis first
-                try:
-                    analysis_result = analyze_strategy_with_gemini(parsed_data, raw_text, user=user)
-                    ai_status = analysis_result.get('ai_status')
-                    provider_attempts = analysis_result.get('provider_attempts')
-                    analysis_sources_info['ai_status'] = ai_status
-                    if provider_attempts:
-                        analysis_sources_info['ai_attempts'] = provider_attempts
-                    if analysis_result.get('ai_provider'):
-                        analysis_sources_info['ai_provider'] = analysis_result.get('ai_provider')
-                    if analysis_result.get('provider'):
-                        analysis_sources_info['ai_provider_raw'] = analysis_result.get('provider')
-                    if analysis_result.get('error'):
-                        analysis_sources_info['ai_error'] = analysis_result.get('error')
-                    if analysis_result.get('message'):
-                        analysis_sources_info['ai_message'] = analysis_result.get('message')
+            from ai_module.gemini_client import analyze_strategy_with_gemini
+            from ai_module.nlp_parser import extract_text_from_file
 
-                    if ai_status == 'ok':
-                        analysis = analysis_result
-                        logger.info(f"Generated AI strategy analysis for strategy {strategy.id}")
-                        provider_name = (
-                            analysis_result.get('ai_provider')
-                            or analysis_result.get('provider')
-                            or 'ai'
-                        )
-                        analysis_sources_info['analysis_method'] = f'{provider_name}_ai'
-                        analysis_sources_info['ai_model'] = provider_name
-                        analysis_sources_info.pop('ai_fallback_reason', None)
-                    else:
-                        message = analysis_result.get(
-                            'message',
-                            "AI analysis unavailable. لطفاً کلید یکی از ارائه‌دهندگان هوش مصنوعی را در تنظیمات وارد کنید."
-                        )
-                        logger.info(f"AI analysis unavailable ({ai_status}): {message}")
-                        analysis_sources_info['analysis_method'] = 'ai_unavailable'
-                        analysis_sources_info['ai_model'] = None
-                        analysis_sources_info.setdefault('ai_message', message)
-                        analysis = None
-                except Exception as ai_error:
-                    logger.warning(f"AI analysis failed: {str(ai_error)}, using basic analysis")
-                    analysis = None
-                    analysis_sources_info['ai_status'] = 'error'
-                    analysis_sources_info['ai_error'] = str(ai_error)
+            # Update progress: Analysis stage
+            cache.set(progress_key, {
+                'progress': 50,
+                'stage': 'تحلیل هوش مصنوعی',
+                'message': 'در حال تحلیل استراتژی با هوش مصنوعی...'
+            }, 600)
+            
+            logger.info(f"Starting analysis generation for strategy {strategy.id}")
+            raw_text = extract_text_from_file(strategy_file_path)
+            logger.info(f"Extracted {len(raw_text)} characters for analysis")
+            analysis_sources_info['text_length'] = len(raw_text)
+            analysis_sources_info['data_sources']['source_file_length'] = len(raw_text)
+
+            user = request.user if request.user and request.user.is_authenticated else None
+            analysis_result = analyze_strategy_with_gemini(parsed_data, raw_text, user=user)
+            
+            # Update progress: Analysis completed
+            cache.set(progress_key, {
+                'progress': 80,
+                'stage': 'تحلیل کامل شد',
+                'message': 'تحلیل هوش مصنوعی با موفقیت انجام شد'
+            }, 600)
+
+            ai_status = analysis_result.get('ai_status')
+            analysis_sources_info['ai_status'] = ai_status
+            provider_attempts = analysis_result.get('provider_attempts')
+            if provider_attempts:
+                analysis_sources_info['ai_attempts'] = provider_attempts
+
+            resolved_ai_provider = resolve_ai_provider(analysis_result)
+            if resolved_ai_provider:
+                analysis_sources_info['ai_provider'] = resolved_ai_provider
+            if analysis_result.get('provider'):
+                analysis_sources_info['ai_provider_raw'] = analysis_result.get('provider')
+            if analysis_result.get('error'):
+                analysis_sources_info['ai_error'] = analysis_result.get('error')
+            if analysis_result.get('message'):
+                analysis_sources_info['ai_message'] = analysis_result.get('message')
+
+            if ai_status != 'ok':
+                message = analysis_result.get(
+                    'message',
+                    "AI analysis unavailable. لطفاً کلید ChatGPT را بررسی کنید."
+                )
                 
-                # If AI analysis is not available or failed, use basic analysis
-                if not analysis:
-                    analysis = generate_basic_analysis(parsed_data)
-                    logger.info(f"Generated basic strategy analysis for strategy {strategy.id}")
-                    analysis_sources_info['analysis_method'] = 'basic_analysis'
-                    analysis_sources_info['ai_model'] = None
-                    analysis_sources_info['ai_provider'] = None
-                    fallback_reason = (
-                        analysis_sources_info.get('ai_message')
-                        or analysis_sources_info.get('ai_error')
-                        or "AI provider not available"
-                    )
-                    analysis_sources_info['ai_fallback_reason'] = fallback_reason
-                    if not analysis_sources_info.get('ai_status'):
-                        analysis_sources_info['ai_status'] = 'unavailable'
+                # Diagnostic logging for Rate Limit errors
+                provider_attempts = analysis_result.get('provider_attempts', [])
+                status_code_from_api = None
+                raw_error_from_api = None
                 
-                # Always add analysis (either AI or basic)
-                if analysis:
-                    parsed_data['analysis'] = analysis
-                    logger.info(f"Analysis added to parsed_data for strategy {strategy.id}")
+                # Extract actual status code and error from API response
+                if provider_attempts:
+                    for attempt in provider_attempts:
+                        if isinstance(attempt, dict):
+                            status_code_from_api = attempt.get('status_code')
+                            raw_error_from_api = attempt.get('error')
+                        elif hasattr(attempt, 'status_code'):
+                            status_code_from_api = attempt.status_code
+                            raw_error_from_api = attempt.error
+                        if status_code_from_api:
+                            break
+                
+                # Log detailed diagnostic information
+                logger.error("=" * 80)
+                logger.error(f"❌ AI Analysis Failed for Strategy {strategy.id}")
+                logger.error(f"Message: {message}")
+                logger.error(f"Status Code from API: {status_code_from_api}")
+                logger.error(f"Raw Error from API: {raw_error_from_api}")
+                logger.error(f"Provider Attempts: {provider_attempts}")
+                logger.error(f"Analysis Result Keys: {list(analysis_result.keys())}")
+                logger.error(f"Status Code from result: {analysis_result.get('status_code')}")
+                logger.error("=" * 80)
+                
+                # Handle Rate Limit errors more gracefully
+                # Check multiple sources to determine if it's really a rate limit error
+                is_rate_limit = False
+                rate_limit_sources = []
+                
+                if status_code_from_api == 429:
+                    is_rate_limit = True
+                    rate_limit_sources.append(f"API status_code={status_code_from_api}")
+                
+                if analysis_result.get('status_code') == 429:
+                    is_rate_limit = True
+                    rate_limit_sources.append(f"result.status_code=429")
+                
+                message_lower = message.lower()
+                if 'rate limit' in message_lower or 'rate_limit' in message_lower or '429' in str(message):
+                    is_rate_limit = True
+                    rate_limit_sources.append(f"message contains rate limit")
+                
+                if raw_error_from_api and ('rate limit' in str(raw_error_from_api).lower() or '429' in str(raw_error_from_api)):
+                    is_rate_limit = True
+                    rate_limit_sources.append(f"raw_error contains rate limit")
+                
+                logger.warning(
+                    f"Rate Limit Detection for Strategy {strategy.id}: "
+                    f"is_rate_limit={is_rate_limit}, sources={rate_limit_sources}, "
+                    f"api_status_code={status_code_from_api}, "
+                    f"message='{message[:100]}'"
+                )
+                
+                # Update progress: Error
+                from django.core.cache import cache
+                progress_key = f'strategy_process_progress_{strategy.id}'
+                cache.set(progress_key, {
+                    'progress': 0,
+                    'stage': 'خطا',
+                    'message': f'خطا در تحلیل: {message[:100]}'
+                }, 600)
+                
+                # Save parsed data without analysis (basic processing)
+                strategy.processing_status = 'failed'
+                strategy.processing_error = message
+                strategy.parsed_strategy_data = parsed_data
+                strategy.analysis_sources = analysis_sources_info
+                strategy.save()
+                
+                logger.warning(
+                    f"Strategy {strategy.id} processing failed due to AI analysis error: {message}"
+                )
+                
+                # Return appropriate response based on error type
+                if is_rate_limit:
+                    return Response({
+                        'status': 'error',
+                        'message': message,
+                        'error': 'rate_limit',
+                        'error_type': 'RateLimitError',
+                        'strategy': {
+                            'id': strategy.id,
+                            'name': strategy.name,
+                            'processing_status': 'failed',
+                            'processing_error': message
+                        },
+                        'analysis_sources': analysis_sources_info,
+                        'suggestion': 'لطفاً چند دقیقه صبر کنید و دوباره تلاش کنید. یا از ارائه‌دهنده AI دیگری استفاده کنید.'
+                    }, status=status.HTTP_429_TOO_MANY_REQUESTS)
                 else:
-                    logger.warning(f"No analysis generated for strategy {strategy.id}")
-                    
-            except Exception as e:
-                import traceback
-                error_trace = traceback.format_exc()
-                logger.error(f"Error generating strategy analysis: {str(e)}\n{error_trace}")
-                # Try basic analysis as fallback
-                try:
-                    from ai_module.gemini_client import generate_basic_analysis
-                    analysis = generate_basic_analysis(parsed_data)
-                    parsed_data['analysis'] = analysis
-                    logger.info(f"Used basic analysis fallback after error for strategy {strategy.id}")
-                except Exception as e2:
-                    import traceback
-                    error_trace2 = traceback.format_exc()
-                    logger.error(f"Even basic analysis failed: {str(e2)}\n{error_trace2}")
-                    # Don't fail the whole process if analysis fails completely
-                    # Just continue without analysis
-                    analysis_sources_info['analysis_error'] = str(e2)
-                    analysis_sources_info['analysis_method'] = 'failed'
+                    return Response({
+                        'status': 'error',
+                        'message': message,
+                        'error': 'ai_analysis_failed',
+                        'error_type': 'AIAnalysisError',
+                        'strategy': {
+                            'id': strategy.id,
+                            'name': strategy.name,
+                            'processing_status': 'failed',
+                            'processing_error': message
+                        },
+                        'analysis_sources': analysis_sources_info
+                    }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+            analysis = analysis_result
+            provider_name = resolved_ai_provider or 'openai'
+            analysis_sources_info['analysis_method'] = f'{provider_name}_ai'
+            analysis_sources_info['ai_model'] = provider_name
+            analysis_sources_info.pop('ai_fallback_reason', None)
+            parsed_data['analysis'] = analysis
+            logger.info(f"AI analysis added to parsed_data for strategy {strategy.id}")
             
             # Run genetic optimization with ChatGPT-backed analysis and backtest on gold
             optimization_summary = {}
@@ -1053,15 +1275,18 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                 from ai_module.backtest_engine import BacktestEngine
                 from api.data_providers import DataProviderManager
 
-                data_manager = DataProviderManager()
+                data_manager = DataProviderManager(user=request.user)
                 default_symbol = strategy_symbol or "XAU/USD"
                 timeframe_days = 365
+                # استفاده از تایم‌فریم دقیق از استراتژی پردازش شده
+                strategy_timeframe = parsed_data.get('timeframe')
                 historical_data, historical_provider = data_manager.get_historical_data(
                     default_symbol,
                     timeframe_days=timeframe_days,
                     include_latest=True,
                     user=request.user if request.user.is_authenticated else None,
                     return_provider=True,
+                    strategy_timeframe=strategy_timeframe,  # تایم‌فریم دقیق از استراتژی
                 )
 
                 if historical_data is not None and not historical_data.empty:
@@ -1169,11 +1394,12 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             # استخراج اطلاعات توکن از تحلیل AI
             token_info = {}
             if analysis and isinstance(analysis, dict):
+                provider_for_tokens = resolve_ai_provider(analysis)
                 tokens_used = analysis.get('tokens_used')
                 if tokens_used:
                     token_info = {
                         'total_tokens': tokens_used,
-                        'provider': analysis.get('ai_provider') or analysis.get('provider') or 'ai',
+                        'provider': provider_for_tokens,
                     }
                 # همچنین بررسی metadata در analysis_sources_info
                 if analysis_sources_info.get('ai_provider'):
@@ -1217,6 +1443,13 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                 except Exception as log_error:
                     logger.warning(f"Failed to log user activity: {log_error}")
             
+            # Update progress: Finalizing
+            cache.set(progress_key, {
+                'progress': 90,
+                'stage': 'ذخیره نتایج',
+                'message': 'در حال ذخیره نتایج پردازش...'
+            }, 600)
+            
             # Save parsed data (with or without analysis)
             process_completed_at = timezone.now()
             duration_seconds = max(time.perf_counter() - process_started_perf, 0.0)
@@ -1230,6 +1463,13 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             strategy.processing_error = ''
             strategy.analysis_sources = analysis_sources_info
             strategy.save()
+            
+            # Update progress: Completed
+            cache.set(progress_key, {
+                'progress': 100,
+                'stage': 'پردازش کامل شد',
+                'message': 'پردازش استراتژی با موفقیت انجام شد'
+            }, 600)
             
             logger.info(f"Strategy {strategy.id} processed successfully with confidence {parsed_data.get('confidence_score', 0):.2f}")
             
@@ -1247,8 +1487,18 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             
         except Exception as e:
             import traceback
+            from django.core.cache import cache
             error_trace = traceback.format_exc()
             logger.error(f"Error processing strategy {strategy.id}: {str(e)}\n{error_trace}")
+            
+            # Update progress: Error
+            progress_key = f'strategy_process_progress_{strategy.id}'
+            cache.set(progress_key, {
+                'progress': 0,
+                'stage': 'خطا',
+                'message': f'خطا در پردازش: {str(e)[:100]}'
+            }, 600)
+            
             strategy.processing_status = 'failed'
             strategy.processing_error = f"{str(e)}\n{error_trace[:500]}"  # Limit error length
             strategy.save()
@@ -1258,6 +1508,33 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                 'error': str(e),
                 'error_type': type(e).__name__
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=True, methods=['get'])
+    def progress(self, request, pk=None):
+        """Get processing progress for a strategy"""
+        from django.core.cache import cache
+        
+        strategy = self.get_object()
+        progress_key = f'strategy_process_progress_{strategy.id}'
+        progress_data = cache.get(progress_key)
+        
+        if progress_data:
+            return Response({
+                'status': 'processing',
+                'progress': progress_data.get('progress', 0),
+                'stage': progress_data.get('stage', ''),
+                'message': progress_data.get('message', ''),
+                'processing_status': strategy.processing_status
+            })
+        else:
+            # No progress data, return current status
+            return Response({
+                'status': strategy.processing_status,
+                'progress': 100 if strategy.processing_status == 'processed' else 0,
+                'stage': 'پردازش نشده' if strategy.processing_status == 'not_processed' else 'نامشخص',
+                'message': 'اطلاعات پیشرفت در دسترس نیست',
+                'processing_status': strategy.processing_status
+            })
     
     @action(detail=True, methods=['post'])
     def generate_questions(self, request, pk=None):
@@ -1877,7 +2154,13 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        queryset = Job.objects.all()
+        queryset = Job.objects.select_related(
+            'strategy',
+            'result',
+            'marketplace_access',
+            'marketplace_access__listing',
+            'marketplace_access__listing__owner',
+        )
         if not (user.is_staff or user.is_superuser):
             queryset = queryset.filter(user=user)
         return queryset
@@ -1956,28 +2239,80 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
         if marketplace_access and job_type == 'backtest':
             marketplace_access.increment_backtests(save=True)
         
-        # Run async task (placeholder - requires Redis/Celery)
-        # if job_type == 'backtest':
-        #     run_backtest_task.delay(job.id)
-        # else:
-        #     run_demo_trade_task.delay(job.id)
+        # Helper function to check if Celery is available
+        def is_celery_available():
+            """Check if Celery/Redis is available for async task execution"""
+            try:
+                from config.celery import app as celery_app
+                from celery import current_app
+                
+                # Check if task_always_eager is False (meaning async is enabled)
+                if current_app.conf.task_always_eager:
+                    return False
+                
+                # Try to check Redis connection by inspecting broker connection
+                broker_url = celery_app.conf.broker_url
+                if not broker_url:
+                    return False
+                
+                # Try to ping the broker (this will fail if Redis is not available)
+                try:
+                    with celery_app.connection() as conn:
+                        conn.ensure_connection(max_retries=1)
+                    return True
+                except Exception:
+                    return False
+            except Exception as e:
+                logger.warning(f"Celery availability check failed: {e}")
+                return False
         
-        # For now, run sync as fallback
-        # Note: We call the task synchronously, but we need to refresh the job after execution
-        # to get the updated status and result
-        try:
-            if job_type == 'backtest':
-                logger.info(f"Starting synchronous backtest for job {job.id}, strategy {strategy_id}, timeframe {timeframe_days} days")
-                run_backtest_task(job.id, timeframe_days=timeframe_days, symbol_override=symbol_override, initial_capital=initial_capital, selected_indicators=selected_indicators)
-            else:
-                run_demo_trade_task(job.id)
+        # Try to run task asynchronously if Celery is available
+        celery_available = is_celery_available()
+        
+        if celery_available:
+            # Run task asynchronously using Celery
+            try:
+                if job_type == 'backtest':
+                    logger.info(f"Starting async backtest task for job {job.id}, strategy {strategy_id}, timeframe {timeframe_days} days")
+                    run_backtest_task.delay(
+                        job.id,
+                        timeframe_days=timeframe_days,
+                        symbol_override=symbol_override,
+                        initial_capital=initial_capital,
+                        selected_indicators=selected_indicators
+                    )
+                else:
+                    logger.info(f"Starting async demo trade task for job {job.id}")
+                    run_demo_trade_task.delay(job.id)
+                
+                logger.info(f"Job {job.id} queued successfully. Status: {job.status}")
+                # Return immediately - task will run in background
+                return Response(JobSerializer(job).data, status=status.HTTP_201_CREATED)
+                
+            except Exception as e:
+                logger.warning(f"Failed to queue async task for job {job.id}: {e}. Falling back to synchronous execution.")
+                celery_available = False  # Fallback to sync
+        
+        # Fallback: Run synchronously if Celery is not available
+        if not celery_available:
+            logger.warning(
+                f"Celery/Redis is not available. Running {job_type} task synchronously for job {job.id}. "
+                "This may cause timeout for long-running tasks. Please start Redis and Celery worker for better performance."
+            )
             
-            # Refresh job from database to get updated status and result
-            job.refresh_from_db()
-            logger.info(f"Backtest task completed for job {job.id}, status: {job.status}, result_id: {job.result_id}")
-        except Exception as e:
-            logger.error(f"Error executing backtest task for job {job.id}: {e}", exc_info=True)
-            job.refresh_from_db()
+            try:
+                if job_type == 'backtest':
+                    logger.info(f"Starting synchronous backtest for job {job.id}, strategy {strategy_id}, timeframe {timeframe_days} days")
+                    run_backtest_task(job.id, timeframe_days=timeframe_days, symbol_override=symbol_override, initial_capital=initial_capital, selected_indicators=selected_indicators)
+                else:
+                    run_demo_trade_task(job.id)
+                
+                # Refresh job from database to get updated status and result
+                job.refresh_from_db()
+                logger.info(f"Backtest task completed synchronously for job {job.id}, status: {job.status}, result_id: {job.result_id}")
+            except Exception as e:
+                logger.error(f"Error executing {job_type} task synchronously for job {job.id}: {e}", exc_info=True)
+                job.refresh_from_db()
         
         return Response(JobSerializer(job).data, status=status.HTTP_201_CREATED)
     
@@ -2001,7 +2336,11 @@ class ResultViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = Result.objects.all()
+        qs = Result.objects.select_related(
+            'job',
+            'job__strategy',
+            'job__user',
+        )
         if not (user.is_staff or user.is_superuser):
             qs = qs.filter(job__user=user)
         job_id = self.request.query_params.get('job')
@@ -2038,7 +2377,7 @@ class LiveTradeViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        queryset = LiveTrade.objects.all()
+        queryset = LiveTrade.objects.select_related('strategy', 'strategy__user')
         if not (user.is_staff or user.is_superuser):
             queryset = queryset.filter(strategy__user=user)
         return queryset
@@ -2304,7 +2643,7 @@ class AutoTradingSettingsViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        qs = AutoTradingSettings.objects.all()
+        qs = AutoTradingSettings.objects.select_related('strategy', 'strategy__user')
         if not (user.is_staff or user.is_superuser):
             qs = qs.filter(strategy__user=user)
         strategy_id = self.request.query_params.get('strategy')
@@ -3177,10 +3516,11 @@ class StrategyOptimizationViewSet(viewsets.ModelViewSet):
         # Calculate original score
         try:
             # Get historical data
-            symbol = data.get('symbol') or strategy.parsed_strategy_data.get('symbol', 'EURUSD')
+            # Default to XAU/USD (Gold) as it's the primary symbol for this trading system
+            symbol = data.get('symbol') or strategy.parsed_strategy_data.get('symbol') or 'XAU/USD'
             timeframe_days = data.get('timeframe_days', 365)
             
-            data_provider = DataProviderManager()
+            data_provider = DataProviderManager(user=request.user)
             historical_data = data_provider.get_historical_data(
                 symbol=symbol,
                 timeframe_days=timeframe_days
@@ -3428,4 +3768,66 @@ class UserAPIUsageStatsView(APIView):
         )
         
         return Response(stats)
+
+
+class UserScoreViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for user scores"""
+    serializer_class = UserScoreSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            return UserScore.objects.all()
+        return UserScore.objects.filter(user=user)
+    
+    @action(detail=False, methods=['get'])
+    def me(self, request):
+        """Get current user's score"""
+        score = get_or_create_user_score(request.user)
+        serializer = self.get_serializer(score)
+        rank = get_user_rank(request.user)
+        data = serializer.data
+        data['rank'] = rank
+        return Response(data)
+    
+    @action(detail=False, methods=['get'])
+    def leaderboard(self, request):
+        """Get leaderboard"""
+        limit = int(request.query_params.get('limit', 10))
+        leaderboard = get_leaderboard(limit)
+        return Response(leaderboard)
+
+
+class AchievementViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for achievements"""
+    serializer_class = AchievementSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        return Achievement.objects.filter(is_active=True)
+    
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context['request'] = self.request
+        return context
+
+
+class UserAchievementViewSet(viewsets.ReadOnlyModelViewSet):
+    """ViewSet for user achievements"""
+    serializer_class = UserAchievementSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            return UserAchievement.objects.all()
+        return UserAchievement.objects.filter(user=user)
+    
+    @action(detail=False, methods=['get'])
+    def my_achievements(self, request):
+        """Get current user's achievements"""
+        achievements = UserAchievement.objects.filter(user=request.user).select_related('achievement')
+        serializer = self.get_serializer(achievements, many=True)
+        return Response(serializer.data)
 

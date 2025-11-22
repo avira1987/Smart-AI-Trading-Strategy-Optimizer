@@ -4,8 +4,18 @@ import Strategies from '../components/Strategies'
 import Jobs from '../components/Jobs'
 import { useToast } from '../components/ToastProvider'
 import { useAuth } from '../context/AuthContext'
-import { getStrategies, getJobs, getWalletBalance } from '../api/client'
+import { getStrategies, getJobs, getWalletBalance, getResults } from '../api/client'
 import { useFeatureFlags } from '../context/FeatureFlagsContext'
+
+function normalizeArrayResponse<T = any>(data: any): T[] {
+  if (!data) return []
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.results)) return data.results
+  if (Array.isArray(data?.data)) return data.data
+  if (Array.isArray(data?.data?.results)) return data.data.results
+  if (Array.isArray(data?.results?.data)) return data.results.data
+  return []
+}
 
 export default function Dashboard() {
   const [showStrategyModal, setShowStrategyModal] = useState(false)
@@ -33,10 +43,11 @@ export default function Dashboard() {
   const loadStats = useCallback(async () => {
     try {
       setStatsLoading(true)
-      const [walletRes, strategiesRes, jobsRes] = await Promise.allSettled([
+      const [walletRes, strategiesRes, jobsRes, resultsRes] = await Promise.allSettled([
         getWalletBalance(),
         getStrategies(),
-        getJobs()
+        getJobs(),
+        getResults(),
       ])
 
       const newStats = {
@@ -59,12 +70,29 @@ export default function Dashboard() {
         newStats.strategiesCount = strategiesData.length
       }
 
+      // Results count (completed tests)
+      if (resultsRes.status === 'fulfilled') {
+        const resultsData = normalizeArrayResponse(resultsRes.value.data)
+        newStats.recentJobsCount = resultsData.length
+      }
+
       // Jobs count
       if (jobsRes.status === 'fulfilled') {
         const jobsData = Array.isArray(jobsRes.value.data)
           ? jobsRes.value.data
           : jobsRes.value.data?.results || []
-        newStats.recentJobsCount = jobsData.length
+
+        if (newStats.recentJobsCount === 0) {
+          const seenResults = new Set<number>()
+          for (const job of jobsData) {
+            const resultId = job?.result?.id
+            if (typeof resultId === 'number' && !seenResults.has(resultId)) {
+              seenResults.add(resultId)
+            }
+          }
+          newStats.recentJobsCount = seenResults.size
+        }
+
         newStats.activeJobsCount = jobsData.filter((job: any) => 
           job.status === 'running' || job.status === 'pending'
         ).length

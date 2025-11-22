@@ -48,20 +48,36 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <ToastContext.Provider value={value}>
       {children}
       {/* Toast Container */}
-      <div className="fixed top-4 right-4 z-50 space-y-2">
+      <div className="fixed top-4 right-4 z-50 space-y-2 direction-rtl" style={{ direction: 'rtl' }}>
         {toasts.map((t) => (
           <div
             key={t.id}
             className={
-              `px-4 py-2 rounded shadow-lg text-white transition-opacity ` +
+              `px-4 py-3 rounded-lg shadow-lg text-white transition-all duration-300 max-w-md direction-rtl text-right ` +
               (t.type === 'success' ? 'bg-green-600' : '') +
               (t.type === 'error' ? 'bg-red-600' : '') +
               (t.type === 'warning' ? 'bg-yellow-600' : '') +
               (t.type === 'info' ? 'bg-blue-600' : '')
             }
-            style={{ direction: 'rtl', textAlign: 'right', unicodeBidi: 'plaintext' }}
+            style={{ 
+              direction: 'rtl', 
+              textAlign: 'right',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontSize: '14px',
+              lineHeight: '1.6'
+            }}
           >
-            {t.message}
+            {t.message.split('\n').map((line, index, array) => (
+              <div 
+                key={index} 
+                className="direction-rtl text-right"
+                style={{ direction: 'rtl', textAlign: 'right' }}
+              >
+                {line}
+                {index < array.length - 1 && <br />}
+              </div>
+            ))}
           </div>
         ))}
       </div>

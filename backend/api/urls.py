@@ -19,6 +19,10 @@ from .views import (
     APIUsageStatsView,
     UserAPIUsageStatsView,
     SystemSettingsView,
+    ClearAICacheView,
+    UserScoreViewSet,
+    AchievementViewSet,
+    UserAchievementViewSet,
 )
 from .auth_views import SendOTPView, VerifyOTPView, check_auth, logout, get_csrf_token, check_profile_completion, update_profile, check_ip_location, get_user_activity_logs
 from .captcha_views import GetCaptchaView
@@ -45,6 +49,9 @@ router.register(r'ai-recommendations', AIRecommendationViewSet, basename='ai-rec
 router.register(r'payments', PaymentViewSet, basename='payment')
 router.register(r'strategy-optimizations', StrategyOptimizationViewSet, basename='strategy-optimization')
 router.register(r'gold-access/requests', GoldAPIAccessRequestViewSet, basename='gold-access-request')
+router.register(r'gamification/scores', UserScoreViewSet, basename='user-score')
+router.register(r'gamification/achievements', AchievementViewSet, basename='achievement')
+router.register(r'gamification/user-achievements', UserAchievementViewSet, basename='user-achievement')
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -64,6 +71,7 @@ urlpatterns = [
     path('auth/check-ip/', check_ip_location, name='check_ip_location'),
     # System settings
     path('system-settings/', SystemSettingsView.as_view(), name='system_settings'),
+    path('admin/clear-ai-cache/', ClearAICacheView.as_view(), name='clear_ai_cache'),
     # Test endpoints
     path('test/sms/', test_sms, name='test_sms'),
     path('test/backend-status/', test_backend_status, name='test_backend_status'),

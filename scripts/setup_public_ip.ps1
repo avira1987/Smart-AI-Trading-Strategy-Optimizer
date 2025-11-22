@@ -84,15 +84,26 @@ if ($publicIP -and $publicIP -ne "") {
 Write-Host ""
 
 # Get ports
+$defaultBackendPort = "8000"
+$defaultFrontendPort = if ($publicIP -and $publicIP -ne "") { "80" } else { "3000" }
+
 Write-Host "[3/4] تنظیم پورت‌ها:" -ForegroundColor Yellow
-$backendPort = Read-Host "  پورت Backend (پیش‌فرض: 8000)"
-if (-not $backendPort -or $backendPort -eq "") {
-    $backendPort = "8000"
+if ($publicIP -and $publicIP -ne "") {
+    Write-Host "  توصیه می‌شود برای دسترسی اینترنتی Frontend روی پورت 80 باشد." -ForegroundColor Gray
 }
 
-$frontendPort = Read-Host "  پورت Frontend (پیش‌فرض: 3000)"
-if (-not $frontendPort -or $frontendPort -eq "") {
-    $frontendPort = "3000"
+$backendPortInput = Read-Host "  پورت Backend (پیش‌فرض: $defaultBackendPort)"
+if ([string]::IsNullOrWhiteSpace($backendPortInput)) {
+    $backendPort = $defaultBackendPort
+} else {
+    $backendPort = $backendPortInput
+}
+
+$frontendPortInput = Read-Host "  پورت Frontend (پیش‌فرض: $defaultFrontendPort)"
+if ([string]::IsNullOrWhiteSpace($frontendPortInput)) {
+    $frontendPort = $defaultFrontendPort
+} else {
+    $frontendPort = $frontendPortInput
 }
 
 Write-Host ""

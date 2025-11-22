@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -41,6 +42,114 @@ class ProviderResult:
 
 
 def _get_api_key(provider_name: str, env_key: Optional[str], user=None) -> str:
+    """
+    Get API key from database first, then fallback to environment variables.
+    Priority:
+    1. User-specific key from DB
+    2. System-wide key from DB (user=None)
+    3. Admin key from DB
+    4. Any active key from DB
+    5. Environment variable (as fallback)
+    """
+    # First, try to get from database
+    provider_candidates: List[str] = [provider_name] if provider_name else []
+    provider_alias_map = getattr(settings, "AI_PROVIDER_NAME_ALIASES", {})
+    
+    # Add direct aliases
+    provider_candidates.extend(provider_alias_map.get(provider_name, []))
+    
+    # Build reverse alias map
+    reverse_alias_map: Dict[str, str] = {}
+    for main_provider, aliases in provider_alias_map.items():
+        for alias in aliases:
+            reverse_alias_map[alias] = main_provider
+            if provider_name == alias and main_provider not in provider_candidates:
+                provider_candidates.append(main_provider)
+    
+    # Remove duplicates
+    seen = set()
+    unique_candidates = []
+    for candidate in provider_candidates:
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            unique_candidates.append(candidate)
+    provider_candidates = unique_candidates
+
+    if provider_candidates and APIConfiguration is not None:
+        try:
+            # 1. User-specific API key (if request user provided)
+            if user is not None and getattr(user, "is_authenticated", False):
+                user_config = (
+                    APIConfiguration.objects.filter(
+                        provider__in=provider_candidates,
+                        is_active=True,
+                        user=user,
+                    )
+                    .order_by("-updated_at", "-created_at")
+                    .first()
+                )
+                if user_config and user_config.api_key:
+                    # Log only in debug mode - too many logs in console
+                    LOGGER.debug(f"Found user-specific API key for provider={provider_name}, user_id={user.id}, provider_in_db={user_config.provider}")
+                    return user_config.api_key.strip()
+
+            # 2. System-wide API key (user=None)
+            system_config = (
+                APIConfiguration.objects.filter(
+                    provider__in=provider_candidates,
+                    is_active=True,
+                    user__isnull=True,
+                )
+                .order_by("-updated_at", "-created_at")
+                .first()
+            )
+            if system_config and system_config.api_key:
+                # Log only in debug mode - too many logs in console
+                LOGGER.debug(f"Found system-wide API key for provider={provider_name}, provider_in_db={system_config.provider}")
+                return system_config.api_key.strip()
+
+            # 3. Admin-provided API keys
+            admin_phone = getattr(settings, "ADMIN_PHONE_NUMBER", "09035760718")
+            admin_user_ids: List[int] = []
+            if admin_phone and UserProfile is not None:
+                try:
+                    admin_user_ids = list(
+                        UserProfile.objects.filter(phone=admin_phone).values_list("user_id", flat=True)
+                    )
+                except Exception:
+                    admin_user_ids = []
+            
+            if admin_user_ids:
+                admin_config = (
+                    APIConfiguration.objects.filter(
+                        provider__in=provider_candidates,
+                        is_active=True,
+                        user_id__in=admin_user_ids,
+                    )
+                    .order_by("-updated_at", "-created_at")
+                    .first()
+                )
+                if admin_config and admin_config.api_key:
+                    LOGGER.info(f"Found admin API key for provider={provider_name}, admin_user_ids={admin_user_ids}, provider_in_db={admin_config.provider}")
+                    return admin_config.api_key.strip()
+
+            # 4. Fallback to any active key
+            config = (
+                APIConfiguration.objects.filter(
+                    provider__in=provider_candidates,
+                    is_active=True,
+                )
+                .order_by("-updated_at", "-created_at")
+                .first()
+            )
+            if config and config.api_key:
+                LOGGER.info(f"Found fallback API key for provider={provider_name}, provider_in_db={config.provider}")
+                return config.api_key.strip()
+                
+        except Exception as db_error:
+            LOGGER.warning(f"Error fetching API key from database: {db_error}")
+    
+    # Fallback to environment variable if no DB key found
     env_candidates: List[str] = []
     if env_key:
         env_candidates.append(env_key)
@@ -50,122 +159,22 @@ def _get_api_key(provider_name: str, env_key: Optional[str], user=None) -> str:
     for candidate in env_candidates:
         key = os.environ.get(candidate, "").strip()
         if key:
+            LOGGER.debug(f"Using environment variable API key for {provider_name} (from {candidate})")
             return key
-
-    provider_candidates: List[str] = [provider_name] if provider_name else []
-    provider_alias_map = getattr(settings, "AI_PROVIDER_NAME_ALIASES", {})
     
-    # Add direct aliases (e.g., if provider_name is "openai", add ["chatgpt", "gpt", ...])
-    provider_candidates.extend(provider_alias_map.get(provider_name, []))
-    
-    # Add reverse aliases (e.g., if provider_name is "chatgpt", find which main provider it maps to)
-    # Build reverse map: alias -> main_provider
-    reverse_alias_map: Dict[str, str] = {}
-    for main_provider, aliases in provider_alias_map.items():
-        for alias in aliases:
-            reverse_alias_map[alias] = main_provider
-            # Also add the main provider to candidates if searching for an alias
-            if provider_name == alias and main_provider not in provider_candidates:
-                provider_candidates.append(main_provider)
-    
-    # Remove duplicates while preserving order
-    seen = set()
-    unique_candidates = []
-    for candidate in provider_candidates:
-        if candidate and candidate not in seen:
-            seen.add(candidate)
-            unique_candidates.append(candidate)
-    provider_candidates = unique_candidates
-
-    if not provider_candidates:
-        LOGGER.debug(f"No provider candidates found for provider_name={provider_name}")
-        return ""
-
-    if APIConfiguration is None:
-        LOGGER.debug("APIConfiguration model not available")
-        return ""
-    
-    LOGGER.debug(f"Searching for API key: provider_name={provider_name}, candidates={provider_candidates}, user={user}")
-
+    # Log if no key found
+    LOGGER.warning(
+        f"No API key found for provider={provider_name} (searched candidates={provider_candidates}, "
+        f"user={user.id if user and hasattr(user, 'id') else None})"
+    )
+    # Also log available API configs for debugging
     try:
-        # 1. User-specific API key (if request user provided)
-        if user is not None and getattr(user, "is_authenticated", False):
-            user_config = (
-                APIConfiguration.objects.filter(
-                    provider__in=provider_candidates,
-                    is_active=True,
-                    user=user,
-                )
-                .order_by("-updated_at", "-created_at")
-                .first()
-            )
-            if user_config and user_config.api_key:
-                LOGGER.debug(f"Found user-specific API key for provider={provider_name}, user_id={user.id}")
-                return user_config.api_key.strip()
-
-        # Resolve admin/system users via phone number
-        admin_phone = getattr(settings, "ADMIN_PHONE_NUMBER", "09035760718")
-        admin_user_ids: List[int] = []
-        if admin_phone and UserProfile is not None:
-            try:
-                admin_user_ids = list(
-                    UserProfile.objects.filter(phone=admin_phone).values_list("user_id", flat=True)
-                )
-            except Exception:
-                admin_user_ids = []
-
-        # 2. System-wide API key (user=None)
-        system_config = (
-            APIConfiguration.objects.filter(
-                provider__in=provider_candidates,
-                is_active=True,
-                user__isnull=True,
-            )
-            .order_by("-updated_at", "-created_at")
-            .first()
-        )
-        if system_config and system_config.api_key:
-            LOGGER.debug(f"Found system-wide API key for provider={provider_name}, provider_in_db={system_config.provider}")
-            return system_config.api_key.strip()
-
-        # 3. Admin-provided API keys (shared for all users)
-        if admin_user_ids:
-            admin_config = (
-                APIConfiguration.objects.filter(
-                    provider__in=provider_candidates,
-                    is_active=True,
-                    user_id__in=admin_user_ids,
-                )
-                .order_by("-updated_at", "-created_at")
-                .first()
-            )
-            if admin_config and admin_config.api_key:
-                LOGGER.debug(f"Found admin API key for provider={provider_name}, admin_user_ids={admin_user_ids}, provider_in_db={admin_config.provider}")
-                return admin_config.api_key.strip()
-            else:
-                LOGGER.debug(f"No admin API key found for provider={provider_name}, admin_user_ids={admin_user_ids}, candidates={provider_candidates}")
-
-        # 4. Fallback to any active key (legacy behaviour)
-        config = (
-            APIConfiguration.objects.filter(
-                provider__in=provider_candidates,
-                is_active=True,
-            )
-            .order_by("-updated_at", "-created_at")
-            .first()
-        )
-        if config and config.api_key:
-            LOGGER.debug(f"Found fallback API key for provider={provider_name}, provider_in_db={config.provider}")
-            return config.api_key.strip()
-        
-        # Log what we searched for if no key found
-        LOGGER.warning(
-            f"No API key found for provider={provider_name} (searched candidates={provider_candidates}, "
-            f"user={user.id if user and hasattr(user, 'id') else None}, "
-            f"admin_user_ids={admin_user_ids})"
-        )
-    except Exception:  # pragma: no cover - database errors should not break provider discovery
-        LOGGER.exception("Failed to fetch API key for provider %s from database", provider_name)
+        if APIConfiguration is not None:
+            all_configs = APIConfiguration.objects.filter(is_active=True).values('provider', 'user_id', 'is_active')
+            LOGGER.info(f"Available API configs in DB: {list(all_configs)}")
+    except Exception as e:
+        LOGGER.debug(f"Could not query API configs: {e}")
+    
     return ""
 
 
@@ -186,7 +195,62 @@ class BaseProvider:
         return _get_api_key(self.name, self.env_key, user=self._user_context)
 
     def is_available(self) -> bool:
-        return bool(self.get_api_key())
+        """Check if provider is available (has a valid-looking API key)"""
+        api_key = self.get_api_key()
+        if not api_key or not api_key.strip():
+            return False
+        
+        # Validate that the key doesn't look like a placeholder/dummy
+        api_key_lower = api_key.lower().strip()
+        
+        # Common placeholder patterns to reject
+        placeholder_patterns = [
+            'your-',
+            'your_',
+            'placeholder',
+            'dummy',
+            'test-',
+            'test_',
+            'example',
+            'xxxxx',
+            '*****',
+            'sk-test',
+            'sk-dummy',
+            'api-key-here',
+            'enter-your',
+            'paste-your',
+        ]
+        
+        # Check if key looks like a placeholder
+        for pattern in placeholder_patterns:
+            if pattern in api_key_lower:
+                self.logger.warning(
+                    f"API key for {self.name} looks like a placeholder (contains '{pattern}')"
+                )
+                return False
+        
+        # For OpenAI, check that it starts with 'sk-' and has reasonable length
+        if self.name == 'openai':
+            if not api_key.startswith('sk-'):
+                self.logger.warning(
+                    f"OpenAI API key doesn't start with 'sk-': {api_key[:10]}..."
+                )
+                return False
+            if len(api_key) < 20:  # OpenAI keys are typically 50+ characters
+                self.logger.warning(
+                    f"OpenAI API key seems too short (length: {len(api_key)})"
+                )
+                return False
+        
+        # For Gemini, check that it has reasonable length
+        if self.name == 'gemini':
+            if len(api_key) < 20:  # Gemini keys are typically 30+ characters
+                self.logger.warning(
+                    f"Gemini API key seems too short (length: {len(api_key)})"
+                )
+                return False
+        
+        return True
 
     def get_model(self) -> Optional[str]:
         model_map = getattr(settings, "AI_PROVIDER_DEFAULT_MODELS", {})
@@ -338,6 +402,7 @@ class GeminiProvider(BaseProvider):
         discovery_attempted = False
 
         model_candidates = deque(initial_candidates)
+        primary_model = initial_candidates[0] if initial_candidates else None
         seen_candidates = set(initial_candidates)
 
         while model_candidates:
@@ -375,7 +440,7 @@ class GeminiProvider(BaseProvider):
                 except Exception:
                     tokens_used = None
 
-                if candidate != model_candidates[0]:
+                if primary_model and candidate != primary_model:
                     self.logger.info("Gemini fallback model selected: %s", candidate)
 
                 return ProviderResult(
@@ -544,6 +609,212 @@ class ChatCompletionProvider(BaseProvider):
             return str(text)
         return ""
 
+    def _make_request_with_retry(
+        self,
+        endpoint: str,
+        headers: Dict[str, str],
+        payload: Dict[str, Any],
+        timeout: float,
+    ) -> ProviderResult:
+        """
+        Make API request with retry logic and exponential backoff.
+        Max 5 attempts with backoff: 3s, 6s, 9s, 12s, 15s
+        """
+        max_attempts = getattr(settings, 'AI_RETRY_ATTEMPTS', 5)
+        backoff_times = [3, 6, 9, 12, 15]  # Exponential backoff in seconds
+        
+        last_error = None
+        last_status_code = None
+        attempts = []
+        
+        for attempt_num in range(1, max_attempts + 1):
+            try:
+                start_time = time.perf_counter()
+                response = requests.post(
+                    endpoint,
+                    headers=headers,
+                    json=payload,
+                    timeout=timeout,
+                )
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
+                
+                status_code = response.status_code
+                data: Any
+                if response.headers.get("content-type", "").startswith("application/json"):
+                    data = response.json()
+                else:
+                    data = {}
+
+                if status_code in (200, 201):
+                    text = self._extract_text(data if isinstance(data, dict) else {})
+                    if not text:
+                        result = ProviderResult(
+                            success=False,
+                            error="Empty response content",
+                            status_code=status_code,
+                            raw_response=data,
+                        )
+                    else:
+                        tokens = self._extract_tokens(data if isinstance(data, dict) else {})
+                        result = ProviderResult(
+                            success=True,
+                            text=text,
+                            status_code=status_code,
+                            tokens_used=tokens,
+                            raw_response=data,
+                        )
+                    
+                    # Add attempt record
+                    attempt = ProviderAttempt(
+                        provider=self.name,
+                        success=result.success,
+                        error=result.error,
+                        status_code=status_code,
+                        latency_ms=latency_ms,
+                        tokens_used=tokens if result.success else None,
+                    )
+                    attempts.append(attempt)
+                    result.attempts = attempts
+                    return result
+
+                # Handle error responses
+                raw_text = response.text
+                error_message = None
+                error_type = None
+                if isinstance(data, dict):
+                    error = data.get("error")
+                    if isinstance(error, dict):
+                        error_message = error.get("message") or error.get("code")
+                        error_type = error.get("type")
+                    elif isinstance(error, str):
+                        error_message = error
+                
+                # Provide more detailed error messages for common OpenAI errors
+                if status_code == 401:
+                    error_message = error_message or "Invalid API key. Please check your OpenAI API key."
+                elif status_code == 429:
+                    error_message = error_message or "Rate limit exceeded. Please try again later."
+                elif status_code == 400:
+                    model_name = payload.get("model", "unknown")
+                    error_message = error_message or f"Invalid request. Model '{model_name}' may not be available or request format is incorrect."
+                elif status_code == 404:
+                    model_name = payload.get("model", "unknown")
+                    error_message = error_message or f"Model '{model_name}' not found. Please check the model name."
+                
+                if not error_message:
+                    error_message = raw_text or f"HTTP {status_code} error"
+
+                full_error = f"{self.name} error: {error_message}"
+                if error_type:
+                    full_error += f" (type: {error_type})"
+                
+                last_error = full_error
+                last_status_code = status_code
+                
+                # Record attempt
+                attempt = ProviderAttempt(
+                    provider=self.name,
+                    success=False,
+                    error=full_error,
+                    status_code=status_code,
+                    latency_ms=latency_ms,
+                    tokens_used=None,
+                )
+                attempts.append(attempt)
+                
+                # Don't retry on 401 (invalid API key) or 400 (bad request)
+                if status_code in (401, 400):
+                    self.logger.warning(
+                        f"{self.name} API call failed (non-retryable): status={status_code}, error={error_message}, "
+                        f"model={payload.get('model', 'unknown')}"
+                    )
+                    result = ProviderResult(
+                        success=False,
+                        error=full_error,
+                        status_code=status_code,
+                        raw_response=data or raw_text,
+                        attempts=attempts,
+                    )
+                    return result
+                
+                # For 429 and other retryable errors, apply backoff
+                if attempt_num < max_attempts:
+                    backoff_time = backoff_times[min(attempt_num - 1, len(backoff_times) - 1)]
+                    self.logger.warning(
+                        f"{self.name} API call failed (attempt {attempt_num}/{max_attempts}): "
+                        f"status={status_code}, error={error_message}, "
+                        f"retrying in {backoff_time}s"
+                    )
+                    time.sleep(backoff_time)
+                else:
+                    self.logger.warning(
+                        f"{self.name} API call failed after {max_attempts} attempts: "
+                        f"status={status_code}, error={error_message}, "
+                        f"model={payload.get('model', 'unknown')}"
+                    )
+                    
+            except requests.exceptions.Timeout as exc:
+                last_error = f"{self.name} request timed out after {timeout}s"
+                self.logger.warning(f"{self.name} request timed out (attempt {attempt_num}/{max_attempts}): {exc}")
+                
+                attempt = ProviderAttempt(
+                    provider=self.name,
+                    success=False,
+                    error=last_error,
+                    status_code=None,
+                    latency_ms=None,
+                    tokens_used=None,
+                )
+                attempts.append(attempt)
+                
+                if attempt_num < max_attempts:
+                    backoff_time = backoff_times[min(attempt_num - 1, len(backoff_times) - 1)]
+                    time.sleep(backoff_time)
+                    
+            except requests.exceptions.RequestException as exc:
+                last_error = f"{self.name} network error: {str(exc)}"
+                self.logger.warning(f"{self.name} network error (attempt {attempt_num}/{max_attempts}): {exc}")
+                
+                attempt = ProviderAttempt(
+                    provider=self.name,
+                    success=False,
+                    error=last_error,
+                    status_code=None,
+                    latency_ms=None,
+                    tokens_used=None,
+                )
+                attempts.append(attempt)
+                
+                if attempt_num < max_attempts:
+                    backoff_time = backoff_times[min(attempt_num - 1, len(backoff_times) - 1)]
+                    time.sleep(backoff_time)
+                    
+            except Exception as exc:
+                last_error = f"{self.name} error: {str(exc)}"
+                self.logger.exception(f"{self.name} request failed (attempt {attempt_num}/{max_attempts}): {exc}")
+                
+                attempt = ProviderAttempt(
+                    provider=self.name,
+                    success=False,
+                    error=last_error,
+                    status_code=None,
+                    latency_ms=None,
+                    tokens_used=None,
+                )
+                attempts.append(attempt)
+                
+                if attempt_num < max_attempts:
+                    backoff_time = backoff_times[min(attempt_num - 1, len(backoff_times) - 1)]
+                    time.sleep(backoff_time)
+        
+        # All attempts failed
+        return ProviderResult(
+            success=False,
+            error=last_error or f"{self.name} request failed after {max_attempts} attempts",
+            status_code=last_status_code,
+            attempts=attempts,
+        )
+
     def generate(
         self,
         prompt: str,
@@ -557,88 +828,12 @@ class ChatCompletionProvider(BaseProvider):
         payload = self._prepare_payload(prompt, generation_config, metadata)
         headers = self._build_headers(api_key)
 
-        try:
-            response = requests.post(
-                self.endpoint,
-                headers=headers,
-                json=payload,
-                timeout=self.get_timeout(),
-            )
-            status_code = response.status_code
-            data: Any
-            if response.headers.get("content-type", "").startswith("application/json"):
-                data = response.json()
-            else:
-                data = {}
-
-            if status_code in (200, 201):
-                text = self._extract_text(data if isinstance(data, dict) else {})
-                if not text:
-                    return ProviderResult(
-                        success=False,
-                        error="Empty response content",
-                        status_code=status_code,
-                        raw_response=data,
-                    )
-                tokens = self._extract_tokens(data if isinstance(data, dict) else {})
-                return ProviderResult(
-                    success=True,
-                    text=text,
-                    status_code=status_code,
-                    tokens_used=tokens,
-                    raw_response=data,
-                )
-
-            raw_text = response.text
-            error_message = None
-            error_type = None
-            if isinstance(data, dict):
-                error = data.get("error")
-                if isinstance(error, dict):
-                    error_message = error.get("message") or error.get("code")
-                    error_type = error.get("type")
-                elif isinstance(error, str):
-                    error_message = error
-            
-            # Provide more detailed error messages for common OpenAI errors
-            if status_code == 401:
-                error_message = error_message or "Invalid API key. Please check your OpenAI API key."
-            elif status_code == 429:
-                error_message = error_message or "Rate limit exceeded. Please try again later."
-            elif status_code == 400:
-                model_name = payload.get("model", "unknown")
-                error_message = error_message or f"Invalid request. Model '{model_name}' may not be available or request format is incorrect."
-            elif status_code == 404:
-                model_name = payload.get("model", "unknown")
-                error_message = error_message or f"Model '{model_name}' not found. Please check the model name."
-            
-            if not error_message:
-                error_message = raw_text or f"HTTP {status_code} error"
-
-            full_error = f"{self.name} error: {error_message}"
-            if error_type:
-                full_error += f" (type: {error_type})"
-            
-            self.logger.warning(
-                f"{self.name} API call failed: status={status_code}, error={error_message}, "
-                f"model={payload.get('model', 'unknown')}"
-            )
-
-            return ProviderResult(
-                success=False,
-                error=full_error,
-                status_code=status_code,
-                raw_response=data or raw_text,
-            )
-        except requests.exceptions.Timeout as exc:
-            self.logger.exception("%s request timed out: %s", self.name, exc)
-            return ProviderResult(success=False, error=f"{self.name} request timed out after {self.get_timeout()}s")
-        except requests.exceptions.RequestException as exc:
-            self.logger.exception("%s request failed (network error): %s", self.name, exc)
-            return ProviderResult(success=False, error=f"{self.name} network error: {str(exc)}")
-        except Exception as exc:
-            self.logger.exception("%s request failed: %s", self.name, exc)
-            return ProviderResult(success=False, error=f"{self.name} error: {str(exc)}")
+        return self._make_request_with_retry(
+            self.endpoint,
+            headers,
+            payload,
+            self.get_timeout(),
+        )
 
 
 class OpenRouterProvider(ChatCompletionProvider):

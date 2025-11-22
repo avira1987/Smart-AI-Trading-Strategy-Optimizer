@@ -10,8 +10,8 @@ import pandas as pd
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
-if str(ROOT_DIR / "backend") not in sys.path:
-    sys.path.insert(0, str(ROOT_DIR / "backend"))
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "backend.config.settings")
 django.setup()
@@ -19,7 +19,7 @@ django.setup()
 from django.test import override_settings
 
 from backend.ai_module import gemini_client, provider_manager
-from backend.ai_module.providers import ProviderAttempt, ProviderResult
+from backend.ai_module.providers import ProviderAttempt, ProviderResult, GeminiProvider
 
 
 @pytest.fixture(autouse=True)
@@ -32,9 +32,9 @@ def reset_rate_limit():
 
 @pytest.fixture(autouse=True)
 def reset_provider_cache():
-    provider_manager._PROVIDER_MANAGER = None
+    provider_manager._PROVIDER_MANAGERS.clear()
     yield
-    provider_manager._PROVIDER_MANAGER = None
+    provider_manager._PROVIDER_MANAGERS.clear()
 
 
 class _DummyManagerDisabled:
@@ -109,16 +109,16 @@ def test_registered_providers_include_chatgpt_alias():
     assert providers["chatgpt"] is providers["openai"]
 
 
-def test_priority_collapses_to_openai_when_first():
+def test_priority_preserves_order_with_openai_first():
     with override_settings(AI_PROVIDER_PRIORITY=["openai", "gemini", "cohere"]):
         manager = provider_manager.AIProviderManager()
-        assert manager._get_priority_list() == ["openai"]
+        assert manager._get_priority_list() == ["openai", "gemini", "cohere"]
 
 
-def test_priority_collapses_to_openai_when_alias_used():
+def test_priority_normalizes_alias_but_keeps_rest():
     with override_settings(AI_PROVIDER_PRIORITY=["chatgpt", "gemini", "cohere"]):
         manager = provider_manager.AIProviderManager()
-        assert manager._get_priority_list() == ["openai"]
+        assert manager._get_priority_list() == ["openai", "gemini", "cohere"]
 
 
 def test_priority_keeps_non_openai_when_missing():
@@ -182,4 +182,38 @@ def test_data_provider_manager_falls_back_to_any_provider(monkeypatch):
 
     assert not data.empty
     assert provider_used == "financialmodelingprep"
+
+
+def test_gemini_provider_handles_single_candidate_success(monkeypatch):
+    provider = GeminiProvider()
+
+    class _DummyResponse:
+        def __init__(self, text: str) -> None:
+            self.text = text
+            self.usage_metadata = type("Usage", (), {"total_token_count": 42})()
+
+        def to_dict(self):
+            return {"text": self.text}
+
+    dummy_response = _DummyResponse('{"entry_conditions": []}')
+
+    class _DummyModel:
+        def generate_content(self, prompt, generation_config):
+            assert prompt == "prompt"
+            assert "max_output_tokens" in generation_config
+            return dummy_response
+
+    class _DummyGenAI:
+        def GenerativeModel(self, name):
+            assert name == "gemini-1.5-flash-latest"
+            return _DummyModel()
+
+    monkeypatch.setattr(provider, "_configure", lambda: _DummyGenAI())
+    monkeypatch.setattr(provider, "_resolve_model_candidates", lambda: ["gemini-1.5-flash-latest"])
+
+    result = provider.generate("prompt", {"temperature": 0.1}, metadata=None)
+
+    assert result.success is True
+    assert result.text == dummy_response.text
+    assert result.tokens_used == 42
 

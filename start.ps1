@@ -4,6 +4,42 @@
 $ErrorActionPreference = "Continue"
 $scriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# Helper to detect configured frontend port so we can respect PUBLIC_IP settings
+function Get-ConfiguredFrontendPort {
+    param(
+        [string]$ProjectRoot
+    )
+
+    function Read-PortFromFile {
+        param(
+            [string]$Path,
+            [string]$Pattern
+        )
+        if (-not (Test-Path $Path)) { return $null }
+        try {
+            $content = Get-Content $Path -Raw
+            if ($content -match $Pattern) {
+                return $matches[1].Trim()
+            }
+        } catch {
+            return $null
+        }
+        return $null
+    }
+
+    $frontendEnv = Join-Path $ProjectRoot "frontend\.env"
+    $value = Read-PortFromFile -Path $frontendEnv -Pattern "(?m)^\s*VITE_FRONTEND_PORT\s*=\s*(.+)$"
+    if ($value) { return $value }
+
+    $rootEnv = Join-Path $ProjectRoot ".env"
+    $value = Read-PortFromFile -Path $rootEnv -Pattern "(?m)^\s*FRONTEND_PUBLIC_PORT\s*=\s*(.+)$"
+    if ($value) { return $value }
+
+    return "3000"
+}
+
+$frontendPort = Get-ConfiguredFrontendPort -ProjectRoot $scriptPath
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "  Smart AI Trading Strategy Optimizer" -ForegroundColor Green
@@ -80,8 +116,37 @@ if (-not $redisRunning) {
 Write-Host ""
 Start-Sleep -Seconds 1
 
-# Step 2: Stop existing processes
-Write-Host "[2/5] Stopping existing processes..." -ForegroundColor Cyan
+# Step 2: Stop existing processes and PowerShell windows
+Write-Host "[2/6] Stopping existing processes and PowerShell windows..." -ForegroundColor Cyan
+
+# Get current PowerShell process ID to avoid closing it
+$currentPID = $PID
+
+# Stop PowerShell windows that are running project-related commands
+Write-Host "  Closing PowerShell windows with project processes..." -ForegroundColor Gray
+$powerShellProcesses = Get-WmiObject Win32_Process | Where-Object { 
+    $_.Name -eq "powershell.exe" -or $_.Name -eq "pwsh.exe"
+} | Where-Object { 
+    $_.ProcessId -ne $currentPID -and (
+        $_.CommandLine -like "*manage.py*runserver*" -or
+        $_.CommandLine -like "*npm run dev*" -or
+        $_.CommandLine -like "*celery*" -or
+        $_.CommandLine -like "*Smart-AI-Trading*"
+    )
+}
+
+if ($powerShellProcesses) {
+    $powerShellProcesses | ForEach-Object {
+        try {
+            Write-Host "    Closing PowerShell process (PID: $($_.ProcessId))..." -ForegroundColor DarkGray
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            # Ignore errors
+        }
+    }
+    Start-Sleep -Seconds 2
+}
 
 # Stop Node processes
 $nodeProcess = Get-Process -Name "node" -ErrorAction SilentlyContinue
@@ -106,11 +171,83 @@ if ($celeryProcesses) {
     Start-Sleep -Seconds 2
 }
 
+# Stop Django processes (manage.py runserver)
+$djangoProcesses = Get-WmiObject Win32_Process | Where-Object { $_.CommandLine -like "*manage.py*runserver*" }
+if ($djangoProcesses) {
+    Write-Host "  Stopping Django processes..." -ForegroundColor Gray
+    $djangoProcesses | ForEach-Object { 
+        try {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            # Ignore errors
+        }
+    }
+    Start-Sleep -Seconds 2
+}
+
+# Stop Python processes related to the project
+$pythonProcesses = Get-WmiObject Win32_Process | Where-Object { 
+    $_.Name -eq "python.exe" -and (
+        $_.CommandLine -like "*Smart-AI-Trading*" -or
+        $_.CommandLine -like "*manage.py*"
+    )
+}
+if ($pythonProcesses) {
+    Write-Host "  Stopping Python processes..." -ForegroundColor Gray
+    $pythonProcesses | ForEach-Object { 
+        try {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            # Ignore errors
+        }
+    }
+    Start-Sleep -Seconds 2
+}
+
+Write-Host "  [OK] All existing processes stopped" -ForegroundColor Green
 Write-Host ""
 Start-Sleep -Seconds 1
 
-# Step 3: Start Backend
-Write-Host "[3/5] Starting Backend (Django)..." -ForegroundColor Cyan
+# Step 3: Run Database Migrations
+Write-Host "[3/6] Running Database Migrations..." -ForegroundColor Cyan
+$backendPath = Join-Path $scriptPath "backend"
+
+# Check for Python virtual environment
+$venvPython = Join-Path $backendPath "venv\Scripts\python.exe"
+$rootVenvPython = Join-Path $scriptPath "venv\Scripts\python.exe"
+
+$pythonExe = "python"
+if (Test-Path $venvPython) {
+    $pythonExe = $venvPython
+    Write-Host "  Using backend venv Python..." -ForegroundColor Gray
+}
+elseif (Test-Path $rootVenvPython) {
+    $pythonExe = $rootVenvPython
+    Write-Host "  Using root venv Python..." -ForegroundColor Gray
+}
+else {
+    Write-Host "  Using system Python..." -ForegroundColor Gray
+}
+
+Set-Location $backendPath
+Write-Host "  Running migrations..." -ForegroundColor Gray
+& $pythonExe manage.py migrate
+
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "  [OK] Migrations completed successfully!" -ForegroundColor Green
+}
+else {
+    Write-Host "  [WARN] Migration completed with warnings" -ForegroundColor Yellow
+}
+
+Set-Location $scriptPath
+Write-Host ""
+Start-Sleep -Seconds 1
+
+# Step 4: Start Backend
+Write-Host "[4/6] Starting Backend (Django)..." -ForegroundColor Cyan
 $backendPath = Join-Path $scriptPath "backend"
 $backendCommand = "cd '$backendPath'; Write-Host '========================================' -ForegroundColor Green; Write-Host '  Backend Django Server' -ForegroundColor Green; Write-Host '  Port: 8000' -ForegroundColor Green; Write-Host '========================================' -ForegroundColor Green; Write-Host ''; python manage.py runserver 0.0.0.0:8000"
 Start-Process powershell -ArgumentList "-NoExit", "-Command", $backendCommand
@@ -118,17 +255,26 @@ Start-Sleep -Seconds 4
 Write-Host "  [OK] Backend starting..." -ForegroundColor Green
 Write-Host ""
 
-# Step 4: Start Frontend
-Write-Host "[4/5] Starting Frontend (React)..." -ForegroundColor Cyan
+# Step 5: Start Frontend
+Write-Host "[5/6] Starting Frontend (React)..." -ForegroundColor Cyan
 $frontendPath = Join-Path $scriptPath "frontend"
-$frontendCommand = "cd '$frontendPath'; Write-Host '========================================' -ForegroundColor Cyan; Write-Host '  Frontend React Server' -ForegroundColor Cyan; Write-Host '  Port: 3000' -ForegroundColor Cyan; Write-Host '========================================' -ForegroundColor Cyan; Write-Host ''; npm run dev"
+$frontendCommand = @"
+cd '$frontendPath'
+`$env:VITE_FRONTEND_PORT='$frontendPort'
+Write-Host '========================================' -ForegroundColor Cyan
+Write-Host '  Frontend React Server' -ForegroundColor Cyan
+Write-Host '  Port: $frontendPort' -ForegroundColor Cyan
+Write-Host '========================================' -ForegroundColor Cyan
+Write-Host ''
+npm run dev
+"@
 Start-Process powershell -ArgumentList "-NoExit", "-Command", $frontendCommand
 Start-Sleep -Seconds 3
 Write-Host "  [OK] Frontend starting..." -ForegroundColor Green
 Write-Host ""
 
-# Step 5: Start Celery Worker and Beat
-Write-Host "[5/5] Starting Celery Worker and Beat..." -ForegroundColor Cyan
+# Step 6: Start Celery Worker and Beat
+Write-Host "[6/6] Starting Celery Worker and Beat..." -ForegroundColor Cyan
 
 # Start Celery Worker
 $workerCommand = "cd '$backendPath'; Write-Host '========================================' -ForegroundColor Yellow; Write-Host '  Celery Worker' -ForegroundColor Yellow; Write-Host '========================================' -ForegroundColor Yellow; Write-Host ''; celery -A config worker --loglevel=info --pool=solo"
@@ -166,17 +312,17 @@ catch {
 
 Write-Host "Access URLs:" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "  Frontend (Local):    http://localhost:3000" -ForegroundColor White
+Write-Host "  Frontend (Local):    http://localhost:$frontendPort" -ForegroundColor White
 if ($localIP) {
-    Write-Host "  Frontend (Network):  http://$localIP:3000" -ForegroundColor Cyan
+    Write-Host "  Frontend (Network):  http://${localIP}:$frontendPort" -ForegroundColor Cyan
 }
 Write-Host "  Backend (Local):     http://localhost:8000" -ForegroundColor White
 if ($localIP) {
-    Write-Host "  Backend (Network):   http://$localIP:8000" -ForegroundColor Cyan
+    Write-Host "  Backend (Network):   http://${localIP}:8000" -ForegroundColor Cyan
 }
 Write-Host "  Admin (Local):       http://localhost:8000/admin/" -ForegroundColor White
 if ($localIP) {
-    Write-Host "  Admin (Network):     http://$localIP:8000/admin/" -ForegroundColor Cyan
+    Write-Host "  Admin (Network):     http://${localIP}:8000/admin/" -ForegroundColor Cyan
 }
 Write-Host ""
 Write-Host "Admin Login:" -ForegroundColor Cyan
@@ -186,7 +332,7 @@ Write-Host ""
 Write-Host "Services Status:" -ForegroundColor Yellow
 Write-Host "  [OK] Redis          (Port 6379)" -ForegroundColor Green
 Write-Host "  [OK] Django Server  (Port 8000)" -ForegroundColor Green
-Write-Host "  [OK] React Dev      (Port 3000)" -ForegroundColor Green
+Write-Host "  [OK] React Dev      (Port $frontendPort)" -ForegroundColor Green
 Write-Host "  [OK] Celery Worker  (Running)" -ForegroundColor Green
 Write-Host "  [OK] Celery Beat    (Every 5 minutes)" -ForegroundColor Green
 Write-Host ""

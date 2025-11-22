@@ -333,6 +333,7 @@ export const deleteStrategy = (id: number) => client.delete(`/strategies/${id}/`
 export const processStrategy = (id: number) => client.post(`/strategies/${id}/process/`, {}, {
   timeout: 60000, // 60 seconds timeout for strategy processing (can take longer due to AI analysis)
 })
+export const getStrategyProgress = (id: number) => client.get(`/strategies/${id}/progress/`)
 export const generateStrategyQuestions = (id: number) => client.post(`/strategies/${id}/generate_questions/`)
 export const processStrategyWithAnswers = (id: number) => client.post(`/strategies/${id}/process_with_answers/`)
 export const setPrimaryStrategy = (id: number) => client.post(`/strategies/${id}/set-primary/`)
@@ -345,7 +346,7 @@ export const createJob = (data: { strategy: number, job_type: string, timeframe_
     data,
     data.job_type === 'backtest'
       ? {
-          timeout: 300000, // Allow long-running backtests (up to 5 minutes)
+          timeout: 30000, // 30 seconds - job creation should be fast now (async execution)
         }
       : undefined
   )
@@ -649,6 +650,7 @@ export const chargeWallet = (amount: number) =>
 // System Settings
 export interface SystemSettingsResponse {
   live_trading_enabled: boolean
+  use_ai_cache: boolean
   google_auth_enabled?: boolean
 }
 
@@ -657,6 +659,9 @@ export const getSystemSettings = () =>
 
 export const updateSystemSettings = (payload: Partial<SystemSettingsResponse>) =>
   client.patch<SystemSettingsResponse>('/system-settings/', payload)
+
+export const clearAICache = () =>
+  client.post<{ status: string; message: string; deleted_count: number }>('/admin/clear-ai-cache/')
 
 // Security Management (Admin Only)
 export interface BlockedIP {
@@ -754,6 +759,9 @@ export interface UserActivityLogsResponse {
   limit: number
   offset: number
 }
+
+// Export a simple get function for general API calls
+export const get = (url: string, config?: any) => client.get(url, config)
 
 export async function getUserActivityLogs(limit: number = 50, offset: number = 0): Promise<AxiosResponse<UserActivityLogsResponse>> {
   return client.get('/auth/activity-logs/', {

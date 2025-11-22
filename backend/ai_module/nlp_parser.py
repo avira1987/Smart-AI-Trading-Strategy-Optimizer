@@ -13,6 +13,11 @@ except Exception:
     parse_with_gemini = None
     _providers_available = lambda: False
 
+try:
+    from .text_chunker import get_chunker
+except Exception:
+    get_chunker = None
+
 # Import document processing libraries
 try:
     import docx
@@ -304,138 +309,90 @@ def parse_strategy_text(text: str) -> Dict[str, Any]:
 
 def parse_strategy_file(file_path: str, user=None) -> Dict[str, Any]:
     """
-    Parse strategy file using AI-First approach with Regex fallback.
-    
-    Strategy:
-    1. Try AI parsing first (with cache support)
-    2. If AI fails or unavailable, fallback to regex
-    3. Merge results: prefer AI results, fill gaps with regex
+    Parse strategy file exclusively through ChatGPT/OpenAI.
+    If the AI provider is unavailable or returns an error, the parsing fails.
+    Automatically chunks large texts that exceed token limits.
     """
     try:
         text = extract_text_from_file(file_path)
-        logger.info(f"Extracted {len(text)} characters from file: {file_path}")
+        logger.debug(f"Extracted {len(text)} characters from file: {file_path}")
+
+        if parse_with_gemini is None:
+            raise RuntimeError("AI parser not available. ChatGPT integration is required.")
+
+        if not _providers_available(user=user):
+            logger.error("[NLP_PARSER] No ChatGPT providers available")
+            raise RuntimeError("هیچ کلید ChatGPT فعالی پیکربندی نشده است.")
+
+        logger.debug("[NLP_PARSER] Attempting AI parsing (ChatGPT only)...")
+        logger.debug(f"[NLP_PARSER] Text length: {len(text)}, User: {user.username if user and user.is_authenticated else 'None'}")
         
-        # Initialize result structure
-        final_result = {
-            "entry_conditions": [],
-            "exit_conditions": [],
-            "risk_management": {},
-            "timeframe": None,
-            "symbol": None,
-            "indicators": [],
-            "raw_excerpt": text[:2000],
-            "confidence_score": 0.0,
-            "parsing_method": "unknown"
-        }
-        
-        ai_result = None
-        ai_success = False
-        
-        # ===== STEP 1: Try AI First (with automatic caching) =====
-        if parse_with_gemini is not None and _providers_available(user=user):
-            try:
-                logger.info("Attempting AI parsing first (with cache support)...")
-                ai_result = parse_with_gemini(text, user=user)
+        # Check if text needs chunking
+        chunker = get_chunker() if get_chunker else None
+        if chunker and chunker.should_chunk(text):
+            logger.info(f"[NLP_PARSER] Text exceeds token limit, chunking into smaller pieces")
+            chunks = chunker.chunk_text(text)
+            logger.info(f"[NLP_PARSER] Text chunked into {len(chunks)} pieces")
+            
+            # Process each chunk and merge results
+            all_entry_conditions = []
+            all_exit_conditions = []
+            all_indicators = []
+            merged_risk_management = {}
+            timeframe = None
+            symbol = None
+            
+            for i, chunk in enumerate(chunks):
+                logger.debug(f"[NLP_PARSER] Processing chunk {i+1}/{len(chunks)} ({len(chunk)} chars)")
+                chunk_result = parse_with_gemini(chunk, user=user)
                 
-                if isinstance(ai_result, dict) and ai_result.get('ai_status') == 'ok':
-                    # AI parsing successful
-                    ai_success = True
-                    logger.info(f"✅ AI parsing successful: "
-                               f"{len(ai_result.get('entry_conditions', []))} entry conditions, "
-                               f"{len(ai_result.get('exit_conditions', []))} exit conditions")
-                    
-                    # Extract AI results
-                    final_result["entry_conditions"] = ai_result.get('entry_conditions', [])
-                    final_result["exit_conditions"] = ai_result.get('exit_conditions', [])
-                    final_result["risk_management"] = ai_result.get('risk_management', {})
-                    final_result["indicators"] = ai_result.get('indicators', [])
-                    final_result["timeframe"] = ai_result.get('timeframe')
-                    final_result["symbol"] = ai_result.get('symbol')
-                    final_result["parsing_method"] = "ai"
-                    
-                    # Calculate confidence from AI results
-                    confidence = 0.0
-                    if final_result["entry_conditions"]:
-                        confidence += 0.3
-                    if final_result["exit_conditions"]:
-                        confidence += 0.3
-                    if final_result["risk_management"]:
-                        confidence += 0.2
-                    if final_result["indicators"]:
-                        confidence += 0.1
-                    if final_result["timeframe"]:
-                        confidence += 0.1
-                    final_result["confidence_score"] = confidence
-                    
-                    # If AI provided complete results, return early
-                    if (final_result["entry_conditions"] and 
-                        final_result["exit_conditions"] and 
-                        confidence >= 0.6):
-                        logger.info(f"AI parsing complete - confidence: {confidence:.2f}")
-                        return final_result
-                    else:
-                        logger.info(f"AI parsing partial - confidence: {confidence:.2f}, will merge with regex")
-                        
+                if chunk_result.get('ai_status') == 'ok':
+                    # Merge results from this chunk
+                    if chunk_result.get('entry_conditions'):
+                        all_entry_conditions.extend(chunk_result.get('entry_conditions', []))
+                    if chunk_result.get('exit_conditions'):
+                        all_exit_conditions.extend(chunk_result.get('exit_conditions', []))
+                    if chunk_result.get('indicators'):
+                        all_indicators.extend(chunk_result.get('indicators', []))
+                    if chunk_result.get('risk_management'):
+                        merged_risk_management.update(chunk_result.get('risk_management', {}))
+                    if chunk_result.get('timeframe') and not timeframe:
+                        timeframe = chunk_result.get('timeframe')
+                    if chunk_result.get('symbol') and not symbol:
+                        symbol = chunk_result.get('symbol')
                 else:
-                    # AI parsing failed or returned error
-                    ai_status = ai_result.get('ai_status', 'unknown') if isinstance(ai_result, dict) else 'invalid'
-                    error_msg = ai_result.get('message', 'Unknown error') if isinstance(ai_result, dict) else 'Invalid response'
-                    logger.warning(f"AI parsing failed (status: {ai_status}): {error_msg}")
-                    
-            except Exception as ai_error:
-                logger.warning(f"AI parsing exception: {str(ai_error)}, falling back to regex")
-                import traceback
-                logger.debug(f"AI error traceback: {traceback.format_exc()}")
-        else:
-            if parse_with_gemini is None:
-                logger.info("AI parser not available (parse_with_gemini is None)")
-            elif not _providers_available(user=user):
-                logger.info("No AI providers configured - falling back to regex")
-        
-        # ===== STEP 2: Fallback to Regex Parsing =====
-        logger.info("Running regex parsing as fallback/enhancement...")
-        regex_result = parse_strategy_text(text)
-        
-        logger.info(f"Regex parsing results: {len(regex_result.get('entry_conditions', []))} entry conditions, "
-                   f"{len(regex_result.get('exit_conditions', []))} exit conditions, "
-                   f"confidence: {regex_result.get('confidence_score', 0.0):.2f}")
-        
-        # ===== STEP 3: Merge Results (AI-first, fill gaps with regex) =====
-        if ai_success:
-            # AI was successful - use AI as base, fill gaps with regex
-            logger.info("Merging: AI results as base, regex for gaps")
+                    # If any chunk fails, return error
+                    logger.warning(f"[NLP_PARSER] Chunk {i+1} failed: {chunk_result.get('message', 'Unknown error')}")
+                    return {
+                        "error": chunk_result.get('message', 'AI parsing failed for chunk'),
+                        "error_type": "ai_parsing_failed",
+                        "provider_attempts": chunk_result.get('provider_attempts', []),
+                        "status_code": chunk_result.get('status_code'),
+                        "entry_conditions": all_entry_conditions,
+                        "exit_conditions": all_exit_conditions,
+                        "risk_management": merged_risk_management,
+                        "timeframe": timeframe,
+                        "symbol": symbol,
+                        "indicators": list(set(all_indicators)),
+                        "raw_excerpt": text[:2000],
+                        "confidence_score": 0.0,
+                        "parsing_method": "chunked_error"
+                    }
             
-            # Fill missing entry conditions from regex
-            if not final_result["entry_conditions"] and regex_result.get("entry_conditions"):
-                final_result["entry_conditions"] = regex_result["entry_conditions"]
-                logger.info(f"Filled {len(regex_result['entry_conditions'])} entry conditions from regex")
+            # Return merged results
+            final_result = {
+                "entry_conditions": all_entry_conditions,
+                "exit_conditions": all_exit_conditions,
+                "risk_management": merged_risk_management,
+                "timeframe": timeframe,
+                "symbol": symbol,
+                "indicators": list(set(all_indicators)),
+                "raw_excerpt": text[:2000],
+                "confidence_score": 0.0,
+                "parsing_method": "ai_chunked"
+            }
             
-            # Fill missing exit conditions from regex
-            if not final_result["exit_conditions"] and regex_result.get("exit_conditions"):
-                final_result["exit_conditions"] = regex_result["exit_conditions"]
-                logger.info(f"Filled {len(regex_result['exit_conditions'])} exit conditions from regex")
-            
-            # Fill missing indicators from regex
-            if not final_result["indicators"] and regex_result.get("indicators"):
-                final_result["indicators"] = regex_result["indicators"]
-                logger.info(f"Filled {len(regex_result['indicators'])} indicators from regex")
-            
-            # Fill missing risk management from regex
-            if not final_result["risk_management"] and regex_result.get("risk_management"):
-                final_result["risk_management"] = regex_result["risk_management"]
-                logger.info("Filled risk_management from regex")
-            
-            # Fill missing timeframe from regex
-            if not final_result["timeframe"] and regex_result.get("timeframe"):
-                final_result["timeframe"] = regex_result["timeframe"]
-                logger.info(f"Filled timeframe from regex: {regex_result['timeframe']}")
-            
-            # Fill missing symbol from regex
-            if not final_result["symbol"] and regex_result.get("symbol"):
-                final_result["symbol"] = regex_result["symbol"]
-                logger.info(f"Filled symbol from regex: {regex_result['symbol']}")
-            
-            # Recalculate confidence after merge
+            # Calculate confidence
             confidence = 0.0
             if final_result["entry_conditions"]:
                 confidence += 0.3
@@ -448,21 +405,103 @@ def parse_strategy_file(file_path: str, user=None) -> Dict[str, Any]:
             if final_result["timeframe"]:
                 confidence += 0.1
             final_result["confidence_score"] = confidence
-            final_result["parsing_method"] = "ai_regex_merged"
             
-        else:
-            # AI failed or unavailable - use regex results
-            logger.info("Using regex results (AI unavailable or failed)")
-            final_result = regex_result
-            final_result["parsing_method"] = "regex"
+            logger.info(
+                "AI parsing result (chunked): entry=%s, exit=%s, confidence=%.2f",
+                len(final_result["entry_conditions"]),
+                len(final_result["exit_conditions"]),
+                final_result["confidence_score"],
+            )
+            
+            return final_result
         
-        logger.info(f"Final parsing result: method={final_result.get('parsing_method')}, "
-                   f"entry={len(final_result.get('entry_conditions', []))}, "
-                   f"exit={len(final_result.get('exit_conditions', []))}, "
-                   f"confidence={final_result.get('confidence_score', 0.0):.2f}")
+        # Process normally if no chunking needed
+        ai_result = parse_with_gemini(text, user=user)
         
+        logger.debug(f"[NLP_PARSER] AI result received: ai_status={ai_result.get('ai_status') if isinstance(ai_result, dict) else 'NOT_DICT'}")
+
+        if not isinstance(ai_result, dict):
+            logger.error(f"[NLP_PARSER] Invalid AI result type: {type(ai_result)}")
+            raise RuntimeError("پاسخ نامعتبر از ChatGPT دریافت شد.")
+
+        if ai_result.get('ai_status') != 'ok':
+            message = ai_result.get('message') or ai_result.get('error') or 'AI parsing failed'
+            error_details = ai_result.get('error', '')
+            provider_attempts = ai_result.get('provider_attempts', [])
+            
+            # Log error only once - details are already logged in provider_manager and gemini_client
+            # Only log a summary to avoid duplicate logs
+            status_code = None
+            if provider_attempts and len(provider_attempts) > 0:
+                status_code = provider_attempts[0].get('status_code')
+            
+            # Log different levels based on error type
+            if status_code == 429:
+                # Rate Limit errors - log once with summary (avoid duplicate logs)
+                logger.warning(f"[NLP_PARSER] Rate Limit (429) detected - Provider: {provider_attempts[0].get('provider') if provider_attempts else 'unknown'}")
+            else:
+                # Other errors - log summary only (truncate long messages)
+                error_msg_truncated = message[:100] + "..." if len(message) > 100 else message
+                logger.error(f"[NLP_PARSER] AI parsing failed: {error_msg_truncated}")
+                # Log provider attempt details only if needed for debugging (use debug level)
+                if provider_attempts:
+                    logger.debug(f"[NLP_PARSER] Error details: {error_details[:200] if error_details else 'N/A'}")
+                    for i, attempt in enumerate(provider_attempts, 1):
+                        logger.debug(f"[NLP_PARSER] Provider attempt {i}: {attempt.get('provider')}, status={attempt.get('status_code')}")
+            
+            # به جای raise RuntimeError، یک dictionary با اطلاعات خطا برگردانیم
+            # این باعث می‌شود که در api/views.py بتوانیم Rate Limit errors را به درستی handle کنیم
+            
+            return {
+                "error": message,
+                "error_type": "ai_parsing_failed",
+                "provider_attempts": provider_attempts,
+                "status_code": status_code,
+                "entry_conditions": [],
+                "exit_conditions": [],
+                "risk_management": {},
+                "timeframe": None,
+                "symbol": None,
+                "indicators": [],
+                "raw_excerpt": "",
+                "confidence_score": 0.0,
+                "parsing_method": "error"
+            }
+
+        final_result = {
+            "entry_conditions": ai_result.get('entry_conditions', []),
+            "exit_conditions": ai_result.get('exit_conditions', []),
+            "risk_management": ai_result.get('risk_management', {}),
+            "timeframe": ai_result.get('timeframe'),
+            "symbol": ai_result.get('symbol'),
+            "indicators": ai_result.get('indicators', []),
+            "raw_excerpt": text[:2000],
+            "confidence_score": 0.0,
+            "parsing_method": "ai"
+        }
+
+        confidence = 0.0
+        if final_result["entry_conditions"]:
+            confidence += 0.3
+        if final_result["exit_conditions"]:
+            confidence += 0.3
+        if final_result["risk_management"]:
+            confidence += 0.2
+        if final_result["indicators"]:
+            confidence += 0.1
+        if final_result["timeframe"]:
+            confidence += 0.1
+        final_result["confidence_score"] = confidence
+
+        logger.info(
+            "AI parsing result: entry=%s, exit=%s, confidence=%.2f",
+            len(final_result["entry_conditions"]),
+            len(final_result["exit_conditions"]),
+            final_result["confidence_score"],
+        )
+
         return final_result
-        
+
     except Exception as e:
         logger.error(f"Error parsing strategy file {file_path}: {e}")
         import traceback
