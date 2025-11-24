@@ -5,7 +5,10 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
 from rest_framework.serializers import ValidationError
 from django.shortcuts import get_object_or_404
-from django.http import Http404
+from django.http import Http404, FileResponse
+import os
+import mimetypes
+from urllib.parse import quote
 from django.utils import timezone
 from django.db import transaction
 from django.db.models import Q
@@ -75,6 +78,91 @@ from .mt5_client import (
 )
 import logging
 import types
+import time
+import redis
+from redis.exceptions import RedisError
+
+
+CELERY_CHECK_CACHE = {
+    'timestamp': 0.0,
+    'available': False,
+}
+CELERY_CHECK_TTL_SECONDS = 30
+
+MT5_CHECK_CACHE = {
+    'timestamp': 0.0,
+    'available': False,
+    'message': None,
+}
+MT5_CHECK_TTL_SECONDS = 30
+
+
+def _is_celery_available_quick():
+    """Determine Celery availability with a very fast broker probe.
+    
+    The previous implementation attempted to establish a full Celery connection
+    on every request, which could block for long periods when Redis/broker was
+    down. That delay surfaced in the UI as a timeout when starting a backtest.
+    """
+    now = time.monotonic()
+    if now - CELERY_CHECK_CACHE['timestamp'] < CELERY_CHECK_TTL_SECONDS:
+        return CELERY_CHECK_CACHE['available']
+    
+    available = False
+    try:
+        from celery import current_app
+        
+        if getattr(current_app.conf, 'task_always_eager', False):
+            available = False
+        else:
+            broker_url = getattr(current_app.conf, 'broker_url', None) or getattr(settings, 'CELERY_BROKER_URL', None)
+            if not broker_url:
+                available = False
+            elif broker_url.startswith(('redis://', 'rediss://')):
+                try:
+                    redis_client = redis.Redis.from_url(
+                        broker_url,
+                        socket_connect_timeout=1.0,
+                        socket_timeout=1.0,
+                    )
+                    redis_client.ping()
+                    available = True
+                except RedisError as redis_error:
+                    logger.warning("Redis broker unreachable: %s", redis_error)
+                    available = False
+            else:
+                try:
+                    from kombu import Connection
+                    conn = Connection(broker_url, connect_timeout=1.0)
+                    conn.connect()
+                    conn.release()
+                    available = True
+                except Exception as kombu_error:
+                    logger.warning("Celery broker unreachable: %s", kombu_error)
+                    available = False
+    except Exception as e:
+        logger.warning("Celery availability check error: %s", e)
+        available = False
+    
+    CELERY_CHECK_CACHE['timestamp'] = now
+    CELERY_CHECK_CACHE['available'] = available
+    return available
+
+
+def _is_mt5_available_cached():
+    """Check MT5 availability with caching to avoid slow initialization on every request."""
+    now = time.monotonic()
+    if now - MT5_CHECK_CACHE['timestamp'] < MT5_CHECK_TTL_SECONDS:
+        return MT5_CHECK_CACHE['available'], MT5_CHECK_CACHE['message']
+    
+    from .mt5_client import is_mt5_available
+    available, message = is_mt5_available()
+    
+    MT5_CHECK_CACHE['timestamp'] = now
+    MT5_CHECK_CACHE['available'] = available
+    MT5_CHECK_CACHE['message'] = message
+    return available, message
+
 import time
 from .utils import get_user_friendly_api_error_message, get_user_strategy_or_404  # توابع کمکی مدیریت پیام خطا
 from .sms_service import send_sms
@@ -494,6 +582,58 @@ class APIConfigurationViewSet(viewsets.ModelViewSet):
                     'provider': 'gemini'
                 }, status=status.HTTP_400_BAD_REQUEST)
         
+        elif api_config.provider == 'gapgpt':
+            # Special handling for GapGPT API
+            try:
+                test_key = (api_config.api_key or "").strip()
+                if not test_key:
+                    return Response({
+                        'status': 'error',
+                        'message': 'کلید API خالی است',
+                        'provider': 'gapgpt'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+                # Import GapGPT test function
+                from ai_module.gapgpt_client import test_gapgpt_api_key
+                
+                # Run the test
+                test_result = test_gapgpt_api_key(test_key, user=request.user if request.user.is_authenticated else None)
+                
+                if test_result.get('success'):
+                    response_data = {
+                        'status': 'success',
+                        'message': test_result.get('message', 'GapGPT API connection successful.'),
+                        'provider': 'gapgpt',
+                        'data_points': test_result.get('available_models', 0)
+                    }
+                    # Add optional fields if available
+                    if 'model_used' in test_result:
+                        response_data['model_used'] = test_result['model_used']
+                    if 'tokens_used' in test_result:
+                        response_data['tokens_used'] = test_result['tokens_used']
+                    if 'models' in test_result:
+                        response_data['available_models'] = test_result['models']
+                    
+                    return Response(response_data)
+                else:
+                    error_msg = test_result.get('message', test_result.get('error', 'Unknown error'))
+                    status_code = test_result.get('status_code', status.HTTP_400_BAD_REQUEST)
+                    
+                    return Response({
+                        'status': 'error',
+                        'message': error_msg,
+                        'provider': 'gapgpt',
+                        'details': test_result.get('error')
+                    }, status=status_code)
+            
+            except Exception as e:
+                logger.exception(f"GapGPT API test failed with exception: {e}")
+                return Response({
+                    'status': 'error',
+                    'message': f'GapGPT API test failed: {str(e)}',
+                    'provider': 'gapgpt'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
         elif api_config.provider in {'openai', 'chatgpt', 'gpt', 'gpt4', 'gpt-4', 'cohere', 'openrouter', 'together_ai', 'deepinfra', 'groq'}:
             try:
                 test_key = (api_config.api_key or "").strip()
@@ -789,15 +929,23 @@ class BacktestPrecheckView(APIView):
                 
                 strategy = marketplace_access.listing.strategy
 
-            # Parse strategy file to extract requirements (symbol at minimum)
-            from ai_module.nlp_parser import parse_strategy_file
-            if not strategy.strategy_file:
-                return Response({
-                    'status': 'error', 
-                    'message': 'استراتژی انتخاب شده فایل ندارد. لطفاً ابتدا استراتژی را آپلود کنید.'
-                }, status=status.HTTP_400_BAD_REQUEST)
+            # Use pre-processed strategy data if available, otherwise parse on the fly
+            # IMPORTANT: If parsed_strategy_data exists and processing_status is 'processed',
+            # we don't need to parse the file again. This avoids slow re-parsing on every precheck.
+            if strategy.parsed_strategy_data and strategy.processing_status == 'processed':
+                parsed = strategy.parsed_strategy_data
+                logger.debug(f"Precheck: Using pre-processed strategy data for strategy {strategy.id}")
+            else:
+                # Parse strategy file on the fly (backward compatibility)
+                from ai_module.nlp_parser import parse_strategy_file
+                if not strategy.strategy_file:
+                    return Response({
+                        'status': 'error', 
+                        'message': 'استراتژی انتخاب شده فایل ندارد. لطفاً ابتدا استراتژی را آپلود کنید.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+                parsed = parse_strategy_file(strategy.strategy_file.path, user=request.user)
             
-            parsed = parse_strategy_file(strategy.strategy_file.path, user=request.user)
             # Default to XAU/USD (Gold) as it's the primary symbol for this trading system
             symbol = parsed.get('symbol') or 'XAU/USD'
 
@@ -825,8 +973,8 @@ class BacktestPrecheckView(APIView):
                 except Exception as e:
                     details['provider_checks'].append({'provider': provider, 'status': 'error', 'message': str(e)})
 
-            # Probe MT5 availability regardless, as a fallback option
-            mt5_ok, mt5_msg = is_mt5_available()
+            # Probe MT5 availability regardless, as a fallback option (with caching)
+            mt5_ok, mt5_msg = _is_mt5_available_cached()
             details['mt5'] = {'available': mt5_ok, 'message': mt5_msg}
 
             # Decide readiness and user-facing guidance
@@ -922,6 +1070,147 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             'is_primary': strategy.is_primary,
             'message': message
         })
+    
+    @action(detail=True, methods=['post'], url_path='save-gapgpt-conversion')
+    def save_gapgpt_conversion(self, request, pk=None):
+        """
+        ذخیره استراتژی تبدیل شده با GapGPT
+        
+        Body:
+        - converted_strategy: استراتژی تبدیل شده (JSON)
+        - model_used: مدل استفاده شده (optional)
+        - tokens_used: تعداد توکن‌های استفاده شده (optional)
+        
+        Returns:
+            استراتژی به‌روز شده
+        """
+        strategy = self.get_object()
+        
+        # بررسی دسترسی
+        if not (request.user.is_staff or request.user.is_superuser or strategy.user == request.user):
+            return Response({
+                'status': 'error',
+                'message': 'شما دسترسی به این استراتژی ندارید'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            converted_strategy = request.data.get('converted_strategy')
+            if not converted_strategy:
+                return Response({
+                    'status': 'error',
+                    'message': 'استراتژی تبدیل شده (converted_strategy) الزامی است'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # اگر converted_strategy یک string JSON است، آن را parse کن
+            if isinstance(converted_strategy, str):
+                import json
+                try:
+                    converted_strategy = json.loads(converted_strategy)
+                except json.JSONDecodeError:
+                    return Response({
+                        'status': 'error',
+                        'message': 'فرمت استراتژی تبدیل شده نامعتبر است'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # ذخیره استراتژی تبدیل شده در parsed_strategy_data
+            from django.utils import timezone
+            from time import time
+            
+            # اضافه کردن metadata
+            if not isinstance(converted_strategy, dict):
+                converted_strategy = {'data': converted_strategy}
+            
+            # اضافه کردن اطلاعات GapGPT
+            converted_strategy['conversion_source'] = 'gapgpt'
+            converted_strategy['converted_at'] = timezone.now().isoformat()
+            converted_strategy['model_used'] = request.data.get('model_used', 'unknown')
+            converted_strategy['tokens_used'] = request.data.get('tokens_used', 0)
+            
+            # اضافه کردن confidence_score در صورت عدم وجود
+            if 'confidence_score' not in converted_strategy:
+                # محاسبه confidence score بر اساس کامل بودن استراتژی
+                score = 0.0
+                if converted_strategy.get('entry_conditions'):
+                    score += 0.3
+                if converted_strategy.get('exit_conditions'):
+                    score += 0.3
+                if converted_strategy.get('indicators'):
+                    score += 0.2
+                if converted_strategy.get('risk_management'):
+                    score += 0.2
+                converted_strategy['confidence_score'] = min(score, 1.0)
+            
+            # ذخیره
+            strategy.parsed_strategy_data = converted_strategy
+            strategy.processing_status = 'processed'
+            strategy.processed_at = timezone.now()
+            strategy.processing_error = ''
+            strategy.save()
+            
+            logger.info(f"Saved GapGPT conversion for strategy {strategy.id}")
+            
+            return Response({
+                'status': 'success',
+                'message': 'استراتژی تبدیل شده با موفقیت ذخیره شد',
+                'strategy': TradingStrategySerializer(strategy).data
+            })
+            
+        except Exception as e:
+            logger.error(f"Error saving GapGPT conversion: {e}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f'خطا در ذخیره استراتژی: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=True, methods=['get'], url_path='file-content')
+    def get_file_content(self, request, pk=None):
+        """
+        دریافت محتوای فایل استراتژی
+        
+        Returns:
+            محتوای فایل استراتژی به صورت متن
+        """
+        strategy = self.get_object()
+        
+        # بررسی دسترسی
+        if not (request.user.is_staff or request.user.is_superuser or strategy.user == request.user):
+            return Response({
+                'status': 'error',
+                'message': 'شما دسترسی به این استراتژی ندارید'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        if not strategy.strategy_file:
+            return Response({
+                'status': 'error',
+                'message': 'فایل استراتژی یافت نشد'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        try:
+            from ai_module.nlp_parser import extract_text_from_file
+            import os
+            
+            strategy_file_path = strategy.strategy_file.path
+            if not os.path.exists(strategy_file_path):
+                return Response({
+                    'status': 'error',
+                    'message': f'فایل در مسیر یافت نشد: {strategy_file_path}'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            file_content = extract_text_from_file(strategy_file_path)
+            
+            return Response({
+                'status': 'success',
+                'content': file_content,
+                'file_name': os.path.basename(strategy.strategy_file.name),
+                'file_size': len(file_content)
+            })
+            
+        except Exception as e:
+            logger.error(f"Error reading strategy file content: {e}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f'خطا در خواندن فایل: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @action(detail=True, methods=['post'])
     def process(self, request, pk=None):
@@ -1753,6 +2042,69 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                 'status': 'error',
                 'message': f'Error processing strategy: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=True, methods=['get'], url_path='download')
+    def download(self, request, pk=None):
+        """دانلود فایل استراتژی - همان فایل آپلود شده"""
+        strategy = self.get_object()
+        
+        # بررسی دسترسی
+        if not (request.user.is_staff or request.user.is_superuser or strategy.user == request.user):
+            return Response({
+                'status': 'error',
+                'message': 'شما دسترسی به این استراتژی ندارید'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # بررسی وجود فایل
+        if not strategy.strategy_file:
+            return Response({
+                'status': 'error',
+                'message': 'فایل استراتژی یافت نشد'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        try:
+            file_path = strategy.strategy_file.path
+            if not os.path.exists(file_path):
+                return Response({
+                    'status': 'error',
+                    'message': 'فایل در سرور یافت نشد'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # دریافت نام فایل اصلی (همان نام آپلود شده) با حفظ پسوند کامل
+            original_filename = os.path.basename(strategy.strategy_file.name)
+            
+            # تعیین Content-Type بر اساس پسوند فایل
+            # برای فایل‌های Word (.docx) باید content type درست باشد
+            content_type, _ = mimetypes.guess_type(original_filename)
+            if not content_type:
+                # Fallback برای انواع فایل‌های رایج
+                file_ext = os.path.splitext(original_filename)[1].lower()
+                content_type_map = {
+                    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    '.doc': 'application/msword',
+                    '.pdf': 'application/pdf',
+                    '.txt': 'text/plain',
+                    '.md': 'text/markdown',
+                }
+                content_type = content_type_map.get(file_ext, 'application/octet-stream')
+            
+            # باز کردن فایل و ارسال آن (همان فایل آپلود شده - باینری)
+            file = open(file_path, 'rb')
+            response = FileResponse(file, content_type=content_type, as_attachment=True)
+            
+            # Encode کردن نام فایل برای پشتیبانی از کاراکترهای فارسی و خاص
+            # استفاده از RFC 2231 برای پشتیبانی بهتر از کاراکترهای غیر ASCII
+            encoded_filename = quote(original_filename, safe='')
+            # استفاده از هر دو فرمت برای سازگاری بیشتر با مرورگرها
+            response['Content-Disposition'] = f'attachment; filename="{original_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+            
+            return response
+        except Exception as e:
+            logger.error(f"Error downloading strategy file {strategy.id}: {str(e)}")
+            return Response({
+                'status': 'error',
+                'message': f'خطا در دانلود فایل: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class StrategyMarketplaceViewSet(viewsets.ModelViewSet):
@@ -2176,6 +2528,7 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
         symbol_override = serializer.validated_data.get('symbol')
         initial_capital = serializer.validated_data.get('initial_capital', 10000)
         selected_indicators = serializer.validated_data.get('selected_indicators', [])
+        ai_provider = serializer.validated_data.get('ai_provider', None)
         
         user = request.user
         marketplace_access = None
@@ -2239,47 +2592,21 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
         if marketplace_access and job_type == 'backtest':
             marketplace_access.increment_backtests(save=True)
         
-        # Helper function to check if Celery is available
-        def is_celery_available():
-            """Check if Celery/Redis is available for async task execution"""
-            try:
-                from config.celery import app as celery_app
-                from celery import current_app
-                
-                # Check if task_always_eager is False (meaning async is enabled)
-                if current_app.conf.task_always_eager:
-                    return False
-                
-                # Try to check Redis connection by inspecting broker connection
-                broker_url = celery_app.conf.broker_url
-                if not broker_url:
-                    return False
-                
-                # Try to ping the broker (this will fail if Redis is not available)
-                try:
-                    with celery_app.connection() as conn:
-                        conn.ensure_connection(max_retries=1)
-                    return True
-                except Exception:
-                    return False
-            except Exception as e:
-                logger.warning(f"Celery availability check failed: {e}")
-                return False
-        
         # Try to run task asynchronously if Celery is available
-        celery_available = is_celery_available()
+        celery_available = _is_celery_available_quick()
         
         if celery_available:
             # Run task asynchronously using Celery
             try:
                 if job_type == 'backtest':
-                    logger.info(f"Starting async backtest task for job {job.id}, strategy {strategy_id}, timeframe {timeframe_days} days")
+                    logger.info(f"Starting async backtest task for job {job.id}, strategy {strategy_id}, timeframe {timeframe_days} days, ai_provider={ai_provider}")
                     run_backtest_task.delay(
                         job.id,
                         timeframe_days=timeframe_days,
                         symbol_override=symbol_override,
                         initial_capital=initial_capital,
-                        selected_indicators=selected_indicators
+                        selected_indicators=selected_indicators,
+                        ai_provider=ai_provider
                     )
                 else:
                     logger.info(f"Starting async demo trade task for job {job.id}")
@@ -2294,25 +2621,45 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
                 celery_available = False  # Fallback to sync
         
         # Fallback: Run synchronously if Celery is not available
+        # اما برای جلوگیری از timeout، حتی در حالت sync هم job را ایجاد می‌کنیم و در background اجرا می‌کنیم
         if not celery_available:
             logger.warning(
-                f"Celery/Redis is not available. Running {job_type} task synchronously for job {job.id}. "
-                "This may cause timeout for long-running tasks. Please start Redis and Celery worker for better performance."
+                f"Celery/Redis is not available. For backtest jobs, we'll create the job and return immediately. "
+                "The task will run in a separate thread to avoid timeout. Please start Redis and Celery worker for better performance."
             )
             
-            try:
-                if job_type == 'backtest':
-                    logger.info(f"Starting synchronous backtest for job {job.id}, strategy {strategy_id}, timeframe {timeframe_days} days")
-                    run_backtest_task(job.id, timeframe_days=timeframe_days, symbol_override=symbol_override, initial_capital=initial_capital, selected_indicators=selected_indicators)
-                else:
-                    run_demo_trade_task(job.id)
+            # برای بک تست، حتی اگر Celery در دسترس نباشد، job را ایجاد می‌کنیم و در background اجرا می‌کنیم
+            if job_type == 'backtest':
+                import threading
+                def run_backtest_in_thread():
+                    try:
+                        logger.info(f"Starting synchronous backtest in thread for job {job.id}, strategy {strategy_id}, timeframe {timeframe_days} days, ai_provider={ai_provider}")
+                        run_backtest_task(job.id, timeframe_days=timeframe_days, symbol_override=symbol_override, initial_capital=initial_capital, selected_indicators=selected_indicators, ai_provider=ai_provider)
+                        job.refresh_from_db()
+                        logger.info(f"Backtest task completed in thread for job {job.id}, status: {job.status}, result_id: {job.result_id}")
+                    except Exception as e:
+                        logger.error(f"Error executing backtest task in thread for job {job.id}: {e}", exc_info=True)
+                        job.refresh_from_db()
+                        job.status = 'failed'
+                        job.error_message = str(e)
+                        job.save()
                 
-                # Refresh job from database to get updated status and result
-                job.refresh_from_db()
-                logger.info(f"Backtest task completed synchronously for job {job.id}, status: {job.status}, result_id: {job.result_id}")
-            except Exception as e:
-                logger.error(f"Error executing {job_type} task synchronously for job {job.id}: {e}", exc_info=True)
-                job.refresh_from_db()
+                # اجرای بک تست در thread جداگانه
+                thread = threading.Thread(target=run_backtest_in_thread, daemon=True)
+                thread.start()
+                
+                # فوراً response را برمی‌گردانیم
+                logger.info(f"Job {job.id} created and backtest started in background thread. Returning immediately.")
+                return Response(JobSerializer(job).data, status=status.HTTP_201_CREATED)
+            else:
+                # برای demo trade، sync اجرا می‌کنیم
+                try:
+                    logger.info(f"Starting synchronous demo trade for job {job.id}")
+                    run_demo_trade_task(job.id)
+                    job.refresh_from_db()
+                except Exception as e:
+                    logger.error(f"Error executing demo trade task synchronously for job {job.id}: {e}", exc_info=True)
+                    job.refresh_from_db()
         
         return Response(JobSerializer(job).data, status=status.HTTP_201_CREATED)
     
@@ -3831,3 +4178,156 @@ class UserAchievementViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = self.get_serializer(achievements, many=True)
         return Response(serializer.data)
 
+
+class GapGPTViewSet(viewsets.ViewSet):
+    """
+    ViewSet for GapGPT API operations
+    مستندات: https://gapgpt.app/platform/quickstart
+    
+    این ViewSet برای تبدیل متن استراتژی‌های معاملاتی به مدل‌های AI مختلف استفاده می‌شود.
+    """
+    
+    @action(detail=False, methods=['get'], url_path='models', permission_classes=[AllowAny])
+    def list_models(self, request):
+        """
+        لیست مدل‌های موجود در GapGPT
+        
+        Returns:
+            لیست مدل‌های قابل استفاده
+        """
+        try:
+            from ai_module.gapgpt_client import get_available_models
+            
+            user = request.user if request.user.is_authenticated else None
+            models = get_available_models(user=user, filter_chat_models=True)
+            
+            return Response({
+                'status': 'success',
+                'models': models,
+                'count': len(models)
+            })
+        except Exception as e:
+            logger.error(f"Error listing GapGPT models: {e}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f'خطا در دریافت لیست مدل‌ها: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['post'], url_path='convert', permission_classes=[AllowAny])
+    def convert_strategy(self, request):
+        """
+        تبدیل استراتژی با استفاده از GapGPT
+        
+        Body:
+        - strategy_text: متن استراتژی (required)
+        - model_id: ID مدل (optional, default: gpt-4o)
+        - temperature: دما (optional, default: 0.3)
+        - max_tokens: حداکثر توکن (optional, default: 4000)
+        
+        Returns:
+            استراتژی تبدیل شده
+        """
+        try:
+            from ai_module.gapgpt_client import convert_strategy_with_gapgpt
+            
+            strategy_text = request.data.get('strategy_text')
+            model_id = request.data.get('model_id', None)
+            temperature = float(request.data.get('temperature', 0.3))
+            max_tokens = int(request.data.get('max_tokens', 4000))
+            
+            if not strategy_text:
+                return Response({
+                    'status': 'error',
+                    'message': 'متن استراتژی (strategy_text) الزامی است'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            user = request.user if request.user.is_authenticated else None
+            
+            # افزایش timeout برای تبدیل استراتژی (ممکن است طول بکشد)
+            result = convert_strategy_with_gapgpt(
+                strategy_text=strategy_text,
+                model_id=model_id,
+                user=user,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=120  # 120 ثانیه timeout برای تبدیل استراتژی
+            )
+            
+            if result['success']:
+                return Response({
+                    'status': 'success',
+                    'data': result
+                })
+            else:
+                return Response({
+                    'status': 'error',
+                    'message': result.get('error', 'خطای نامشخص'),
+                    'data': result
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+        except ValueError as e:
+            return Response({
+                'status': 'error',
+                'message': f'پارامتر نامعتبر: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Error converting strategy with GapGPT: {e}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f'خطا در تبدیل استراتژی: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['post'], url_path='compare-models', permission_classes=[AllowAny])
+    def compare_models(self, request):
+        """
+        تبدیل استراتژی با چندین مدل و مقایسه نتایج برای پیدا کردن بهترین
+        
+        Body:
+        - strategy_text: متن استراتژی (required)
+        - models: لیست ID مدل‌ها (optional, اگر نباشد از مدل‌های پیش‌فرض استفاده می‌شود)
+        
+        Returns:
+            نتایج تمام مدل‌ها و بهترین نتیجه
+        """
+        try:
+            from ai_module.gapgpt_client import analyze_strategy_with_multiple_models
+            
+            strategy_text = request.data.get('strategy_text')
+            models = request.data.get('models', None)
+            temperature = float(request.data.get('temperature', 0.3))
+            max_tokens = int(request.data.get('max_tokens', 4000))
+            
+            if not strategy_text:
+                return Response({
+                    'status': 'error',
+                    'message': 'متن استراتژی (strategy_text) الزامی است'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            user = request.user if request.user.is_authenticated else None
+            
+            # افزایش timeout برای مقایسه مدل‌ها (ممکن است بیشتر طول بکشد)
+            result = analyze_strategy_with_multiple_models(
+                strategy_text=strategy_text,
+                models=models,
+                user=user,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=180  # 180 ثانیه (3 دقیقه) برای مقایسه چند مدل
+            )
+            
+            return Response({
+                'status': 'success',
+                'data': result
+            })
+                
+        except ValueError as e:
+            return Response({
+                'status': 'error',
+                'message': f'پارامتر نامعتبر: {str(e)}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Error comparing models with GapGPT: {e}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f'خطا در مقایسه مدل‌ها: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

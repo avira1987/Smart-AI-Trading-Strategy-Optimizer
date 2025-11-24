@@ -60,6 +60,48 @@ const client = axios.create({
   timeout: 10000, // 10 second timeout to prevent hanging
 })
 
+// Client with longer timeout for GapGPT operations (can take 30-60 seconds)
+const gapGPTClient = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  withCredentials: true,
+  timeout: 120000, // 120 seconds (2 minutes) timeout for GapGPT API calls
+})
+
+// Add request interceptor to gapGPTClient for CSRF token
+gapGPTClient.interceptors.request.use(
+  (config) => {
+    const csrfToken = getCsrfToken()
+    if (csrfToken) {
+      if (config.method && ['post', 'put', 'patch', 'delete'].includes(config.method.toLowerCase())) {
+        config.headers['X-CSRFToken'] = csrfToken
+      }
+    }
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
+
+// Add response interceptor to gapGPTClient (same as client)
+gapGPTClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Log network errors for debugging
+    if (!error.response) {
+      console.error('GapGPT Network error:', {
+        message: error.message,
+        code: error.code,
+        url: error.config?.url,
+      })
+    }
+    return Promise.reject(error)
+  }
+)
+
 // Add request interceptor to include CSRF token
 client.interceptors.request.use(
   (config) => {
@@ -337,16 +379,23 @@ export const getStrategyProgress = (id: number) => client.get(`/strategies/${id}
 export const generateStrategyQuestions = (id: number) => client.post(`/strategies/${id}/generate_questions/`)
 export const processStrategyWithAnswers = (id: number) => client.post(`/strategies/${id}/process_with_answers/`)
 export const setPrimaryStrategy = (id: number) => client.post(`/strategies/${id}/set-primary/`)
+export const downloadStrategy = (id: number) => client.get(`/strategies/${id}/download/`, {
+  responseType: 'blob',
+})
+export const getStrategyFileContent = (id: number) => 
+  client.get<{status: string, content: string, file_name: string, file_size: number}>(`/strategies/${id}/file-content/`)
+export const saveGapGPTConversion = (id: number, data: { converted_strategy: any, model_used?: string, tokens_used?: number }) => 
+  client.post(`/strategies/${id}/save-gapgpt-conversion/`, data)
 
 // Jobs
 export const getJobs = () => client.get('/jobs/')
-export const createJob = (data: { strategy: number, job_type: string, timeframe_days?: number, symbol?: string, initial_capital?: number, selected_indicators?: string[] }) => 
+export const createJob = (data: { strategy: number, job_type: string, timeframe_days?: number, symbol?: string, initial_capital?: number, selected_indicators?: string[], ai_provider?: string }) => 
   client.post(
     '/jobs/',
     data,
     data.job_type === 'backtest'
       ? {
-          timeout: 30000, // 30 seconds - job creation should be fast now (async execution)
+          timeout: 60000, // 60 seconds - job creation should be fast (async execution), but allow more time for sync fallback
         }
       : undefined
   )
@@ -770,4 +819,65 @@ export async function getUserActivityLogs(limit: number = 50, offset: number = 0
 }
 
 export default client
+
+// ==================== GapGPT API Functions ====================
+
+export interface GapGPTModel {
+  id: string
+  name: string
+  description: string
+  owned_by: string
+  endpoint_types: string[]
+}
+
+export interface GapGPTConvertRequest {
+  strategy_text: string
+  model_id?: string
+  temperature?: number
+  max_tokens?: number
+}
+
+export interface GapGPTConvertResponse {
+  status: 'success' | 'error'
+  data?: {
+    success: boolean
+    converted_strategy: any
+    model_used: string
+    tokens_used: number
+    latency_ms: number
+    raw_response?: string
+    error?: string
+  }
+  message?: string
+}
+
+export interface GapGPTCompareResponse {
+  status: 'success' | 'error'
+  data?: {
+    all_results: Record<string, any>
+    best_result: {
+      model_id: string
+      result: any
+      score: number
+    }
+    models_tested: string[]
+    summary: {
+      total_models: number
+      successful_models: number
+      failed_models: number
+      best_model_id: string | null
+      best_score: number
+    }
+  }
+  message?: string
+}
+
+export const getGapGPTModels = () => 
+  gapGPTClient.get<{status: string, models: GapGPTModel[], count: number}>('/gapgpt/models/')
+
+export const convertStrategyWithGapGPT = (data: GapGPTConvertRequest) => 
+  gapGPTClient.post<GapGPTConvertResponse>('/gapgpt/convert/', data)
+
+export const compareModelsWithGapGPT = (data: { strategy_text: string, models?: string[], temperature?: number, max_tokens?: number }) => 
+  gapGPTClient.post<GapGPTCompareResponse>('/gapgpt/compare-models/', data)
 

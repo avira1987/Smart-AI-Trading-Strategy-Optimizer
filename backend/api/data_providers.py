@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Tuple
 import os
 import time
+import re
 from django.conf import settings
 import logging
 from dataclasses import dataclass
@@ -655,6 +656,67 @@ class DataProviderManager:
             candidate = candidate.replace("-", "")
         return candidate or "XAUUSD"
 
+    def _interval_to_mt5_timeframe(self, interval: Optional[str]) -> str:
+        """Normalize arbitrary interval/timeframe strings to MT5 timeframe identifiers."""
+        if not interval:
+            return "M15"
+
+        value = str(interval).strip().upper()
+        direct_map = {
+            "1MIN": "M1",
+            "MIN1": "M1",
+            "M1": "M1",
+            "5MIN": "M5",
+            "MIN5": "M5",
+            "M5": "M5",
+            "15MIN": "M15",
+            "MIN15": "M15",
+            "M15": "M15",
+            "30MIN": "M30",
+            "MIN30": "M30",
+            "M30": "M30",
+            "1H": "H1",
+            "H1": "H1",
+            "1HR": "H1",
+            "60MIN": "H1",
+            "4H": "H4",
+            "H4": "H4",
+            "240MIN": "H4",
+            "1DAY": "D1",
+            "DAILY": "D1",
+            "DAY": "D1",
+            "D1": "D1",
+        }
+        if value in direct_map:
+            return direct_map[value]
+
+        minute_match = re.search(r"(\d+)\s*(?:MIN|دقیقه)", value)
+        if minute_match:
+            minutes = int(minute_match.group(1))
+            if minutes <= 1:
+                return "M1"
+            if minutes <= 5:
+                return "M5"
+            if minutes <= 15:
+                return "M15"
+            if minutes <= 30:
+                return "M30"
+            return "M15"
+
+        hour_match = re.search(r"(\d+)\s*(?:H|ساعت)", value)
+        if hour_match:
+            hours = int(hour_match.group(1))
+            if hours <= 1:
+                return "H1"
+            if hours <= 4:
+                return "H4"
+            return "H1"
+
+        if "W" in value:
+            return "D1"
+
+        return "M15"
+
     def _estimate_mt5_count(self, timeframe_days: int, interval: str) -> int:
         interval = (interval or "").lower()
         bars_per_day_map = {
@@ -690,7 +752,7 @@ class DataProviderManager:
         if provider is None:
             raise RuntimeError("MT5 provider is not initialized")
 
-        mt5_timeframe = 'M15'
+        mt5_timeframe = self._interval_to_mt5_timeframe(interval)
         count = self._estimate_mt5_count(timeframe_days, interval)
         try:
             data = provider.get_historical_data(mt5_symbol, timeframe=mt5_timeframe, count=count)
