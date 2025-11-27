@@ -107,6 +107,148 @@ export default function About() {
           </section>
 
           <section>
+            <h2 className="text-2xl font-semibold text-blue-400 mb-4">سبک‌های استراتژی قابل بک‌تست</h2>
+            <div className="bg-gray-900 rounded-lg p-6 space-y-6">
+              <p className="text-gray-300 leading-relaxed mb-4">
+                این سیستم از انواع مختلف استراتژی‌های معاملاتی پشتیبانی می‌کند. شما می‌توانید استراتژی‌های خود را به صورت فایل متنی (فارسی یا انگلیسی) آپلود کنید و سیستم به صورت خودکار آن‌ها را تجزیه و تحلیل کرده و بک‌تست کند.
+              </p>
+
+              {/* استراتژی‌های مبتنی بر اندیکاتور */}
+              <div>
+                <h3 className="text-xl font-semibold text-yellow-400 mb-3">1. استراتژی‌های مبتنی بر اندیکاتورهای تکنیکال</h3>
+                <p className="text-gray-300 mb-3">سیستم از 10+ اندیکاتور تکنیکال پیشرفته پشتیبانی می‌کند:</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mr-4">
+                  <div className="bg-gray-800 rounded-lg p-4">
+                    <h4 className="text-lg font-semibold text-blue-300 mb-2">RSI (Relative Strength Index)</h4>
+                    <ul className="text-gray-300 text-sm space-y-1 list-disc list-inside">
+                      <li>ورود: RSI زیر 30 (اشباع فروش)</li>
+                      <li>خروج: RSI بالای 70 (اشباع خرید)</li>
+                    </ul>
+                  </div>
+                  <div className="bg-gray-800 rounded-lg p-4">
+                    <h4 className="text-lg font-semibold text-blue-300 mb-2">MACD</h4>
+                    <ul className="text-gray-300 text-sm space-y-1 list-disc list-inside">
+                      <li>ورود: تقاطع صعودی MACD با خط سیگنال</li>
+                      <li>خروج: تقاطع نزولی MACD با خط سیگنال</li>
+                    </ul>
+                  </div>
+                  <div className="bg-gray-800 rounded-lg p-4">
+                    <h4 className="text-lg font-semibold text-blue-300 mb-2">Moving Averages</h4>
+                    <ul className="text-gray-300 text-sm space-y-1 list-disc list-inside">
+                      <li>SMA: تقاطع SMA 20 و SMA 50</li>
+                      <li>EMA: تقاطع EMA 12 و EMA 26</li>
+                    </ul>
+                  </div>
+                  <div className="bg-gray-800 rounded-lg p-4">
+                    <h4 className="text-lg font-semibold text-blue-300 mb-2">Bollinger Bands</h4>
+                    <ul className="text-gray-300 text-sm space-y-1 list-disc list-inside">
+                      <li>ورود: قیمت به زیر باند پایین</li>
+                      <li>خروج: قیمت به بالای باند بالایی</li>
+                    </ul>
+                  </div>
+                  <div className="bg-gray-800 rounded-lg p-4">
+                    <h4 className="text-lg font-semibold text-blue-300 mb-2">Stochastic Oscillator</h4>
+                    <ul className="text-gray-300 text-sm space-y-1 list-disc list-inside">
+                      <li>ورود: استوکاستیک در منطقه اشباع فروش (&lt; 20)</li>
+                      <li>خروج: استوکاستیک در منطقه اشباع خرید (&gt; 80)</li>
+                    </ul>
+                  </div>
+                  <div className="bg-gray-800 rounded-lg p-4">
+                    <h4 className="text-lg font-semibold text-blue-300 mb-2">سایر اندیکاتورها</h4>
+                    <ul className="text-gray-300 text-sm space-y-1 list-disc list-inside">
+                      <li>Williams %R</li>
+                      <li>ATR (Average True Range)</li>
+                      <li>ADX (Average Directional Index)</li>
+                      <li>CCI (Commodity Channel Index)</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              {/* استراتژی‌های متنی */}
+              <div>
+                <h3 className="text-xl font-semibold text-yellow-400 mb-3">2. استراتژی‌های متنی سفارشی</h3>
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <p className="text-gray-300 mb-3">شما می‌توانید استراتژی‌های خود را به صورت فایل Word/Docx/TXT آپلود کنید:</p>
+                  <ul className="text-gray-300 space-y-2 list-disc list-inside mr-4">
+                    <li>پشتیبانی کامل از فارسی و انگلیسی</li>
+                    <li>استخراج خودکار شرایط ورود/خروج با NLP و AI</li>
+                    <li>ترکیب چند شرط با AND/OR</li>
+                    <li>مثال: "ورود زمانی که RSI زیر 30 باشد و MACD تقاطع صعودی داشته باشد"</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* استراتژی‌های ترکیبی */}
+              <div>
+                <h3 className="text-xl font-semibold text-yellow-400 mb-3">3. استراتژی‌های ترکیبی</h3>
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <ul className="text-gray-300 space-y-2 list-disc list-inside mr-4">
+                    <li>ترکیب استراتژی متنی با اندیکاتورها (AND)</li>
+                    <li>ترکیب چند اندیکاتور (OR)</li>
+                    <li>ترکیب شرایط قیمت با اندیکاتورها</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* Price Action */}
+              <div>
+                <h3 className="text-xl font-semibold text-yellow-400 mb-3">4. استراتژی‌های مبتنی بر Price Action</h3>
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <ul className="text-gray-300 space-y-2 list-disc list-inside mr-4">
+                    <li>شرایط مبتنی بر قیمت (مثل "قیمت بالای 2000")</li>
+                    <li>الگوهای کندل استیک (در صورت تعریف در متن)</li>
+                    <li>شکست سطوح حمایت/مقاومت</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* مدیریت ریسک */}
+              <div>
+                <h3 className="text-xl font-semibold text-yellow-400 mb-3">5. استراتژی‌های مدیریت ریسک</h3>
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <ul className="text-gray-300 space-y-2 list-disc list-inside mr-4">
+                    <li>Stop Loss (پیپ، درصد، یا قیمت)</li>
+                    <li>Take Profit (پیپ، درصد، یا قیمت)</li>
+                    <li>Risk per Trade (درصد سرمایه)</li>
+                    <li>مدیریت حجم معامله</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* چند نماد */}
+              <div>
+                <h3 className="text-xl font-semibold text-yellow-400 mb-3">6. استراتژی‌های چند نماد</h3>
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <p className="text-gray-300 mb-2">پشتیبانی از نمادهای مختلف:</p>
+                  <ul className="text-gray-300 space-y-1 list-disc list-inside mr-4">
+                    <li>XAU/USD (طلا)</li>
+                    <li>EUR/USD</li>
+                    <li>GBP/USD</li>
+                    <li>و سایر نمادهای فارکس</li>
+                  </ul>
+                </div>
+              </div>
+
+              {/* ویژگی‌های بک‌تست */}
+              <div>
+                <h3 className="text-xl font-semibold text-yellow-400 mb-3">متریک‌های عملکرد بک‌تست</h3>
+                <div className="bg-gray-800 rounded-lg p-4">
+                  <ul className="text-gray-300 space-y-2 list-disc list-inside mr-4">
+                    <li><strong>Total Return:</strong> بازده کل استراتژی</li>
+                    <li><strong>Win Rate:</strong> نرخ برد معاملات</li>
+                    <li><strong>Max Drawdown:</strong> حداکثر افت سرمایه</li>
+                    <li><strong>Sharpe Ratio:</strong> نسبت بازده به ریسک</li>
+                    <li><strong>Profit Factor:</strong> نسبت سود به ضرر</li>
+                    <li><strong>Equity Curve:</strong> نمودار رشد سرمایه</li>
+                    <li><strong>تحلیل AI:</strong> تحلیل هوشمند از نتایج</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section>
             <h2 className="text-2xl font-semibold text-blue-400 mb-4">نکات مهم</h2>
             <div className="bg-gray-900 rounded-lg p-4 space-y-3">
               {liveTradingEnabled ? (

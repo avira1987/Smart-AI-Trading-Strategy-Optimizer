@@ -32,6 +32,7 @@ export default function StrategyTesting() {
   const [selectedIndicators, setSelectedIndicators] = useState<string[]>([])
   const [timeframe, setTimeframe] = useState('7')
   const [initialCapital, setInitialCapital] = useState('10000')
+  const [aiProvider, setAiProvider] = useState<string>('auto') // 'auto', 'gapgpt', 'gemini', 'openai'
   const { selectedSymbol } = useSymbol()
   const [symbol, setSymbol] = useState('XAUUSD')
   const [availableSymbols, setAvailableSymbols] = useState<MT5Symbol[]>([])
@@ -190,7 +191,8 @@ export default function StrategyTesting() {
         timeframe_days: Number(timeframe),
         symbol: symbol,
         initial_capital: Number(initialCapital),
-        selected_indicators: selectedIndicators
+        selected_indicators: selectedIndicators,
+        ai_provider: aiProvider !== 'auto' ? aiProvider : undefined
       })
       
       setRunningJob(response.data.id)
@@ -207,12 +209,36 @@ export default function StrategyTesting() {
     } catch (error: any) {
       console.error('Error running backtest:', error)
       if (error?.code === 'ECONNABORTED' || (typeof error?.message === 'string' && error.message.toLowerCase().includes('timeout'))) {
-        const timeoutMessage = 'بک‌تست برای بازه زمانی انتخاب شده بیش از حد زمان نیاز داشت و متوقف شد. لطفاً کمی صبر کنید یا بازه زمانی را کاهش دهید.'
-        showToast(timeoutMessage, { type: 'warning' })
-        setError(timeoutMessage)
+        // اگر timeout رخ داد، ممکن است job ایجاد شده باشد اما response برنگشته باشد
+        // در این صورت، job را از طریق polling بررسی می‌کنیم
+        const timeoutMessage = 'درخواست بک تست زمان زیادی طول کشید. در حال بررسی وضعیت...'
+        showToast(timeoutMessage, { type: 'info' })
+        
+        // سعی می‌کنیم آخرین job کاربر را پیدا کنیم
+        try {
+          const jobsResponse = await getJobs()
+          if (jobsResponse.data && jobsResponse.data.length > 0) {
+            const latestJob = jobsResponse.data[0]
+            if (latestJob.status === 'pending' || latestJob.status === 'running') {
+              // Job ایجاد شده است، polling را شروع می‌کنیم
+              setRunningJob(latestJob.id)
+              setJobStatus(latestJob.status || 'running')
+              checkJobStatus(latestJob.id)
+              showToast('بک تست در حال اجرا است. لطفاً منتظر بمانید...', { type: 'info' })
+              return
+            }
+          }
+        } catch (pollError) {
+          console.error('Error checking jobs:', pollError)
+        }
+        
+        // اگر job پیدا نشد، خطا را نمایش می‌دهیم
+        const finalErrorMessage = 'بک‌تست برای بازه زمانی انتخاب شده بیش از حد زمان نیاز داشت. لطفاً کمی صبر کنید یا بازه زمانی را کاهش دهید. اگر مشکل ادامه داشت، صفحه را رفرش کنید و دوباره تلاش کنید.'
+        showToast(finalErrorMessage, { type: 'warning' })
+        setError(finalErrorMessage)
         return
       }
-      setError('خطا در شروع بازیابی: ' + (error.message || 'خطای نامشخص'))
+      setError('خطا در شروع بک تست: ' + (error.message || 'خطای نامشخص'))
     }
   }
 
@@ -361,6 +387,81 @@ export default function StrategyTesting() {
                 <p className="text-xs text-gray-400 mt-1">
                   {availableSymbols.filter(s => s.is_available).length} جفت ارز در دسترس از MetaTrader 5
                 </p>
+              )}
+            </div>
+          </div>
+
+          {/* AI Provider Selection */}
+          <div className="mb-6">
+            <label className="label-standard">
+              🔮 مدل هوش مصنوعی برای تحلیل بک تست
+            </label>
+            <select
+              value={aiProvider}
+              onChange={(e) => setAiProvider(e.target.value)}
+              className="select-standard"
+              disabled={runningJob !== null}
+            >
+              <option value="auto">🤖 خودکار (پیش‌فرض) - سیستم بهترین مدل را انتخاب می‌کند</option>
+              <option value="gapgpt">🔮 GapGPT - مدل تخصصی تحلیل معاملات (هزینه: ~0.001 تومان/کلمه)</option>
+              <option value="gemini">💎 Gemini AI - مدل سریع و مقرون‌به‌صرفه گوگل (هزینه: رایگان تا ~0.0003 تومان/کلمه)</option>
+              <option value="openai">⚡ OpenAI GPT-4o-mini - مدل قدرتمند OpenAI (هزینه: ~0.0008 تومان/کلمه)</option>
+            </select>
+            <div className="mt-2 p-3 bg-gray-800 rounded-lg border border-gray-700">
+              {aiProvider === 'auto' && (
+                <div>
+                  <p className="text-sm text-gray-300 mb-2">
+                    <strong className="text-white">🤖 حالت خودکار:</strong> سیستم به طور خودکار بهترین مدل در دسترس را بر اساس تنظیمات شما انتخاب می‌کند.
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    <strong>هزینه:</strong> بستگی به مدل انتخاب شده دارد (معمولاً Gemini یا OpenAI)
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    <strong>مناسب برای:</strong> کاربرانی که می‌خواهند سیستم بهینه‌ترین انتخاب را انجام دهد
+                  </p>
+                </div>
+              )}
+              {aiProvider === 'gapgpt' && (
+                <div>
+                  <p className="text-sm text-gray-300 mb-2">
+                    <strong className="text-white">🔮 GapGPT:</strong> مدل تخصصی طراحی شده برای تحلیل استراتژی‌های معاملاتی و نتایج بک تست. این مدل به طور خاص برای درک و تحلیل داده‌های مالی و معاملاتی بهینه شده است.
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    <strong>💰 هزینه:</strong> تقریباً 0.001 تومان به ازای هر کلمه (ورودی + خروجی)
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    <strong>✅ مناسب برای:</strong> تحلیل‌های تخصصی معاملات، بررسی دقیق نتایج بک تست، دریافت توصیه‌های حرفه‌ای برای بهینه‌سازی استراتژی
+                  </p>
+                  <p className="text-xs text-yellow-400 mt-2">
+                    ⚠️ برای استفاده، ابتدا کلید API GapGPT را در تنظیمات اضافه کنید.
+                  </p>
+                </div>
+              )}
+              {aiProvider === 'gemini' && (
+                <div>
+                  <p className="text-sm text-gray-300 mb-2">
+                    <strong className="text-white">💎 Gemini AI (Google):</strong> مدل سریع و کارآمد گوگل با قابلیت پردازش متن‌های طولانی. این مدل برای تحلیل‌های عمومی و سریع ایده‌آل است.
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    <strong>💰 هزینه:</strong> رایگان در سطح محدود، یا تقریباً 0.0003 تومان به ازای هر کلمه در نسخه پرداختی
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    <strong>✅ مناسب برای:</strong> تحلیل‌های سریع و روزمره، کاربرانی که به دنبال تعادل بین کیفیت و هزینه هستند، تحلیل‌های با حجم متوسط
+                  </p>
+                </div>
+              )}
+              {aiProvider === 'openai' && (
+                <div>
+                  <p className="text-sm text-gray-300 mb-2">
+                    <strong className="text-white">⚡ OpenAI GPT-4o-mini:</strong> مدل قدرتمند و پیشرفته OpenAI با دقت بالا در تحلیل و تولید متن. این مدل برای تحلیل‌های پیچیده و دقیق مناسب است.
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    <strong>💰 هزینه:</strong> تقریباً 0.0008 تومان به ازای هر کلمه (ورودی + خروجی)
+                  </p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    <strong>✅ مناسب برای:</strong> تحلیل‌های دقیق و حرفه‌ای، تولید گزارش‌های جامع، تحلیل‌های پیچیده با جزئیات زیاد
+                  </p>
+                </div>
               )}
             </div>
           </div>

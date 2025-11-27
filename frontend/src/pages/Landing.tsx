@@ -35,6 +35,146 @@ export default function Landing() {
               </div>
             )}
           </div>
+
+          {/* بخش محرک - انواع استراتژی‌های قابل بک‌تست */}
+          <div className="mt-16 bg-gradient-to-r from-blue-900/50 via-purple-900/50 to-blue-900/50 rounded-2xl p-8 border border-blue-500/30">
+            <div className="text-center mb-8">
+              <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
+                🚀 بیش از 10 نوع استراتژی معاملاتی را بک‌تست کنید!
+              </h2>
+              <p className="text-lg text-gray-300 max-w-3xl mx-auto">
+                از استراتژی‌های مبتنی بر اندیکاتور تا استراتژی‌های متنی سفارشی - هر آنچه که فکر می‌کنید را تست کنید
+              </p>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-blue-500/20 hover:border-blue-400/50 transition-all">
+                <div className="text-2xl mb-3">📊</div>
+                <h3 className="text-lg font-semibold text-blue-300 mb-2">اندیکاتورهای تکنیکال</h3>
+                <p className="text-gray-300 text-sm">
+                  RSI, MACD, SMA, EMA, Bollinger, Stochastic و 5+ اندیکاتور دیگر
+                </p>
+              </div>
+              
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-green-500/20 hover:border-green-400/50 transition-all">
+                <div className="text-2xl mb-3">✍️</div>
+                <h3 className="text-lg font-semibold text-green-300 mb-2">استراتژی‌های متنی</h3>
+                <p className="text-gray-300 text-sm">
+                  فایل Word/Docx خود را آپلود کنید - سیستم خودکار تجزیه می‌کند
+                </p>
+              </div>
+              
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-purple-500/20 hover:border-purple-400/50 transition-all">
+                <div className="text-2xl mb-3">🔀</div>
+                <h3 className="text-lg font-semibold text-purple-300 mb-2">استراتژی‌های ترکیبی</h3>
+                <p className="text-gray-300 text-sm">
+                  ترکیب چند اندیکاتور و شرایط سفارشی با منطق AND/OR
+                </p>
+              </div>
+              
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-yellow-500/20 hover:border-yellow-400/50 transition-all">
+                <div className="text-2xl mb-3">📈</div>
+                <h3 className="text-lg font-semibold text-yellow-300 mb-2">Price Action</h3>
+                <p className="text-gray-300 text-sm">
+                  استراتژی‌های مبتنی بر رفتار قیمت و الگوهای کندل استیک
+                </p>
+              </div>
+              
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-red-500/20 hover:border-red-400/50 transition-all">
+                <div className="text-2xl mb-3">🛡️</div>
+                <h3 className="text-lg font-semibold text-red-300 mb-2">مدیریت ریسک</h3>
+                <p className="text-gray-300 text-sm">
+                  Stop Loss, Take Profit و مدیریت حجم معامله
+                </p>
+              </div>
+              
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-teal-500/20 hover:border-teal-400/50 transition-all">
+                <div className="text-2xl mb-3">🌍</div>
+                <h3 className="text-lg font-semibold text-teal-300 mb-2">چند نماد</h3>
+                <p className="text-gray-300 text-sm">
+                  طلا، EUR/USD, GBP/USD و سایر نمادهای فارکس
+                </p>
+              </div>
+
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-orange-500/20 hover:border-orange-400/50 transition-all">
+                <div className="text-2xl mb-3">📉</div>
+                <h3 className="text-lg font-semibold text-orange-300 mb-2">استراتژی‌های نوسانی</h3>
+                <p className="text-gray-300 text-sm">
+                  معاملات در محدوده‌های نوسانی و شناسایی نقاط ورود و خروج
+                </p>
+              </div>
+
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-pink-500/20 hover:border-pink-400/50 transition-all">
+                <div className="text-2xl mb-3">🎯</div>
+                <h3 className="text-lg font-semibold text-pink-300 mb-2">استراتژی‌های روندی</h3>
+                <p className="text-gray-300 text-sm">
+                  شناسایی و معامله در جهت روندهای قوی بازار
+                </p>
+              </div>
+
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-cyan-500/20 hover:border-cyan-400/50 transition-all">
+                <div className="text-2xl mb-3">⚡</div>
+                <h3 className="text-lg font-semibold text-cyan-300 mb-2">اسکالپینگ</h3>
+                <p className="text-gray-300 text-sm">
+                  معاملات سریع با سودهای کوچک و تایم فریم‌های کوتاه
+                </p>
+              </div>
+
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-lime-500/20 hover:border-lime-400/50 transition-all">
+                <div className="text-2xl mb-3">🔄</div>
+                <h3 className="text-lg font-semibold text-lime-300 mb-2">استراتژی‌های معکوس</h3>
+                <p className="text-gray-300 text-sm">
+                  شناسایی نقاط بازگشت روند و معامله در خلاف جهت
+                </p>
+              </div>
+
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-rose-500/20 hover:border-rose-400/50 transition-all">
+                <div className="text-2xl mb-3">📊</div>
+                <h3 className="text-lg font-semibold text-rose-300 mb-2">تحلیل حجم معاملات</h3>
+                <p className="text-gray-300 text-sm">
+                  استفاده از حجم معاملات برای تایید سیگنال‌های معاملاتی
+                </p>
+              </div>
+
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-violet-500/20 hover:border-violet-400/50 transition-all">
+                <div className="text-2xl mb-3">🎲</div>
+                <h3 className="text-lg font-semibold text-violet-300 mb-2">استراتژی‌های الگوریتمی</h3>
+                <p className="text-gray-300 text-sm">
+                  معاملات خودکار بر اساس الگوریتم‌های پیچیده و شرط‌های چندگانه
+                </p>
+              </div>
+
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-amber-500/20 hover:border-amber-400/50 transition-all">
+                <div className="text-2xl mb-3">🌐</div>
+                <h3 className="text-lg font-semibold text-amber-300 mb-2">تحلیل چند بازاری</h3>
+                <p className="text-gray-300 text-sm">
+                  همبستگی بین نمادهای مختلف و تحلیل همزمان چند بازار
+                </p>
+              </div>
+
+              <div className="bg-gray-800/80 backdrop-blur-sm rounded-xl p-5 border border-emerald-500/20 hover:border-emerald-400/50 transition-all">
+                <div className="text-2xl mb-3">⏰</div>
+                <h3 className="text-lg font-semibold text-emerald-300 mb-2">استراتژی‌های زمانی</h3>
+                <p className="text-gray-300 text-sm">
+                  معاملات بر اساس زمان‌های خاص روز و الگوهای زمانی
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-8 text-center">
+              <p className="text-gray-300 mb-4">
+                💡 <strong className="text-white">نکته:</strong> قبل از ورود به بازار واقعی، استراتژی خود را با داده‌های تاریخی تست کنید و از عملکرد آن اطمینان حاصل کنید!
+              </p>
+              {!isAuthenticated && (
+                <Link
+                  to="/login"
+                  className="inline-block px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg"
+                >
+                  همین حالا شروع کنید و اولین بک‌تست خود را انجام دهید →
+                </Link>
+              )}
+            </div>
+          </div>
         </div>
       </section>
 

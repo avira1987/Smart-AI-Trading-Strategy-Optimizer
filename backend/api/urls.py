@@ -23,6 +23,7 @@ from .views import (
     UserScoreViewSet,
     AchievementViewSet,
     UserAchievementViewSet,
+    GapGPTViewSet,
 )
 from .auth_views import SendOTPView, VerifyOTPView, check_auth, logout, get_csrf_token, check_profile_completion, update_profile, check_ip_location, get_user_activity_logs
 from .captcha_views import GetCaptchaView
@@ -52,6 +53,7 @@ router.register(r'gold-access/requests', GoldAPIAccessRequestViewSet, basename='
 router.register(r'gamification/scores', UserScoreViewSet, basename='user-score')
 router.register(r'gamification/achievements', AchievementViewSet, basename='achievement')
 router.register(r'gamification/user-achievements', UserAchievementViewSet, basename='user-achievement')
+router.register(r'gapgpt', GapGPTViewSet, basename='gapgpt')
 
 urlpatterns = [
     path('', include(router.urls)),

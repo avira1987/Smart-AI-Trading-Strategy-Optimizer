@@ -106,6 +106,10 @@ OPENAI_MODEL = _openai_model_env
 OPENAI_ORG_ID = os.environ.get('OPENAI_ORG_ID', '')
 OPENAI_PROJECT_ID = os.environ.get('OPENAI_PROJECT_ID', '')
 
+# GapGPT API Configuration
+GAPGPT_API_KEY = get_api_key_from_db_or_env('gapgpt', 'GAPGPT_API_KEY')
+GAPGPT_MODEL = os.environ.get('GAPGPT_MODEL', 'gpt-4o')
+
 AI_PROVIDER_PRIORITY = [
     provider.strip()
     for provider in os.environ.get(
@@ -116,6 +120,7 @@ AI_PROVIDER_PRIORITY = [
 ]
 
 AI_PROVIDER_DEFAULT_MODELS = {
+    'gapgpt': GAPGPT_MODEL,
     'gemini': GEMINI_MODEL,
     'cohere': os.environ.get('COHERE_MODEL', 'command-r-plus'),
     'openai': OPENAI_MODEL,

@@ -622,6 +622,7 @@ class JobSerializer(serializers.ModelSerializer):
 
 
 class JobCreateSerializer(serializers.Serializer):
+    ai_provider = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text="AI provider for backtest analysis (gapgpt, gemini, openai, or auto)")
     strategy = serializers.IntegerField()
     job_type = serializers.ChoiceField(choices=['backtest', 'demo_trade'])
     timeframe_days = serializers.IntegerField(required=False, min_value=1, default=365)

@@ -28,6 +28,7 @@ class APIConfiguration(models.Model):
         ('together_ai', 'Together AI'),
         ('deepinfra', 'DeepInfra'),
         ('groq', 'GroqCloud'),
+        ('gapgpt', 'GapGPT'),
         ('kavenegar', 'Kavenegar (SMS)'),
         ('zarinpal', 'Zarinpal (Merchant ID)'),
         ('recaptcha', 'reCAPTCHA v3 (Site Key & Secret Key)'),

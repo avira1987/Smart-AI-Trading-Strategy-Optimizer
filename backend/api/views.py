@@ -1037,7 +1037,7 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        serializer.save(user=self.request.user, is_active=True)
     
     @action(detail=True, methods=['post'])
     def toggle_active(self, request, pk=None):

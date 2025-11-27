@@ -8,7 +8,7 @@ import re
 from django.conf import settings
 import logging
 from dataclasses import dataclass
-from api.mt5_client import fetch_mt5_candles, is_mt5_available
+from api.mt5_client import fetch_mt5_candles, fetch_mt5_candles_aggregated, is_mt5_available, extract_timeframe_minutes
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,12 @@ class MT5DataProvider:
         self.api_key = None  # For compatibility with legacy interfaces
 
     def get_historical_data(self, symbol: str, timeframe: str = 'M15', count: int = 2000) -> pd.DataFrame:
-        df, error = fetch_mt5_candles(symbol, timeframe, count)
+        """
+        Fetch historical data from MT5.
+        Always uses M1 candles and aggregates to the requested timeframe for accuracy.
+        """
+        # Use aggregated function to ensure accurate custom timeframes
+        df, error = fetch_mt5_candles_aggregated(symbol, timeframe, count)
         if df is None or df.empty:
             raise RuntimeError(error or "MT5 returned no data")
         return df
@@ -745,6 +750,7 @@ class DataProviderManager:
     ) -> Any:
         """
         Fetch historical data exclusively from MetaTrader 5.
+        Uses M1 candles and aggregates to the exact timeframe requested (e.g., 77 minutes).
         """
         normalized_symbol = self._normalize_symbol(symbol)
         mt5_symbol = self._format_symbol_for_mt5(normalized_symbol)
@@ -752,10 +758,13 @@ class DataProviderManager:
         if provider is None:
             raise RuntimeError("MT5 provider is not initialized")
 
-        mt5_timeframe = self._interval_to_mt5_timeframe(interval)
+        # Use original interval (not normalized) to preserve custom timeframes like "77m"
+        # The provider will handle aggregation from M1 candles
+        original_timeframe = interval
         count = self._estimate_mt5_count(timeframe_days, interval)
         try:
-            data = provider.get_historical_data(mt5_symbol, timeframe=mt5_timeframe, count=count)
+            # Pass original timeframe to preserve custom timeframes (e.g., "77m")
+            data = provider.get_historical_data(mt5_symbol, timeframe=original_timeframe, count=count)
             provider_used = 'mt5'
         except Exception as mt5_error:
             logger.error("Failed to fetch data from MT5 for %s: %s", mt5_symbol, mt5_error)

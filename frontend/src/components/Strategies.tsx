@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { getStrategies, addStrategy, deleteStrategy as apiDeleteStrategy, processStrategy, getStrategyProgress, getAPIConfigurations, setPrimaryStrategy } from '../api/client'
+import { getStrategies, addStrategy, deleteStrategy as apiDeleteStrategy, processStrategy, getStrategyProgress, getAPIConfigurations, setPrimaryStrategy, downloadStrategy, getStrategyFileContent, toggleStrategyActive } from '../api/client'
 import { useToast } from './ToastProvider'
 import StrategyQuestions from './StrategyQuestions'
 import StrategyOptimizer from './StrategyOptimizer'
 import AIRecommendations from './AIRecommendations'
+import GapGPTConverter from './GapGPTConverter'
 import { useRateLimit } from '../hooks/useRateLimit'
 
 const AI_PROVIDER_REFRESH_MS = 120000
@@ -35,6 +36,10 @@ export default function Strategies() {
   const [expandedDetailsStrategyIds, setExpandedDetailsStrategyIds] = useState<Set<number>>(new Set())
   const [hasAIProvider, setHasAIProvider] = useState(false)
   const [processingStrategies, setProcessingStrategies] = useState<Map<number, { progress: number; stage: string; message: string }>>(new Map())
+  const [showGapGPTModal, setShowGapGPTModal] = useState(false)
+  const [selectedStrategyForGapGPT, setSelectedStrategyForGapGPT] = useState<TradingStrategy | null>(null)
+  const [gapGPTFileContent, setGapGPTFileContent] = useState<string>('')
+  const [loadingFileContent, setLoadingFileContent] = useState(false)
   const { showToast } = useToast()
   const expandedStrategyIdRef = useRef<number | null>(null)
   const rateLimitClickSubmit = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'strategies-submit' })
@@ -176,27 +181,68 @@ export default function Strategies() {
     submitAction()
   }
 
-  const toggleStrategy = (id: number) => {
+  const toggleStrategy = async (id: number) => {
     const toggleAction = rateLimitClickToggle(async () => {
       try {
-        const response = await fetch(`http://localhost:8000/api/strategies/${id}/toggle_active/`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        })
+        const response = await toggleStrategyActive(id)
         
-        if (response.ok) {
+        if (response.data) {
           await loadStrategies()
-          showToast('Strategy status updated', { type: 'success' })
+          const message = response.data.is_active ? 'استراتژی فعال شد' : 'استراتژی غیرفعال شد'
+          showToast(message, { type: 'success' })
         } else {
-          showToast('Error toggling strategy status', { type: 'error' })
+          showToast('خطا در تغییر وضعیت استراتژی', { type: 'error' })
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error toggling strategy:', error)
-        showToast('Error toggling strategy status', { type: 'error' })
+        const errorMsg = error.response?.data?.message || error.message || 'خطا در تغییر وضعیت استراتژی'
+        showToast(errorMsg, { type: 'error' })
       }
     })
     
     toggleAction()
+  }
+
+  const handleOpenGapGPTModal = async (strategy: TradingStrategy) => {
+    try {
+      setSelectedStrategyForGapGPT(strategy)
+      setLoadingFileContent(true)
+      setGapGPTFileContent('')
+      
+      // دریافت محتوای فایل استراتژی
+      try {
+        const response = await getStrategyFileContent(strategy.id)
+        if (response.data.status === 'success' && response.data.content) {
+          setGapGPTFileContent(response.data.content)
+        } else {
+          // اگر فایل موجود نبود، از parsed_strategy_data یا description استفاده کن
+          const fallbackText = strategy.parsed_strategy_data
+            ? JSON.stringify(strategy.parsed_strategy_data, null, 2)
+            : strategy.description || ''
+          setGapGPTFileContent(fallbackText)
+          if (!fallbackText) {
+            showToast('هشدار: فایل استراتژی یافت نشد. لطفاً متن استراتژی را وارد کنید.', { type: 'warning' })
+          }
+        }
+      } catch (fileError: any) {
+        console.error('Error loading file content:', fileError)
+        // در صورت خطا، از parsed_strategy_data یا description استفاده کن
+        const fallbackText = strategy.parsed_strategy_data
+          ? JSON.stringify(strategy.parsed_strategy_data, null, 2)
+          : strategy.description || ''
+        setGapGPTFileContent(fallbackText)
+        if (!fallbackText) {
+          showToast('خطا در خواندن فایل. لطفاً متن استراتژی را وارد کنید.', { type: 'warning' })
+        }
+      } finally {
+        setLoadingFileContent(false)
+        setShowGapGPTModal(true)
+      }
+    } catch (error) {
+      console.error('Error opening GapGPT modal:', error)
+      setLoadingFileContent(false)
+      showToast('خطا در باز کردن مودال GapGPT', { type: 'error' })
+    }
   }
 
   const handleDelete = (id: number, name: string) => {
@@ -381,6 +427,83 @@ export default function Strategies() {
     setPrimaryAction()
   }
 
+  const handleDownload = async (id: number, name: string) => {
+    try {
+      const response = await downloadStrategy(id)
+      
+      // ایجاد لینک دانلود
+      const url = window.URL.createObjectURL(new Blob([response.data]))
+      const link = document.createElement('a')
+      link.href = url
+      
+      // استخراج نام فایل اصلی از header (همان نام فایل آپلود شده با پسوند کامل)
+      const contentDisposition = response.headers['content-disposition'] || response.headers['Content-Disposition']
+      let filename = null
+      
+      if (contentDisposition) {
+        // اول تلاش برای استخراج از فرمت RFC 2231 (filename*=UTF-8''encoded)
+        const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+        if (utf8Match) {
+          try {
+            filename = decodeURIComponent(utf8Match[1].trim())
+          } catch (e) {
+            console.warn('Error decoding UTF-8 filename:', e)
+          }
+        }
+        
+        // اگر از RFC 2231 استخراج نشد، از فرمت ساده استفاده کن
+        if (!filename) {
+          // الگوهای مختلف برای استخراج نام فایل
+          const patterns = [
+            /filename="([^"]+)"/i,  // filename="file.docx"
+            /filename=([^;]+)/i,    // filename=file.docx
+            /filename\*="?([^";]+)"?/i,  // filename*="encoded"
+          ]
+          
+          for (const pattern of patterns) {
+            const match = contentDisposition.match(pattern)
+            if (match && match[1]) {
+              filename = match[1].trim()
+              // حذف quotes اگر وجود دارد
+              filename = filename.replace(/^["']|["']$/g, '')
+              break
+            }
+          }
+        }
+      }
+      
+      // اگر نام فایل از header استخراج نشد، لاگ کن و از نام پیش‌فرض استفاده کن
+      if (!filename) {
+        console.warn('Could not extract filename from Content-Disposition header:', contentDisposition)
+        // استفاده از نام پیش‌فرض با پسوند .docx (چون کاربر گفت فایل Word است)
+        // اما بهتر است از backend درخواست کنیم که header را ارسال کند
+        filename = `strategy_${id}.docx`
+      }
+      
+      // اطمینان از اینکه نام فایل پسوند دارد
+      if (filename && !filename.includes('.')) {
+        // اگر پسوند ندارد، .docx اضافه کن (برای فایل‌های Word)
+        filename = `${filename}.docx`
+      }
+      
+      link.setAttribute('download', filename)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      
+      showToast('فایل با موفقیت دانلود شد', { type: 'success' })
+    } catch (error: any) {
+      console.error('Error downloading strategy:', error)
+      const message =
+        error?.response?.data?.message ||
+        error?.response?.data?.detail ||
+        error?.message ||
+        'خطای نامشخص'
+      showToast(`خطا در دانلود فایل: ${message}`, { type: 'error' })
+    }
+  }
+
   const getProcessingStatusLabel = (status?: string) => {
     switch (status) {
       case 'not_processed':
@@ -406,6 +529,29 @@ export default function Strategies() {
         >
           + افزودن استراتژی جدید
         </button>
+      </div>
+
+      {/* راهنمای آپلود استراتژی برای بهترین نتایج بک‌تست */}
+      <div className="bg-gradient-to-r from-blue-900/50 to-purple-900/50 border border-blue-700 rounded-lg p-4 mb-4">
+        <div className="flex items-start gap-3">
+          <div className="text-2xl">📚</div>
+          <div className="flex-1">
+            <h3 className="text-white font-semibold mb-3">راهنمای آپلود استراتژی برای بهترین نتایج بک‌تست</h3>
+            <p className="text-gray-300 text-sm mb-3">
+              برای دریافت بیشترین بازدهی در بک‌تست‌های خود، لطفاً نکات زیر را قبل از آپلود استراتژی مطالعه کنید:
+            </p>
+            <ul className="text-gray-300 text-sm space-y-2 list-disc list-inside mr-4">
+              <li><strong className="text-white">استراتژی کامل و واضح:</strong> استراتژی شما باید شامل تمام قوانین معاملاتی، شرایط ورود و خروج، مدیریت ریسک و پارامترهای قابل تنظیم باشد.</li>
+              <li><strong className="text-white">کد تمیز و ساختاریافته:</strong> از کدهای تمیز و خوش‌خوان استفاده کنید. کامنت‌های واضح و نام‌گذاری مناسب متغیرها به هوش مصنوعی کمک می‌کند تا استراتژی را بهتر درک کند.</li>
+              <li><strong className="text-white">توضیحات کامل:</strong> در ابتدای فایل استراتژی، توضیح دهید که استراتژی چه کاری انجام می‌دهد، برای چه بازه زمانی مناسب است و چه نوع بازارهایی را هدف قرار می‌دهد.</li>
+              <li><strong className="text-white">پارامترهای قابل تنظیم:</strong> تمام پارامترهای مهم (مثل stop loss، take profit، دوره‌های اندیکاتورها) را به صورت متغیر تعریف کنید تا در بک‌تست قابل تنظیم باشند.</li>
+              <li><strong className="text-white">منطق معاملاتی واضح:</strong> شرایط ورود و خروج باید به صورت واضح و منطقی تعریف شده باشند. از شرط‌های پیچیده و مبهم خودداری کنید.</li>
+            </ul>
+            <p className="text-yellow-300 text-xs mt-3 p-2 bg-yellow-900/30 rounded border border-yellow-700/50">
+              💡 <strong>نکته مهم:</strong> هرچه استراتژی شما کامل‌تر و واضح‌تر باشد، هوش مصنوعی می‌تواند آن را بهتر پردازش کند و در نتیجه بک‌تست‌های دقیق‌تر و بازدهی بالاتری دریافت خواهید کرد.
+            </p>
+          </div>
+        </div>
       </div>
 
       {strategies.length === 0 ? (
@@ -491,16 +637,14 @@ export default function Strategies() {
                       >
                         {strategy.is_primary ? 'استراتژی اصلی' : 'انتخاب به‌عنوان اصلی'}
                       </button>
+                      {/* دکمه پردازش استراتژی با هوش مصنوعی */}
                       <button
-                        onClick={() => handleProcess(strategy.id, strategy.name)}
-                        disabled={strategy.processing_status === 'processing'}
-                        className={`px-3 py-1.5 rounded-lg transition text-xs font-medium ${
-                          strategy.processing_status === 'processing'
-                            ? 'bg-gray-500 cursor-not-allowed text-gray-300'
-                            : 'bg-purple-600 hover:bg-purple-700 text-white'
-                        }`}
+                        onClick={() => handleOpenGapGPTModal(strategy)}
+                        className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg transition text-xs font-medium flex items-center gap-1"
+                        title="پردازش استراتژی با هوش مصنوعی - محتوای فایل به طور خودکار بارگذاری می‌شود"
                       >
-                        {strategy.processing_status === 'processing' ? 'در حال پردازش...' : 'پردازش'}
+                        <span>🔮</span>
+                        <span>پردازش استراتژی با هوش مصنوعی</span>
                       </button>
                       {strategy.processing_status === 'processing' && processingStrategies.has(strategy.id) && (
                         <div className="w-full mt-2">
@@ -541,6 +685,16 @@ export default function Strategies() {
                       >
                         تست
                       </a>
+                      {strategy.strategy_file && (
+                        <button
+                          onClick={() => handleDownload(strategy.id, strategy.name)}
+                          className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition text-xs font-medium flex items-center gap-1"
+                          title="دانلود فایل استراتژی"
+                        >
+                          <span>⬇️</span>
+                          <span>دانلود</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => handleDelete(strategy.id, strategy.name)}
                         className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg transition text-xs font-medium"
@@ -582,9 +736,20 @@ export default function Strategies() {
                     {strategy.processing_status === 'processed' && strategy.parsed_strategy_data && (
                 <>
                   <div className="bg-green-900/20 border border-green-700 rounded-lg p-3 mb-3">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-green-400 text-lg">✓</span>
-                      <span className="text-green-400 font-semibold">نتیجه پردازش:</span>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-green-400 text-lg">✓</span>
+                        <span className="text-green-400 font-semibold">نتیجه پردازش:</span>
+                      </div>
+                      {/* دکمه GapGPT در بخش Details */}
+                      <button
+                        onClick={() => handleOpenGapGPTModal(strategy)}
+                        className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg transition text-sm font-semibold flex items-center gap-2"
+                        title="تبدیل استراتژی با مدل‌های مختلف GapGPT - محتوای فایل به طور خودکار بارگذاری می‌شود"
+                      >
+                        <span>🔮</span>
+                        <span>تبدیل با GapGPT</span>
+                      </button>
                     </div>
                     <div className="text-gray-300 text-xs space-y-1">
                       <div>اعتماد: <span className="text-yellow-400 font-medium">{(strategy.parsed_strategy_data.confidence_score * 100).toFixed(0)}%</span></div>
@@ -1040,6 +1205,42 @@ export default function Strategies() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* GapGPT Modal */}
+      {showGapGPTModal && selectedStrategyForGapGPT && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" style={{ direction: 'rtl' }}>
+          <div className="bg-gray-800 rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto">
+            {loadingFileContent ? (
+              <div className="p-6 text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-4"></div>
+                <p className="text-white">در حال بارگذاری محتوای فایل استراتژی...</p>
+              </div>
+            ) : (
+              <GapGPTConverter
+                strategyText={gapGPTFileContent}
+                strategyId={selectedStrategyForGapGPT.id}
+                onConverted={(converted) => {
+                  console.log('Converted strategy from GapGPT:', converted)
+                  showToast('استراتژی با موفقیت تبدیل شد! می‌توانید آن را ذخیره کنید.', { type: 'success' })
+                }}
+                onSave={() => {
+                  // Reload strategies after save
+                  loadStrategies()
+                  showToast('استراتژی تبدیل شده با موفقیت ذخیره شد! اکنون می‌توانید از آن در بک تست‌ها استفاده کنید.', { type: 'success' })
+                  setShowGapGPTModal(false)
+                  setSelectedStrategyForGapGPT(null)
+                  setGapGPTFileContent('')
+                }}
+                onClose={() => {
+                  setShowGapGPTModal(false)
+                  setSelectedStrategyForGapGPT(null)
+                  setGapGPTFileContent('')
+                }}
+              />
+            )}
           </div>
         </div>
       )}

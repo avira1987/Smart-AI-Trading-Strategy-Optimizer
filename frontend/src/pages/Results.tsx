@@ -334,17 +334,15 @@ export default function Results() {
                           <div className="text-gray-400 text-sm mb-1">تایم‌فریم استراتژی</div>
                           <div className="text-lg font-semibold text-blue-400">
                             {selectedResult.data_sources.strategy_timeframe}
-                            {selectedResult.data_sources.normalized_timeframe && 
-                              selectedResult.data_sources.normalized_timeframe !== selectedResult.data_sources.strategy_timeframe && (
-                                <span className="text-gray-400 text-sm mr-1">
-                                  {' '}({selectedResult.data_sources.normalized_timeframe})
-                                </span>
-                              )
-                            }
                           </div>
+                          {selectedResult.data_sources.provider === 'mt5' && (
+                            <div className="text-gray-400 text-xs mt-1">
+                              (تجمیع شده از کندل‌های M1)
+                            </div>
+                          )}
                         </div>
                       )}
-                      {selectedResult.data_sources.normalized_timeframe && !selectedResult.data_sources.strategy_timeframe && (
+                      {!selectedResult.data_sources.strategy_timeframe && selectedResult.data_sources.normalized_timeframe && (
                         <div className="bg-gray-700 rounded p-4">
                           <div className="text-gray-400 text-sm mb-1">تایم‌فریم استفاده شده</div>
                           <div className="text-lg font-semibold text-blue-400">

@@ -132,6 +132,159 @@ def fetch_mt5_candles(symbol: str, timeframe: str = 'M1', count: int = 500) -> T
             logger.info("[MT5] shutdown()")
 
 
+def extract_timeframe_minutes(timeframe: str) -> Optional[int]:
+    """
+    Extract minutes from timeframe string.
+    
+    Examples:
+        "77m" -> 77
+        "77min" -> 77
+        "77 دقیقه" -> 77
+        "M15" -> 15
+        "H1" -> 60
+        "1h" -> 60
+    
+    Returns:
+        Minutes as integer, or None if cannot be determined
+    """
+    if not timeframe:
+        return None
+    
+    import re
+    timeframe_upper = str(timeframe).upper().strip()
+    
+    # Direct MT5 format mappings
+    mt5_mapping = {
+        'M1': 1,
+        'M5': 5,
+        'M15': 15,
+        'M30': 30,
+        'H1': 60,
+        'H4': 240,
+        'D1': 1440,
+    }
+    if timeframe_upper in mt5_mapping:
+        return mt5_mapping[timeframe_upper]
+    
+    # Pattern: "77m", "77min", "77 minute", "77 دقیقه"
+    minute_match = re.search(r'(\d+)\s*(?:m|min|minute|دقیقه)', timeframe_upper)
+    if minute_match:
+        return int(minute_match.group(1))
+    
+    # Pattern: "1h", "1 hour", "1 ساعت"
+    hour_match = re.search(r'(\d+)\s*(?:h|hour|ساعت)', timeframe_upper)
+    if hour_match:
+        return int(hour_match.group(1)) * 60
+    
+    # Pattern: "1d", "1 day", "1 روز"
+    day_match = re.search(r'(\d+)\s*(?:d|day|روز)', timeframe_upper)
+    if day_match:
+        return int(day_match.group(1)) * 1440
+    
+    return None
+
+
+def aggregate_m1_candles_to_timeframe(m1_df: pd.DataFrame, target_minutes: int) -> pd.DataFrame:
+    """
+    Aggregate M1 candles to a custom timeframe.
+    
+    Args:
+        m1_df: DataFrame with M1 candles (must have datetime index and OHLCV columns)
+        target_minutes: Target timeframe in minutes (e.g., 77 for 77-minute candles)
+    
+    Returns:
+        DataFrame with aggregated candles
+    """
+    if m1_df.empty:
+        return m1_df
+    
+    if target_minutes <= 1:
+        return m1_df.copy()
+    
+    # Ensure datetime index
+    if not isinstance(m1_df.index, pd.DatetimeIndex):
+        if 'datetime' in m1_df.columns:
+            m1_df = m1_df.set_index('datetime')
+        else:
+            logger.error("Cannot aggregate: DataFrame must have datetime index")
+            return m1_df
+    
+    # Create a copy to avoid modifying original
+    df = m1_df.copy()
+    
+    # Resample to target timeframe
+    # Use 'T' for minutes in pandas
+    rule = f'{target_minutes}T'
+    
+    # Aggregate OHLCV
+    aggregated = pd.DataFrame()
+    aggregated['open'] = df['open'].resample(rule).first()
+    aggregated['high'] = df['high'].resample(rule).max()
+    aggregated['low'] = df['low'].resample(rule).min()
+    aggregated['close'] = df['close'].resample(rule).last()
+    
+    # Sum volume if available
+    if 'volume' in df.columns:
+        aggregated['volume'] = df['volume'].resample(rule).sum()
+    elif 'tick_volume' in df.columns:
+        aggregated['volume'] = df['tick_volume'].resample(rule).sum()
+    
+    # Drop rows with NaN (incomplete candles at the end)
+    aggregated = aggregated.dropna()
+    
+    logger.info(f"Aggregated {len(m1_df)} M1 candles to {len(aggregated)} {target_minutes}-minute candles")
+    
+    return aggregated
+
+
+def fetch_mt5_candles_aggregated(symbol: str, target_timeframe: str, count: int = 500) -> Tuple[pd.DataFrame, Optional[str]]:
+    """
+    Fetch candles from MT5 by always using M1 and aggregating to target timeframe.
+    
+    This ensures accurate backtesting for custom timeframes (e.g., 77 minutes).
+    
+    Args:
+        symbol: Trading symbol
+        target_timeframe: Target timeframe string (e.g., "77m", "M15", "H1")
+        count: Number of target candles needed (will fetch more M1 candles to aggregate)
+    
+    Returns:
+        (DataFrame with aggregated candles, error_message)
+    """
+    # Extract minutes from target timeframe
+    target_minutes = extract_timeframe_minutes(target_timeframe)
+    
+    if target_minutes is None:
+        # Fallback to standard MT5 timeframe
+        logger.warning(f"Could not extract minutes from timeframe '{target_timeframe}', using standard MT5 fetch")
+        return fetch_mt5_candles(symbol, target_timeframe, count)
+    
+    # If target is 1 minute, use standard M1 fetch
+    if target_minutes == 1:
+        return fetch_mt5_candles(symbol, 'M1', count)
+    
+    # Calculate how many M1 candles we need
+    # Add 20% buffer to ensure we have enough data after aggregation
+    m1_count = int(count * target_minutes * 1.2)
+    
+    logger.info(f"Fetching {m1_count} M1 candles to aggregate to {target_minutes}-minute candles (need {count} candles)")
+    
+    # Fetch M1 candles
+    m1_df, error = fetch_mt5_candles(symbol, 'M1', m1_count)
+    
+    if error or m1_df.empty:
+        return m1_df, error
+    
+    # Aggregate to target timeframe
+    aggregated_df = aggregate_m1_candles_to_timeframe(m1_df, target_minutes)
+    
+    # Limit to requested count (most recent candles)
+    if len(aggregated_df) > count:
+        aggregated_df = aggregated_df.tail(count)
+    
+    return aggregated_df, None
+
+
 def is_mt5_available() -> Tuple[bool, Optional[str]]:
     """Quick availability check for a locally installed and logged-in MT5 terminal."""
     try:
