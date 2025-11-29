@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { getStrategies, getJobs, createJob, precheckBacktest, getJobStatus, getMT5Symbols, MT5Symbol } from '../api/client'
 import { useToast } from '../components/ToastProvider'
 import { useSymbol } from '../context/SymbolContext'
+import { updateProfile } from '../api/auth'
 
 interface Strategy {
   id: number
@@ -33,8 +34,11 @@ export default function StrategyTesting() {
   const [timeframe, setTimeframe] = useState('7')
   const [initialCapital, setInitialCapital] = useState('10000')
   const [aiProvider, setAiProvider] = useState<string>('auto') // 'auto', 'gapgpt', 'gemini', 'openai'
-  const { selectedSymbol } = useSymbol()
-  const [symbol, setSymbol] = useState('XAUUSD')
+  const { selectedSymbol, setSelectedSymbol } = useSymbol()
+  // Initialize symbol from localStorage first (for immediate display), then context will override if available
+  const [symbol, setSymbol] = useState(() => {
+    return localStorage.getItem('backtest_symbol') || ''
+  })
   const [availableSymbols, setAvailableSymbols] = useState<MT5Symbol[]>([])
   const [loadingSymbols, setLoadingSymbols] = useState(false)
   const [runningJob, setRunningJob] = useState<number | null>(null)
@@ -49,7 +53,20 @@ export default function StrategyTesting() {
   }, [])
 
   useEffect(() => {
-    setSymbol(selectedSymbol)
+    // If context has a symbol, use it (it comes from profile and is more reliable)
+    // Only update if current symbol is empty or different from context
+    if (selectedSymbol && selectedSymbol.trim() !== '') {
+      if (!symbol || symbol !== selectedSymbol) {
+        setSymbol(selectedSymbol)
+        localStorage.setItem('backtest_symbol', selectedSymbol)
+      }
+    } else {
+      // If context doesn't have symbol but localStorage does, use localStorage
+      const savedSymbol = localStorage.getItem('backtest_symbol')
+      if (savedSymbol && savedSymbol.trim() !== '' && !symbol) {
+        setSymbol(savedSymbol)
+      }
+    }
   }, [selectedSymbol])
 
   const loadStrategies = async () => {
@@ -105,12 +122,10 @@ export default function StrategyTesting() {
       if (response.data?.status === 'success' && response.data.symbols) {
         const symbols = response.data.symbols as MT5Symbol[]
         setAvailableSymbols(symbols)
-        // Set default symbol to first available or XAUUSD
-        if (symbols.length > 0 && !symbol) {
-          const defaultSymbol = symbols.find(s => s.name?.includes('XAU')) || symbols[0]
-          if (defaultSymbol) {
-            setSymbol(defaultSymbol.name || 'XAUUSD')
-          }
+        // Don't auto-select symbol - user must choose
+        // Only set if symbol is completely empty and we have a selectedSymbol from context
+        if (symbols.length > 0 && !symbol && selectedSymbol) {
+          setSymbol(selectedSymbol)
         }
       }
     } catch (error) {
@@ -164,6 +179,12 @@ export default function StrategyTesting() {
     
     if (!selectedStrategy) {
       setError('لطفاً یک استراتژی را انتخاب کنید')
+      return
+    }
+
+    if (!symbol || symbol.trim() === '') {
+      setError('لطفاً نماد معاملاتی (جفت ارز) را انتخاب کنید')
+      showToast('لطفاً نماد معاملاتی (جفت ارز) را انتخاب کنید', { type: 'error' })
       return
     }
 
@@ -354,13 +375,29 @@ export default function StrategyTesting() {
 
             <div>
               <label className="label-standard">
-                نماد معاملاتی (جفت ارز)
+                نماد معاملاتی (جفت ارز) <span className="text-red-400">*</span>
               </label>
               <select
                 value={symbol}
-                onChange={(e) => setSymbol(e.target.value)}
-                className="select-compact"
+                onChange={async (e) => {
+                  const newSymbol = e.target.value
+                  setSymbol(newSymbol)
+                  // Save immediately when user selects
+                  if (newSymbol && newSymbol.trim() !== '') {
+                    localStorage.setItem('backtest_symbol', newSymbol)
+                    setSelectedSymbol(newSymbol)
+                    // Save to profile in background
+                    try {
+                      await updateProfile(undefined, undefined, newSymbol)
+                    } catch (err) {
+                      console.error('Failed to save symbol to profile:', err)
+                      // Don't show error, localStorage is enough
+                    }
+                  }
+                }}
+                className={`select-compact ${!symbol || symbol.trim() === '' ? 'border-red-500' : ''}`}
                 disabled={runningJob !== null || loadingSymbols}
+                required
               >
                 {loadingSymbols ? (
                   <option value="">در حال بارگذاری...</option>
@@ -377,13 +414,19 @@ export default function StrategyTesting() {
                   </>
                 ) : (
                   <>
+                    <option value="">انتخاب جفت ارز...</option>
                     <option value="XAUUSD">XAUUSD (Gold/USD)</option>
                     <option value="XAUUSD_l">XAUUSD_l (Gold/USD Live)</option>
                     <option value="XAUUSD_o">XAUUSD_o (Gold/USD Demo)</option>
                   </>
                 )}
               </select>
-              {availableSymbols.length > 0 && (
+              {(!symbol || symbol.trim() === '') && (
+                <p className="text-xs text-red-400 mt-1">
+                  انتخاب جفت ارز اجباری است
+                </p>
+              )}
+              {availableSymbols.length > 0 && symbol && symbol.trim() !== '' && (
                 <p className="text-xs text-gray-400 mt-1">
                   {availableSymbols.filter(s => s.is_available).length} جفت ارز در دسترس از MetaTrader 5
                 </p>
@@ -477,9 +520,9 @@ export default function StrategyTesting() {
           <div className="flex gap-3">
             <button
               type="submit"
-              disabled={runningJob !== null || !selectedStrategy}
+              disabled={runningJob !== null || !selectedStrategy || !symbol || symbol.trim() === ''}
               className={`btn-success ${
-                runningJob !== null || !selectedStrategy
+                runningJob !== null || !selectedStrategy || !symbol || symbol.trim() === ''
                   ? 'opacity-50 cursor-not-allowed'
                   : ''
               }`}

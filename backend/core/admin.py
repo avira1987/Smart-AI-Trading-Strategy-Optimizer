@@ -246,7 +246,7 @@ class GoldAPIAccessRequestAdmin(admin.ModelAdmin):
 @admin.register(SystemSettings)
 class SystemSettingsAdmin(admin.ModelAdmin):
     """Admin برای تنظیمات سیستم"""
-    list_display = ['id', 'live_trading_enabled', 'use_ai_cache', 'updated_at']
+    list_display = ['id', 'live_trading_enabled', 'use_ai_cache', 'token_cost_per_1000', 'backtest_cost', 'strategy_processing_cost', 'registration_bonus', 'updated_at']
     list_filter = ['live_trading_enabled', 'use_ai_cache']
     readonly_fields = ['created_at', 'updated_at']
     
@@ -270,6 +270,10 @@ class SystemSettingsAdmin(admin.ModelAdmin):
         ('تنظیمات هوش مصنوعی', {
             'fields': ('use_ai_cache',),
             'description': 'کنترل استفاده از کش برای پردازش تبدیل متن انسانی به مدل هوش مصنوعی'
+        }),
+        ('هزینه‌های مصرف', {
+            'fields': ('token_cost_per_1000', 'backtest_cost', 'strategy_processing_cost', 'registration_bonus'),
+            'description': 'مدیریت هزینه‌های مصرف توکن، بک‌تست، پردازش استراتژی و هدیه ثبت‌نام'
         }),
         ('اطلاعات سیستم', {
             'fields': ('created_at', 'updated_at'),

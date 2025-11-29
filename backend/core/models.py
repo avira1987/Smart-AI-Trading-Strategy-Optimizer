@@ -978,13 +978,23 @@ class Wallet(models.Model):
     def __str__(self):
         return f"کیف پول {self.user.username} - {self.balance:,} تومان"
     
-    def charge(self, amount: float):
+    def charge(self, amount):
         """شارژ حساب"""
+        from decimal import Decimal
+        if isinstance(amount, float):
+            amount = Decimal(str(amount))
+        elif not isinstance(amount, Decimal):
+            amount = Decimal(str(amount))
         self.balance += amount
         self.save(update_fields=['balance', 'updated_at'])
     
-    def deduct(self, amount: float) -> bool:
+    def deduct(self, amount) -> bool:
         """کسر از موجودی - فقط در صورت کافی بودن موجودی"""
+        from decimal import Decimal
+        if isinstance(amount, float):
+            amount = Decimal(str(amount))
+        elif not isinstance(amount, Decimal):
+            amount = Decimal(str(amount))
         if self.balance >= amount:
             self.balance -= amount
             self.save(update_fields=['balance', 'updated_at'])
@@ -1230,6 +1240,32 @@ class SystemSettings(models.Model):
     use_ai_cache = models.BooleanField(
         default=True,
         help_text="استفاده از کش برای پردازش تبدیل متن انسانی به مدل هوش مصنوعی. اگر غیرفعال شود، همیشه از API استفاده می‌شود."
+    )
+    
+    # هزینه‌های مصرف
+    token_cost_per_1000 = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=100.0,
+        help_text="هزینه هر 1000 توکن به تومان"
+    )
+    backtest_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=50.0,
+        help_text="هزینه هر بک‌تست به تومان"
+    )
+    strategy_processing_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=100.0,
+        help_text="هزینه پردازش هر استراتژی به تومان"
+    )
+    registration_bonus = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=399.0,
+        help_text="مبلغ هدیه ثبت‌نام به تومان"
     )
     
     created_at = models.DateTimeField(auto_now_add=True)

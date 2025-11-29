@@ -60,7 +60,11 @@ export default function Results() {
       const jobResults = jobsData
         .map((job) => {
           if (!job.result) return null
-          return { ...job.result, job: job.result.job ?? job.id }
+          return { 
+            ...job.result, 
+            job: job.result.job ?? job.id,
+            strategy_name: job.strategy_name || job.result.strategy_name || null
+          }
         })
         .filter((item): item is Result => Boolean(item))
 
@@ -260,7 +264,12 @@ export default function Results() {
                     }`}
                   >
                     <div className="flex justify-between items-center">
-                      <span className="text-white text-sm">نتیجه شماره {result.id}</span>
+                      <div className="flex flex-col">
+                        <span className="text-white text-sm">نتیجه شماره {result.id}</span>
+                        {result.strategy_name && (
+                          <span className="text-gray-400 text-xs mt-1">استراتژی: {result.strategy_name}</span>
+                        )}
+                      </div>
                       <span
                         className={`text-sm font-medium ${
                           result.total_return >= 0 ? 'text-green-400' : 'text-red-400'
@@ -320,7 +329,7 @@ export default function Results() {
                 {selectedResult.data_sources && (
                   <div className="card-standard mb-6">
                     <h2 className="text-xl font-semibold text-white mb-4 text-right">اطلاعات بک‌تست</h2>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
                       {selectedResult.data_sources.symbol && (
                         <div className="bg-gray-700 rounded p-4">
                           <div className="text-gray-400 text-sm mb-1">نماد معاملاتی</div>
@@ -375,6 +384,147 @@ export default function Results() {
                         </div>
                       )}
                     </div>
+
+                    {/* جزئیات اجرا */}
+                    {selectedResult.data_sources.execution_details && (
+                      <div className="mb-6">
+                        <h3 className="text-lg font-semibold text-white mb-3 text-right">جزئیات اجرا</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {selectedResult.data_sources.execution_details?.initial_capital && (
+                            <div className="bg-gray-700 rounded p-4">
+                              <div className="text-gray-400 text-sm mb-1">سرمایه اولیه</div>
+                              <div className="text-lg font-semibold text-white">
+                                {selectedResult.data_sources.execution_details.initial_capital.toLocaleString('fa-IR')} تومان
+                              </div>
+                            </div>
+                          )}
+                          {selectedResult.data_sources.execution_details?.backtest_duration_seconds && (
+                            <div className="bg-gray-700 rounded p-4">
+                              <div className="text-gray-400 text-sm mb-1">زمان اجرای بک‌تست</div>
+                              <div className="text-lg font-semibold text-green-400">
+                                {selectedResult.data_sources.execution_details.backtest_duration_seconds.toFixed(2)} ثانیه
+                              </div>
+                            </div>
+                          )}
+                          {selectedResult.data_sources.execution_details?.total_duration_seconds && (
+                            <div className="bg-gray-700 rounded p-4">
+                              <div className="text-gray-400 text-sm mb-1">زمان کل اجرا</div>
+                              <div className="text-lg font-semibold text-blue-400">
+                                {selectedResult.data_sources.execution_details.total_duration_seconds.toFixed(2)} ثانیه
+                              </div>
+                            </div>
+                          )}
+                          {selectedResult.data_sources.execution_details?.data_retrieval_method && (
+                            <div className="bg-gray-700 rounded p-4">
+                              <div className="text-gray-400 text-sm mb-1">روش دریافت داده</div>
+                              <div className="text-lg font-semibold text-white text-sm">
+                                {selectedResult.data_sources.execution_details.data_retrieval_method === 'mt5_m1_aggregation' 
+                                  ? 'تجمیع از M1 (MT5)' 
+                                  : 'مستقیم'}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* جزئیات استراتژی */}
+                    {selectedResult.data_sources.strategy_details && (
+                      <div className="mb-6">
+                        <h3 className="text-lg font-semibold text-white mb-3 text-right">جزئیات استراتژی</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {selectedResult.data_sources.strategy_details?.entry_conditions_count !== undefined && (
+                            <div className="bg-gray-700 rounded p-4">
+                              <div className="text-gray-400 text-sm mb-1">شرایط ورود</div>
+                              <div className="text-lg font-semibold text-green-400">
+                                {selectedResult.data_sources.strategy_details.entry_conditions_count}
+                              </div>
+                            </div>
+                          )}
+                          {selectedResult.data_sources.strategy_details?.exit_conditions_count !== undefined && (
+                            <div className="bg-gray-700 rounded p-4">
+                              <div className="text-gray-400 text-sm mb-1">شرایط خروج</div>
+                              <div className="text-lg font-semibold text-red-400">
+                                {selectedResult.data_sources.strategy_details.exit_conditions_count}
+                              </div>
+                            </div>
+                          )}
+                          {selectedResult.data_sources.strategy_details?.confidence_score !== undefined && (
+                            <div className="bg-gray-700 rounded p-4">
+                              <div className="text-gray-400 text-sm mb-1">امتیاز اطمینان</div>
+                              <div className="text-lg font-semibold text-yellow-400">
+                                {selectedResult.data_sources.strategy_details.confidence_score.toFixed(2)}
+                              </div>
+                            </div>
+                          )}
+                          {selectedResult.data_sources.strategy_details?.indicators_used && selectedResult.data_sources.strategy_details.indicators_used.length > 0 && (
+                            <div className="bg-gray-700 rounded p-4">
+                              <div className="text-gray-400 text-sm mb-1">اندیکاتورها</div>
+                              <div className="text-lg font-semibold text-white text-sm">
+                                {selectedResult.data_sources.strategy_details.indicators_used.length} اندیکاتور
+                              </div>
+                              <div className="text-gray-400 text-xs mt-1">
+                                {selectedResult.data_sources.strategy_details.indicators_used.slice(0, 3).join(', ')}
+                                {selectedResult.data_sources.strategy_details.indicators_used.length > 3 && '...'}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        {selectedResult.data_sources.strategy_details?.selected_indicators && selectedResult.data_sources.strategy_details.selected_indicators.length > 0 && (
+                          <div className="mt-3 bg-gray-700 rounded p-3">
+                            <div className="text-gray-400 text-sm mb-2">اندیکاتورهای انتخاب شده:</div>
+                            <div className="flex flex-wrap gap-2">
+                              {selectedResult.data_sources.strategy_details.selected_indicators.map((indicator, idx) => (
+                                <span key={idx} className="bg-blue-600 text-white text-xs px-2 py-1 rounded">
+                                  {indicator}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* خلاصه نتایج */}
+                    {selectedResult.data_sources.results_summary && (
+                      <div>
+                        <h3 className="text-lg font-semibold text-white mb-3 text-right">خلاصه نتایج</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {selectedResult.data_sources.results_summary?.total_trades !== undefined && (
+                            <div className="bg-gray-700 rounded p-4">
+                              <div className="text-gray-400 text-sm mb-1">کل معاملات</div>
+                              <div className="text-lg font-semibold text-white">
+                                {selectedResult.data_sources.results_summary.total_trades}
+                              </div>
+                            </div>
+                          )}
+                          {selectedResult.data_sources.results_summary?.win_rate !== undefined && (
+                            <div className="bg-gray-700 rounded p-4">
+                              <div className="text-gray-400 text-sm mb-1">نرخ برد</div>
+                              <div className="text-lg font-semibold text-blue-400">
+                                {selectedResult.data_sources.results_summary.win_rate.toFixed(2)}%
+                              </div>
+                            </div>
+                          )}
+                          {selectedResult.data_sources.results_summary?.sharpe_ratio !== undefined && selectedResult.data_sources.results_summary.sharpe_ratio !== null && (
+                            <div className="bg-gray-700 rounded p-4">
+                              <div className="text-gray-400 text-sm mb-1">نسبت شارپ</div>
+                              <div className="text-lg font-semibold text-purple-400">
+                                {selectedResult.data_sources.results_summary.sharpe_ratio.toFixed(4)}
+                              </div>
+                            </div>
+                          )}
+                          {selectedResult.data_sources.results_summary?.profit_factor !== undefined && selectedResult.data_sources.results_summary.profit_factor !== null && (
+                            <div className="bg-gray-700 rounded p-4">
+                              <div className="text-gray-400 text-sm mb-1">فاکتور سود</div>
+                              <div className="text-lg font-semibold text-orange-400">
+                                {selectedResult.data_sources.results_summary.profit_factor.toFixed(4)}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 

@@ -7,12 +7,14 @@ import { useProfileCompletion } from '../context/ProfileCompletionContext'
 export default function Navbar() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { isAuthenticated, user, logout } = useAuth()
+  const { isAuthenticated, user, logout, isAdmin } = useAuth()
   const { liveTradingEnabled } = useFeatureFlags()
   const { shouldRemind, snooze } = useProfileCompletion()
   const [isAboutDropdownOpen, setIsAboutDropdownOpen] = useState(false)
+  const [isAdminDropdownOpen, setIsAdminDropdownOpen] = useState(false)
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const adminDropdownRef = useRef<HTMLDivElement>(null)
   const mobileDropdownRef = useRef<HTMLDivElement>(null)
 
   const primaryPhoneNumber =
@@ -35,11 +37,15 @@ export default function Navbar() {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node
       const isInsideDesktop = dropdownRef.current?.contains(target)
+      const isInsideAdmin = adminDropdownRef.current?.contains(target)
       const isInsideMobile = mobileDropdownRef.current?.contains(target)
       
       // Close dropdown only if click is outside both desktop and mobile dropdowns
       if (!isInsideDesktop && !isInsideMobile) {
         setIsAboutDropdownOpen(false)
+      }
+      if (!isInsideAdmin && !isInsideMobile) {
+        setIsAdminDropdownOpen(false)
       }
     }
 
@@ -54,6 +60,9 @@ export default function Navbar() {
                                 location.pathname === '/tutorial' || 
                                 location.pathname === '/profile' || 
                                 location.pathname === '/about'
+  
+  // Check if current path is in the admin submenu
+  const isAdminSubmenuActive = location.pathname.startsWith('/admin')
   
   return (
     <nav className="bg-gray-800 border-b border-gray-700 direction-rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
@@ -136,6 +145,70 @@ export default function Navbar() {
                 </button>
               </div>
             )}
+            {/* Admin Panel Dropdown */}
+            {isAuthenticated && isAdmin && (
+              <div className="relative" ref={adminDropdownRef}>
+                <button
+                  onClick={() => setIsAdminDropdownOpen(!isAdminDropdownOpen)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1 ${
+                    isAdminSubmenuActive
+                      ? 'bg-gray-700 text-white'
+                      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                  }`}
+                >
+                  پنل ادمین
+                  <svg
+                    className={`w-4 h-4 transition-transform ${isAdminDropdownOpen ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                
+                {isAdminDropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-56 bg-gray-800 rounded-lg shadow-lg border border-gray-700 z-50">
+                    <div className="py-1">
+                      <Link
+                        to="/admin/users"
+                        onClick={() => setIsAdminDropdownOpen(false)}
+                        className={`block px-4 py-2 text-sm transition ${
+                          location.pathname === '/admin/users'
+                            ? 'bg-gray-700 text-white'
+                            : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                        }`}
+                      >
+                        مدیریت کاربران
+                      </Link>
+                      <Link
+                        to="/admin/security"
+                        onClick={() => setIsAdminDropdownOpen(false)}
+                        className={`block px-4 py-2 text-sm transition ${
+                          location.pathname === '/admin/security'
+                            ? 'bg-gray-700 text-white'
+                            : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                        }`}
+                      >
+                        مدیریت امنیت
+                      </Link>
+                      <Link
+                        to="/admin/settings"
+                        onClick={() => setIsAdminDropdownOpen(false)}
+                        className={`block px-4 py-2 text-sm transition ${
+                          location.pathname === '/admin/settings'
+                            ? 'bg-gray-700 text-white'
+                            : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                        }`}
+                      >
+                        تنظیمات سیستم
+                      </Link>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* About System Dropdown */}
             <div className="relative" ref={dropdownRef}>
               <button
@@ -358,6 +431,45 @@ export default function Navbar() {
               >
                 مارکت‌پلیس استراتژی‌ها
               </Link>
+              {/* Admin Panel in Mobile Menu */}
+              {isAuthenticated && isAdmin && (
+                <div className="px-4 py-2">
+                  <div className="text-xs text-gray-400 mb-2 px-4">پنل ادمین</div>
+                  <Link
+                    to="/admin/users"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={`block px-4 py-2 rounded-lg text-sm transition ${
+                      location.pathname === '/admin/users'
+                        ? 'bg-gray-700 text-white'
+                        : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                    }`}
+                  >
+                    مدیریت کاربران
+                  </Link>
+                  <Link
+                    to="/admin/security"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={`block px-4 py-2 rounded-lg text-sm transition ${
+                      location.pathname === '/admin/security'
+                        ? 'bg-gray-700 text-white'
+                        : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                    }`}
+                  >
+                    مدیریت امنیت
+                  </Link>
+                  <Link
+                    to="/admin/settings"
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className={`block px-4 py-2 rounded-lg text-sm transition ${
+                      location.pathname === '/admin/settings'
+                        ? 'bg-gray-700 text-white'
+                        : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                    }`}
+                  >
+                    تنظیمات سیستم
+                  </Link>
+                </div>
+              )}
               <div className="px-4 py-2" ref={mobileDropdownRef}>
                 <button
                   onClick={() => setIsAboutDropdownOpen(!isAboutDropdownOpen)}

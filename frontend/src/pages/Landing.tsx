@@ -297,8 +297,8 @@ export default function Landing() {
           <h2 className="text-3xl md:text-4xl font-bold text-white text-center mb-12">
             چگونه کار می‌کند؟
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
-            <div className="text-center">
+          <div className="flex flex-wrap justify-center gap-6">
+            <div className="text-center max-w-[200px]">
               <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold text-white">
                 1
               </div>
@@ -307,7 +307,7 @@ export default function Landing() {
                 استراتژی معاملاتی خود را به صورت فایل آپلود کنید
               </p>
             </div>
-            <div className="text-center">
+            <div className="text-center max-w-[200px]">
               <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold text-white">
                 2
               </div>
@@ -316,7 +316,7 @@ export default function Landing() {
                 سیستم با استفاده از AI استراتژی را تجزیه می‌کند
               </p>
             </div>
-            <div className="text-center">
+            <div className="text-center max-w-[200px]">
               <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold text-white">
                 3
               </div>
@@ -326,7 +326,7 @@ export default function Landing() {
               </p>
             </div>
             {liveTradingEnabled && (
-              <div className="text-center">
+              <div className="text-center max-w-[200px]">
                 <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold text-white">
                   4
                 </div>
@@ -336,7 +336,7 @@ export default function Landing() {
                 </p>
               </div>
             )}
-            <div className="text-center">
+            <div className="text-center max-w-[200px]">
               <div className="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold text-white">
                 5
               </div>

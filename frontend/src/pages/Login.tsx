@@ -157,13 +157,15 @@ export default function Login() {
         clearCaptcha() // Clear CAPTCHA after successful submission
         login(response.user, response.device_id)
         
-        // Check if this is a new user (user created for the first time)
-        // Check if email is placeholder or phone is invalid
-        const isNewUser = response.user?.email?.endsWith('@example.com') || 
-                         !response.user?.phone_number?.startsWith('09')
+        // Check if this is a new user
+        const isNewUser = response.is_new_user || false
         
         if (isNewUser) {
-          showToast('حساب کاربری شما ایجاد شد. لطفا پروفایل خود را تکمیل کنید', { type: 'info', duration: 5000 })
+          // Show welcome message with registration bonus
+          showToast(
+            '🎉 به پلتفرم خوش آمدید! مبلغ 399 تومان هدیه ثبت‌نام به حساب شما اضافه شد.',
+            { type: 'success', duration: 8000 }
+          )
           navigate('/complete-profile')
         } else {
           showToast('ورود با موفقیت انجام شد', { type: 'success' })

@@ -215,6 +215,153 @@ export default function SystemSettings() {
               </div>
             </div>
 
+            {/* Cost Settings */}
+            <div className="bg-gray-900 rounded-lg p-5 space-y-4">
+              <h4 className="text-lg font-semibold text-white">تنظیمات هزینه‌ها</h4>
+              
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    هزینه هر 1000 توکن (تومان)
+                  </label>
+                  <input
+                    type="number"
+                    value={systemSettings.token_cost_per_1000 || ''}
+                    onChange={(e) => {
+                      const value = parseFloat(e.target.value)
+                      if (!isNaN(value) && value >= 0) {
+                        setSystemSettings({ ...systemSettings, token_cost_per_1000: value })
+                      }
+                    }}
+                    onBlur={async () => {
+                      if (systemSettings.token_cost_per_1000 !== undefined) {
+                        try {
+                          setSettingsActionLoading(true)
+                          const response = await updateSystemSettings({
+                            token_cost_per_1000: systemSettings.token_cost_per_1000,
+                          })
+                          setSystemSettings(response.data)
+                          showToast('هزینه توکن به‌روزرسانی شد', { type: 'success' })
+                        } catch (error: any) {
+                          showToast('خطا در به‌روزرسانی هزینه توکن', { type: 'error' })
+                        } finally {
+                          setSettingsActionLoading(false)
+                        }
+                      }
+                    }}
+                    className="w-full px-4 py-2 bg-gray-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    هزینه هر بک‌تست (تومان)
+                  </label>
+                  <input
+                    type="number"
+                    value={systemSettings.backtest_cost || ''}
+                    onChange={(e) => {
+                      const value = parseFloat(e.target.value)
+                      if (!isNaN(value) && value >= 0) {
+                        setSystemSettings({ ...systemSettings, backtest_cost: value })
+                      }
+                    }}
+                    onBlur={async () => {
+                      if (systemSettings.backtest_cost !== undefined) {
+                        try {
+                          setSettingsActionLoading(true)
+                          const response = await updateSystemSettings({
+                            backtest_cost: systemSettings.backtest_cost,
+                          })
+                          setSystemSettings(response.data)
+                          showToast('هزینه بک‌تست به‌روزرسانی شد', { type: 'success' })
+                        } catch (error: any) {
+                          showToast('خطا در به‌روزرسانی هزینه بک‌تست', { type: 'error' })
+                        } finally {
+                          setSettingsActionLoading(false)
+                        }
+                      }
+                    }}
+                    className="w-full px-4 py-2 bg-gray-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    هزینه پردازش هر استراتژی (تومان)
+                  </label>
+                  <input
+                    type="number"
+                    value={systemSettings.strategy_processing_cost || ''}
+                    onChange={(e) => {
+                      const value = parseFloat(e.target.value)
+                      if (!isNaN(value) && value >= 0) {
+                        setSystemSettings({ ...systemSettings, strategy_processing_cost: value })
+                      }
+                    }}
+                    onBlur={async () => {
+                      if (systemSettings.strategy_processing_cost !== undefined) {
+                        try {
+                          setSettingsActionLoading(true)
+                          const response = await updateSystemSettings({
+                            strategy_processing_cost: systemSettings.strategy_processing_cost,
+                          })
+                          setSystemSettings(response.data)
+                          showToast('هزینه پردازش استراتژی به‌روزرسانی شد', { type: 'success' })
+                        } catch (error: any) {
+                          showToast('خطا در به‌روزرسانی هزینه پردازش استراتژی', { type: 'error' })
+                        } finally {
+                          setSettingsActionLoading(false)
+                        }
+                      }
+                    }}
+                    className="w-full px-4 py-2 bg-gray-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    مبلغ هدیه ثبت‌نام (تومان)
+                  </label>
+                  <input
+                    type="number"
+                    value={systemSettings.registration_bonus || ''}
+                    onChange={(e) => {
+                      const value = parseFloat(e.target.value)
+                      if (!isNaN(value) && value >= 0) {
+                        setSystemSettings({ ...systemSettings, registration_bonus: value })
+                      }
+                    }}
+                    onBlur={async () => {
+                      if (systemSettings.registration_bonus !== undefined) {
+                        try {
+                          setSettingsActionLoading(true)
+                          const response = await updateSystemSettings({
+                            registration_bonus: systemSettings.registration_bonus,
+                          })
+                          setSystemSettings(response.data)
+                          showToast('مبلغ هدیه ثبت‌نام به‌روزرسانی شد', { type: 'success' })
+                        } catch (error: any) {
+                          showToast('خطا در به‌روزرسانی مبلغ هدیه ثبت‌نام', { type: 'error' })
+                        } finally {
+                          setSettingsActionLoading(false)
+                        }
+                      }
+                    }}
+                    className="w-full px-4 py-2 bg-gray-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-gray-900 rounded-lg p-5 border border-yellow-600/30">
               <div>
                 <h4 className="text-lg font-semibold text-white">پاک کردن کش AI</h4>

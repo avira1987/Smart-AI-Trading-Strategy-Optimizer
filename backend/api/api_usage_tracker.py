@@ -156,6 +156,47 @@ def log_api_usage(
         # تبدیل به تومان
         cost_toman = cost * USD_TO_TOMAN_RATE
         
+        # کسر هزینه از موجودی کاربر (فقط برای توکن‌ها و در صورت وجود کاربر)
+        if user and provider in ['gemini', 'openai', 'chatgpt', 'gpt', 'gpt4', 'gpt-4', 'cohere', 'openrouter', 'together_ai', 'deepinfra', 'groq', 'gapgpt']:
+            from core.models import Wallet, SystemSettings, Transaction
+            from django.db import transaction as db_transaction
+            
+            try:
+                with db_transaction.atomic():
+                    wallet, _ = Wallet.objects.select_for_update().get_or_create(user=user)
+                    settings = SystemSettings.load()
+                    
+                    # محاسبه هزینه بر اساس تعداد توکن‌ها
+                    total_tokens = tokens or 0
+                    if metadata:
+                        input_tokens = metadata.get('input_tokens_approx') or metadata.get('input_tokens') or 0
+                        output_tokens = metadata.get('output_tokens_approx') or metadata.get('output_tokens') or 0
+                        total_tokens = input_tokens + output_tokens if (input_tokens or output_tokens) else total_tokens
+                    
+                    if total_tokens > 0:
+                        # محاسبه هزینه بر اساس تنظیمات سیستم
+                        token_cost = (Decimal(str(total_tokens)) / Decimal('1000')) * settings.token_cost_per_1000
+                        
+                        # کسر از موجودی
+                        if wallet.balance >= token_cost:
+                            wallet.balance -= token_cost
+                            wallet.save(update_fields=['balance', 'updated_at'])
+                            
+                            # ایجاد تراکنش
+                            Transaction.objects.create(
+                                wallet=wallet,
+                                transaction_type='payment',
+                                amount=token_cost,
+                                status='completed',
+                                description=f'مصرف توکن ({total_tokens:,} توکن) - {provider}',
+                                completed_at=timezone.now()
+                            )
+                            logger.info(f"Deducted {token_cost} Toman from user {user.username} for {total_tokens} tokens")
+                        else:
+                            logger.warning(f"Insufficient balance for user {user.username}. Required: {token_cost}, Available: {wallet.balance}")
+            except Exception as e:
+                logger.error(f"Error deducting token cost from wallet: {e}")
+        
         # ایجاد لاگ
         log_entry = APIUsageLog.objects.create(
             user=user,

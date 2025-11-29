@@ -96,6 +96,44 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
     detailed_logger = logging.getLogger('api.tasks')
     
     try:
+        # Deduct backtest cost from user's wallet
+        if job.user:
+            from core.models import Wallet, SystemSettings, Transaction
+            from decimal import Decimal
+            from django.db import transaction as db_transaction
+            
+            try:
+                with db_transaction.atomic():
+                    wallet, _ = Wallet.objects.select_for_update().get_or_create(user=job.user)
+                    settings = SystemSettings.load()
+                    backtest_cost = settings.backtest_cost
+                    
+                    # Check balance
+                    if wallet.balance >= backtest_cost:
+                        wallet.balance -= backtest_cost
+                        wallet.save(update_fields=['balance', 'updated_at'])
+                        
+                        # Create transaction
+                        Transaction.objects.create(
+                            wallet=wallet,
+                            transaction_type='payment',
+                            amount=backtest_cost,
+                            status='completed',
+                            description=f'هزینه بک‌تست - استراتژی: {job.strategy.name if job.strategy else "نامشخص"}',
+                            completed_at=timezone.now()
+                        )
+                        logger.info(f"Deducted {backtest_cost} Toman from user {job.user.username} for backtest")
+                    else:
+                        error_msg = f"موجودی کافی نیست. هزینه بک‌تست: {backtest_cost:,.0f} تومان، موجودی: {wallet.balance:,.0f} تومان"
+                        logger.warning(f"Insufficient balance for user {job.user.username}: {error_msg}")
+                        job.status = 'failed'
+                        job.error_message = error_msg
+                        job.save()
+                        return
+            except Exception as e:
+                logger.error(f"Error deducting backtest cost from wallet: {e}")
+                # Continue with backtest even if deduction fails (for now)
+        
         job.status = 'running'
         job.started_at = timezone.now()
         job.save()
@@ -209,8 +247,18 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             return f"Backtest failed for job {job_id}: {error_msg}"
         
         # Get historical data window and symbol
-        # Default to XAU/USD (Gold) as it's the primary symbol for this trading system
-        symbol = (symbol_override or parsed_strategy.get('symbol') or 'XAU/USD')
+        # Symbol is required for backtest - must be provided via symbol_override or in strategy
+        if not symbol_override and not parsed_strategy.get('symbol'):
+            error_msg = "جفت ارز برای بک‌تست تعیین نشده است. لطفاً جفت ارز را انتخاب کنید."
+            detailed_logger.error(f"❌ خطا: {error_msg}")
+            logger.error(f"[BACKTEST] {error_msg}")
+            job.status = 'failed'
+            job.error_message = error_msg
+            job.completed_at = timezone.now()
+            job.save()
+            return f"Backtest failed for job {job_id}: {error_msg}"
+        
+        symbol = (symbol_override or parsed_strategy.get('symbol'))
         days = int(timeframe_days) if timeframe_days else 365
         start_date = (timezone.now() - timezone.timedelta(days=days)).strftime('%Y-%m-%d')
         end_date = timezone.now().strftime('%Y-%m-%d')
@@ -257,6 +305,8 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
         
         # اگر هنوز داده نداریم، خطا برمی‌گردانیم
         if data.empty:
+                # Check MT5 availability before using mt5_ok and mt5_msg
+                mt5_ok, mt5_msg = is_mt5_available()
                 error_msg = (
                     f"نمی‌توان داده بازار را دریافت کرد. "
                     f"لطفاً مطمئن شوید که حداقل یک API key تنظیم شده است: "
@@ -515,7 +565,7 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                 except Exception:
                     ai_analysis = None
             
-            # Prepare data sources information
+            # Prepare data sources information with detailed metrics
             data_sources_info = {
                 'provider': provider_used or 'unknown',
                 'symbol': symbol,
@@ -528,6 +578,32 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                 'data_range': {
                     'first_date': str(data.index[0]) if not data.empty else None,
                     'last_date': str(data.index[-1]) if not data.empty else None,
+                },
+                # جزئیات اجرای بک‌تست
+                'execution_details': {
+                    'backtest_duration_seconds': round(backtest_duration, 2) if 'backtest_duration' in locals() else None,
+                    'total_duration_seconds': None,  # Will be set later
+                    'initial_capital': initial_capital or 10000,
+                    'data_retrieval_method': 'mt5_m1_aggregation' if provider_used == 'mt5' else 'direct',
+                },
+                # جزئیات استراتژی
+                'strategy_details': {
+                    'entry_conditions_count': len(parsed_strategy.get('entry_conditions', [])),
+                    'exit_conditions_count': len(parsed_strategy.get('exit_conditions', [])),
+                    'indicators_used': parsed_strategy.get('indicators', []),
+                    'selected_indicators': selected_indicators or [],
+                    'confidence_score': parsed_strategy.get('confidence_score', 0),
+                },
+                # جزئیات نتایج
+                'results_summary': {
+                    'total_trades': result_data.get('total_trades', 0),
+                    'winning_trades': result_data.get('winning_trades', 0),
+                    'losing_trades': result_data.get('losing_trades', 0),
+                    'win_rate': round(result_data.get('win_rate', 0), 2),
+                    'total_return': round(result_data.get('total_return', 0), 2),
+                    'max_drawdown': round(result_data.get('max_drawdown', 0), 2),
+                    'sharpe_ratio': round(result_data.get('sharpe_ratio', 0), 4) if result_data.get('sharpe_ratio') else None,
+                    'profit_factor': round(result_data.get('profit_factor', 0), 4) if result_data.get('profit_factor') else None,
                 }
             }
             
@@ -670,6 +746,12 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             else:
                 final_description = data_sources_text.strip() if data_sources_text else ""
             
+            # Calculate total duration before creating result
+            total_duration = time.time() - start_time
+            # Update total duration in data_sources_info
+            if 'execution_details' in data_sources_info:
+                data_sources_info['execution_details']['total_duration_seconds'] = round(total_duration, 2)
+            
             # Create result with error handling
             result = Result.objects.create(
                 job=job,
@@ -700,8 +782,6 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             job.status = 'completed'
             job.completed_at = timezone.now()
             job.save()
-            
-            total_duration = time.time() - start_time
             logger.info(f"========== Backtest completed for job {job_id} in {total_duration:.2f} seconds ==========")
             logger.info(f"Results: {result_data.get('total_return', 0):.2f}% return, {result_data.get('total_trades', 0)} trades, {result_data.get('win_rate', 0):.2f}% win rate")
             print(f"[BACKTEST] ========== Backtest completed for job {job_id} in {total_duration:.2f} seconds ==========")

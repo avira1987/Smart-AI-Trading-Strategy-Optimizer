@@ -19,6 +19,8 @@ export interface AuthResponse {
   authenticated?: boolean
   expires_in?: number
   errors?: any
+  is_new_user?: boolean
+  is_new_device?: boolean
 }
 
 export const sendOTP = async (phoneNumber: string, captchaData?: any): Promise<AuthResponse> => {

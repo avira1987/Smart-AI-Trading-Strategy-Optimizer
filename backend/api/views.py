@@ -1228,6 +1228,50 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                 'message': 'No strategy file found'
             }, status=status.HTTP_400_BAD_REQUEST)
         
+        # Check user balance and deduct cost before processing
+        user = strategy.user or request.user
+        if user and user.is_authenticated:
+            from core.models import Wallet, SystemSettings, Transaction
+            from django.db import transaction as db_transaction
+            
+            try:
+                with db_transaction.atomic():
+                    wallet, _ = Wallet.objects.select_for_update().get_or_create(user=user)
+                    settings = SystemSettings.load()
+                    processing_cost = settings.strategy_processing_cost
+                    
+                    # Check balance
+                    if wallet.balance < processing_cost:
+                        error_msg = f"موجودی کافی نیست. هزینه پردازش: {processing_cost:,.0f} تومان، موجودی: {wallet.balance:,.0f} تومان"
+                        logger.warning(f"Insufficient balance for user {user.username}: {error_msg}")
+                        return Response({
+                            'status': 'error',
+                            'message': error_msg,
+                            'error': 'insufficient_balance'
+                        }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                    
+                    # Deduct cost before processing
+                    wallet.balance -= processing_cost
+                    wallet.save(update_fields=['balance', 'updated_at'])
+                    
+                    # Create transaction
+                    Transaction.objects.create(
+                        wallet=wallet,
+                        transaction_type='payment',
+                        amount=processing_cost,
+                        status='completed',
+                        description=f'هزینه پردازش استراتژی - {strategy.name}',
+                        completed_at=timezone.now()
+                    )
+                    logger.info(f"Deducted {processing_cost} Toman from user {user.username} for strategy processing")
+            except Exception as e:
+                logger.error(f"Error deducting strategy processing cost from wallet: {e}")
+                return Response({
+                    'status': 'error',
+                    'message': f'خطا در کسر هزینه: {str(e)}',
+                    'error': 'payment_error'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
         try:
             process_started_at = timezone.now()
             process_started_perf = time.perf_counter()
@@ -4331,3 +4375,283 @@ class GapGPTViewSet(viewsets.ViewSet):
                 'status': 'error',
                 'message': f'خطا در مقایسه مدل‌ها: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class AdminUserManagementView(APIView):
+    """View for admin to manage user credits"""
+    permission_classes = [IsAdminOrStaff]
+    
+    def get(self, request):
+        """Get list of users with their wallet balances"""
+        from core.models import UserProfile
+        
+        users = User.objects.all().select_related('wallet', 'profile')
+        user_data = []
+        
+        for user in users:
+            wallet, _ = Wallet.objects.get_or_create(user=user)
+            profile = getattr(user, 'profile', None)
+            
+            user_data.append({
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'phone_number': profile.phone_number if profile else None,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'nickname': profile.nickname if profile else None,
+                'balance': float(wallet.balance),
+                'balance_formatted': f"{wallet.balance:,.0f} تومان",
+                'date_joined': user.date_joined,
+                'is_staff': user.is_staff,
+                'is_superuser': user.is_superuser,
+            })
+        
+        return Response({
+            'users': user_data,
+            'total': len(user_data)
+        })
+    
+    def post(self, request):
+        """Allocate credit to a user"""
+        user_id = request.data.get('user_id')
+        amount = request.data.get('amount')
+        description = request.data.get('description', 'اعتبار تخصیص داده شده توسط ادمین')
+        
+        if not user_id or not amount:
+            return Response(
+                {'error': 'user_id و amount الزامی هستند'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            amount = Decimal(str(amount))
+            if amount <= 0:
+                return Response(
+                    {'error': 'مبلغ باید بیشتر از صفر باشد'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except (ValueError, TypeError):
+            return Response(
+                {'error': 'مبلغ معتبر نیست'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'کاربر یافت نشد'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        try:
+            with transaction.atomic():
+                wallet, _ = Wallet.objects.select_for_update().get_or_create(user=user)
+                wallet.charge(amount)  # amount is already Decimal
+                
+                # Create transaction record
+                Transaction.objects.create(
+                    wallet=wallet,
+                    transaction_type='charge',
+                    amount=amount,
+                    status='completed',
+                    description=description,
+                    completed_at=timezone.now()
+                )
+                
+                return Response({
+                    'success': True,
+                    'message': f'اعتبار {amount:,.0f} تومان به کاربر {user.username} تخصیص داده شد',
+                    'new_balance': float(wallet.balance),
+                    'new_balance_formatted': f"{wallet.balance:,.0f} تومان"
+                })
+        except Exception as e:
+            logger.error(f"Error allocating credit to user: {e}")
+            return Response(
+                {'error': f'خطا در تخصیص اعتبار: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def patch(self, request):
+        """Update user information"""
+        user_id = request.data.get('user_id')
+        
+        if not user_id:
+            return Response(
+                {'error': 'user_id الزامی است'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'کاربر یافت نشد'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Get or create profile
+        from core.models import UserProfile
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        
+        # Update user fields
+        if 'email' in request.data:
+            email = request.data.get('email', '').strip()
+            if email:
+                # Check if email is already used by another user
+                if User.objects.filter(email=email).exclude(id=user.id).exists():
+                    return Response(
+                        {'error': 'این ایمیل قبلا استفاده شده است'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                user.email = email
+        
+        if 'first_name' in request.data:
+            user.first_name = request.data.get('first_name', '').strip()
+        
+        if 'last_name' in request.data:
+            user.last_name = request.data.get('last_name', '').strip()
+        
+        # Update profile fields
+        if 'phone_number' in request.data:
+            phone_number = request.data.get('phone_number', '').strip()
+            if phone_number:
+                if not phone_number.startswith('09') or len(phone_number) != 11 or not phone_number.isdigit():
+                    return Response(
+                        {'error': 'شماره موبایل باید 11 رقم و با 09 شروع شود'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                # Check if phone number is already used by another user
+                if UserProfile.objects.filter(phone_number=phone_number).exclude(user=user).exists():
+                    return Response(
+                        {'error': 'این شماره موبایل قبلا استفاده شده است'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                profile.phone_number = phone_number
+        
+        if 'nickname' in request.data:
+            nickname = request.data.get('nickname', '').strip()
+            if nickname:
+                # Check if nickname is already used by another user
+                if UserProfile.objects.filter(nickname=nickname).exclude(user=user).exists():
+                    return Response(
+                        {'error': 'این نیک‌نیم قبلا استفاده شده است'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                profile.nickname = nickname
+        
+        if 'is_staff' in request.data:
+            # Only superuser can change staff status
+            if request.user.is_superuser:
+                user.is_staff = request.data.get('is_staff', False)
+            else:
+                return Response(
+                    {'error': 'فقط ادمین اصلی می‌تواند وضعیت کارمند را تغییر دهد'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+        if 'is_superuser' in request.data:
+            # Only superuser can change superuser status
+            if request.user.is_superuser:
+                # Prevent removing superuser status from yourself
+                if user.id == request.user.id and not request.data.get('is_superuser', False):
+                    return Response(
+                        {'error': 'نمی‌توانید دسترسی ادمین اصلی را از خودتان بگیرید'},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+                user.is_superuser = request.data.get('is_superuser', False)
+            else:
+                return Response(
+                    {'error': 'فقط ادمین اصلی می‌تواند وضعیت ادمین اصلی را تغییر دهد'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+        try:
+            user.save()
+            profile.save()
+            
+            # Get updated wallet balance
+            wallet, _ = Wallet.objects.get_or_create(user=user)
+            
+            return Response({
+                'success': True,
+                'message': f'اطلاعات کاربر {user.username} با موفقیت به‌روزرسانی شد',
+                'user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'phone_number': profile.phone_number,
+                    'nickname': profile.nickname,
+                    'is_staff': user.is_staff,
+                    'is_superuser': user.is_superuser,
+                    'balance': float(wallet.balance),
+                    'balance_formatted': f"{wallet.balance:,.0f} تومان",
+                    'date_joined': user.date_joined,
+                }
+            })
+        except Exception as e:
+            logger.error(f"Error updating user: {e}")
+            return Response(
+                {'error': f'خطا در به‌روزرسانی کاربر: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    def delete(self, request):
+        """Delete a regular user (not admin or staff)"""
+        # Try to get user_id from request body or query params
+        user_id = request.data.get('user_id') or request.query_params.get('user_id')
+        
+        if not user_id:
+            return Response(
+                {'error': 'user_id الزامی است'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user_id = int(user_id)
+        except (ValueError, TypeError):
+            return Response(
+                {'error': 'user_id باید یک عدد معتبر باشد'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return Response(
+                {'error': 'کاربر یافت نشد'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Prevent deletion of admin or staff users
+        if user.is_superuser or user.is_staff:
+            return Response(
+                {'error': 'نمی‌توان کاربران ادمین یا کارمند را حذف کرد'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        # Prevent self-deletion
+        if user.id == request.user.id:
+            return Response(
+                {'error': 'نمی‌توانید خودتان را حذف کنید'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            username = user.username
+            user.delete()
+            logger.info(f"User {username} (ID: {user_id}) deleted by admin {request.user.username}")
+            
+            return Response({
+                'success': True,
+                'message': f'کاربر {username} با موفقیت حذف شد'
+            })
+        except Exception as e:
+            logger.error(f"Error deleting user: {e}")
+            return Response(
+                {'error': f'خطا در حذف کاربر: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

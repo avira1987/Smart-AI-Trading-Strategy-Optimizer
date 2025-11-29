@@ -145,7 +145,7 @@ class APIConfigurationSerializer(serializers.ModelSerializer):
 class SystemSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = SystemSettings
-        fields = ['live_trading_enabled', 'use_ai_cache']
+        fields = ['live_trading_enabled', 'use_ai_cache', 'token_cost_per_1000', 'backtest_cost', 'strategy_processing_cost', 'registration_bonus']
 
 
 class PublicSystemSettingsSerializer(serializers.Serializer):
@@ -578,13 +578,20 @@ class StrategyQuestionSerializer(serializers.ModelSerializer):
 
 class ResultSerializer(serializers.ModelSerializer):
     data_sources_display = serializers.SerializerMethodField()
+    strategy_name = serializers.SerializerMethodField()
     
     class Meta:
         model = Result
-        fields = ['id', 'job', 'total_return', 'total_trades', 'winning_trades', 
+        fields = ['id', 'job', 'strategy_name', 'total_return', 'total_trades', 'winning_trades', 
                   'losing_trades', 'win_rate', 'max_drawdown', 'equity_curve_data',
                   'description', 'trades_details', 'data_sources', 'data_sources_display', 'created_at']
-        read_only_fields = ['created_at', 'data_sources', 'data_sources_display']
+        read_only_fields = ['created_at', 'data_sources', 'data_sources_display', 'strategy_name']
+    
+    def get_strategy_name(self, obj):
+        """Get strategy name from the related job"""
+        if obj.job and obj.job.strategy:
+            return obj.job.strategy.name
+        return None
     
     def get_data_sources_display(self, obj):
         """تبدیل اطلاعات منابع داده به فرمت قابل نمایش"""
@@ -634,6 +641,19 @@ class JobCreateSerializer(serializers.Serializer):
         allow_empty=True,
         default=list
     )
+    
+    def validate(self, data):
+        """Validate that symbol is required for backtest jobs"""
+        job_type = data.get('job_type')
+        symbol = data.get('symbol')
+        
+        if job_type == 'backtest':
+            if not symbol or (isinstance(symbol, str) and not symbol.strip()):
+                raise serializers.ValidationError({
+                    'symbol': 'انتخاب جفت ارز برای بک‌تست اجباری است.'
+                })
+        
+        return data
 
 
 class LiveTradeSerializer(serializers.ModelSerializer):

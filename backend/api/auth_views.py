@@ -225,6 +225,27 @@ class VerifyOTPView(APIView):
                 profile.phone_number = phone_number
                 profile.save()
             
+            # Give registration bonus to new users
+            if created:
+                from core.models import Wallet, SystemSettings, Transaction
+                from decimal import Decimal
+                wallet, wallet_created = Wallet.objects.get_or_create(user=user)
+                if wallet_created:
+                    # Get registration bonus from system settings
+                    settings = SystemSettings.load()
+                    bonus_amount = Decimal(str(settings.registration_bonus))
+                    wallet.charge(float(bonus_amount))
+                    # Create transaction record
+                    Transaction.objects.create(
+                        wallet=wallet,
+                        transaction_type='charge',
+                        amount=bonus_amount,
+                        status='completed',
+                        description=f'هدیه ثبت‌نام ({bonus_amount:,.0f} تومان)',
+                        completed_at=timezone.now()
+                    )
+                    logger.info(f"Registration bonus of {bonus_amount} Toman given to new user {user.username}")
+            
             # Generate device ID
             device_id = Device.generate_device_id(request)
             device_name = request.META.get('HTTP_USER_AGENT', 'Unknown Device')[:255]
@@ -249,12 +270,16 @@ class VerifyOTPView(APIView):
             
             logger.info(f"User {user.username} logged in successfully from device {device_id[:20]}")
             
+            # Check if user is new (just created)
+            is_new_user = created
+            
             return Response({
                 'success': True,
                 'message': 'ورود با موفقیت انجام شد',
                 'user': user_serializer.data,
                 'device_id': device_id,
-                'is_new_device': device_created
+                'is_new_device': device_created,
+                'is_new_user': is_new_user
             }, status=status.HTTP_200_OK)
             
         except Exception as e:

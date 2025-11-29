@@ -270,6 +270,7 @@ export interface Job {
 export interface Result {
   id: number
   job: number
+  strategy_name?: string | null
   total_return: number
   total_trades: number
   winning_trades: number
@@ -298,6 +299,29 @@ export interface Result {
     timeframe_days?: number
     strategy_timeframe?: string
     normalized_timeframe?: string
+    execution_details?: {
+      backtest_duration_seconds?: number
+      total_duration_seconds?: number
+      initial_capital?: number
+      data_retrieval_method?: string
+    }
+    strategy_details?: {
+      entry_conditions_count?: number
+      exit_conditions_count?: number
+      indicators_used?: string[]
+      selected_indicators?: string[]
+      confidence_score?: number
+    }
+    results_summary?: {
+      total_trades?: number
+      winning_trades?: number
+      losing_trades?: number
+      win_rate?: number
+      total_return?: number
+      max_drawdown?: number
+      sharpe_ratio?: number
+      profit_factor?: number
+    }
   }
   created_at: string
 }
@@ -701,6 +725,10 @@ export interface SystemSettingsResponse {
   live_trading_enabled: boolean
   use_ai_cache: boolean
   google_auth_enabled?: boolean
+  token_cost_per_1000?: number
+  backtest_cost?: number
+  strategy_processing_cost?: number
+  registration_bonus?: number
 }
 
 export const getSystemSettings = () =>
@@ -769,6 +797,62 @@ export interface SecurityLog {
 
 export const getSecurityLogs = () =>
   client.get<{ success: boolean; logs: SecurityLog[]; note?: string }>('/admin/security-logs/')
+
+// User Management (Admin Only)
+export interface AdminUser {
+  id: number
+  username: string
+  email: string
+  phone_number: string | null
+  first_name?: string
+  last_name?: string
+  nickname?: string
+  balance: number
+  balance_formatted: string
+  date_joined: string
+  is_staff: boolean
+  is_superuser: boolean
+}
+
+export interface AdminUsersResponse {
+  users: AdminUser[]
+  total: number
+}
+
+export const getAdminUsers = () =>
+  client.get<AdminUsersResponse>('/admin/users/')
+
+export const allocateUserCredit = (user_id: number, amount: number, description?: string) =>
+  client.post<{
+    success: boolean
+    message: string
+    new_balance: number
+    new_balance_formatted: string
+  }>('/admin/users/', { user_id, amount, description })
+
+export const updateUser = (user_id: number, data: {
+  email?: string
+  first_name?: string
+  last_name?: string
+  phone_number?: string
+  nickname?: string
+  is_staff?: boolean
+  is_superuser?: boolean
+}) =>
+  client.patch<{
+    success: boolean
+    message: string
+    user: AdminUser
+  }>('/admin/users/', { user_id, ...data })
+
+export const deleteUser = (user_id: number) =>
+  client.delete<{
+    success: boolean
+    message: string
+  }>('/admin/users/', { 
+    data: { user_id },
+    params: { user_id: user_id.toString() }
+  })
 
 // Gold API Access
 export const getUserGoldAPIAccess = () =>

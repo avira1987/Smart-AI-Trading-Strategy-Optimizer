@@ -24,6 +24,7 @@ from .views import (
     AchievementViewSet,
     UserAchievementViewSet,
     GapGPTViewSet,
+    AdminUserManagementView,
 )
 from .auth_views import SendOTPView, VerifyOTPView, check_auth, logout, get_csrf_token, check_profile_completion, update_profile, check_ip_location, get_user_activity_logs
 from .captcha_views import GetCaptchaView
@@ -94,5 +95,7 @@ urlpatterns = [
     # Security management (admin only)
     path('admin/security/', SecurityManagementView.as_view(), name='security_management'),
     path('admin/security-logs/', SecurityLogsView.as_view(), name='security_logs'),
+    # User management (admin only)
+    path('admin/users/', AdminUserManagementView.as_view(), name='admin_user_management'),
 ]
 
