@@ -4,25 +4,19 @@ import { navigateTo } from '../utils/navigation'
 // Auto-detect API URL based on current hostname
 // This allows access from local network IPs
 function getApiBaseUrl(): string {
-  // In development, use Vite proxy which automatically handles local network IPs
-  // The proxy will forward requests to backend on localhost:8000
-  if (import.meta.env.DEV) {
-    // Use relative URL to leverage Vite proxy
-    // This works for both localhost and local network IPs
-    return '/api'
+  // Check for environment variable first (for production builds with custom backend)
+  const envBackendUrl = import.meta.env.VITE_BACKEND_URL
+  if (envBackendUrl) {
+    // Ensure it ends with /api
+    return envBackendUrl.endsWith('/api') ? envBackendUrl : `${envBackendUrl}/api`
   }
   
-  // In production, use the actual API URL
-  const hostname = window.location.hostname
-  const protocol = window.location.protocol
-  
-  // If accessing via localhost or 127.0.0.1, use localhost
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return 'http://localhost:8000/api'
-  }
-  
-  // Otherwise, use the same hostname with port 8000
-  return `${protocol}//${hostname}:8000/api`
+  // In both development and production, use relative URL
+  // This works with:
+  // - Vite dev server proxy (development)
+  // - Nginx reverse proxy (production with Docker)
+  // The proxy will forward requests to backend
+  return '/api'
 }
 
 const API_BASE_URL = getApiBaseUrl()

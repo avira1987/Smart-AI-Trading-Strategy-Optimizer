@@ -130,7 +130,7 @@ export default function Login() {
       // اگر خطا مربوط به شبکه است
       if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' || !error.response) {
         const currentOrigin = window.location.origin
-        detailedMessage = `خطا در اتصال به Backend.\n\nلطفاً بررسی کنید:\n1. Backend روی localhost:8000 در حال اجرا است؟\n2. Vite proxy فعال است؟\n\nآدرس فعلی: ${currentOrigin}\n\nراه حل: Backend باید روی همان سیستم Frontend اجرا شود (localhost:8000)`
+        detailedMessage = `خطا در اتصال به Backend.\n\nلطفاً بررسی کنید:\n1. Backend در حال اجرا است؟\n2. Nginx proxy فعال است؟ (در production)\n3. Vite proxy فعال است؟ (در development)\n\nآدرس فعلی: ${currentOrigin}\n\nراه حل:\n- در Development: Backend باید روی localhost:8000 اجرا شود\n- در Production: Backend باید از طریق Nginx در دسترس باشد`
       }
       
       showToast(detailedMessage, { type: 'error', duration: 8000 })

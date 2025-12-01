@@ -161,9 +161,10 @@ export default function Dashboard() {
       formData.append('description', strategyDesc)
       formData.append('strategy_file', file)
 
-      const response = await fetch('http://localhost:8000/api/strategies/', {
+      const response = await fetch('/api/strategies/', {
         method: 'POST',
-        body: formData
+        body: formData,
+        credentials: 'include' // Important for session cookies
       })
 
       if (response.ok) {
