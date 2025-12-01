@@ -14,17 +14,18 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"  # فقط localhost (امنیت بیشتر)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"  # فقط localhost (امنیت بیشتر)
     volumes:
       - redis_data:/data
     healthcheck:
@@ -32,6 +33,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
 
   backend:
     build:
@@ -40,9 +42,9 @@ services:
     command: >
       sh -c "python manage.py migrate &&
              python manage.py collectstatic --noinput &&
-             celery -A config worker --loglevel=info &
-             celery -A config beat --loglevel=info &
-             gunicorn --bind 0.0.0.0:8000 --workers 2 config.wsgi:application"
+             celery -A config worker --loglevel=info --detach &&
+             celery -A config beat --loglevel=info --detach &&
+             gunicorn --bind 0.0.0.0:8000 --workers 4 --threads 2 --timeout 120 --max-requests 1000 --max-requests-jitter 100 config.wsgi:application"
     volumes:
       - ./backend:/app
       - cache_data:/app/cache
@@ -51,11 +53,13 @@ services:
     env_file:
       - .env
     environment:
-      - ENV=LOCAL
+      - ENV=${ENV:-PRODUCTION}
       - CELERY_BROKER_URL=redis://redis:6379/0
       - REDIS_URL=redis://redis:6379/0
+      - DB_HOST=db
+      - DB_PORT=5432
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"  # فقط localhost (از طریق Nginx دسترسی)
     depends_on:
       db:
         condition: service_healthy
@@ -66,20 +70,22 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    restart: unless-stopped
 
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
     ports:
-      - "80:80"
+      - "80:80"  # پورت 80 برای دسترسی مستقیم با IP
     depends_on:
       - backend
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/"]
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+    restart: unless-stopped
 
 volumes:
   postgres_data:
