@@ -385,10 +385,10 @@ else:
     # Add public IP if configured
     if PUBLIC_IP:
         CORS_ALLOWED_ORIGINS.extend([
-            f"http://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
             f"http://{PUBLIC_IP}",
-            f"https://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
             f"https://{PUBLIC_IP}",
+            f"http://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
+            f"https://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
         ])
     # Also add any custom CORS origins from environment
     env_cors_origins = os.environ.get('CORS_ALLOWED_ORIGINS', '')
@@ -532,12 +532,12 @@ else:
     # Add public IP if configured
     if PUBLIC_IP:
         CSRF_TRUSTED_ORIGINS.extend([
+            f"http://{PUBLIC_IP}",
+            f"https://{PUBLIC_IP}",
             f"http://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
             f"http://{PUBLIC_IP}:{PUBLIC_PORT}",
-            f"http://{PUBLIC_IP}",
             f"https://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
             f"https://{PUBLIC_IP}:{PUBLIC_PORT}",
-            f"https://{PUBLIC_IP}",
         ])
     # Also add any custom CSRF origins from environment
     env_csrf_origins = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
@@ -548,8 +548,12 @@ else:
                 CSRF_TRUSTED_ORIGINS.append(origin)
 
 # Disable CSRF for API endpoints (handled by DRF)
-CSRF_COOKIE_SECURE = False  # Set to True in production with HTTPS
-CSRF_COOKIE_HTTPONLY = False
+# تنظیم امنیتی برای HTTPS
+USE_HTTPS = os.environ.get('USE_HTTPS', 'False') == 'True'
+CSRF_COOKIE_SECURE = USE_HTTPS  # True if using HTTPS
+CSRF_COOKIE_HTTPONLY = True  # برای امنیت بیشتر
+SESSION_COOKIE_SECURE = USE_HTTPS  # برای امنیت session
+SESSION_COOKIE_HTTPONLY = True  # برای امنیت session
 
 # Celery
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
