@@ -33,8 +33,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [deviceId, setDeviceId] = useState<string | null>(null)
-  const isAdmin = user ? (user.is_staff || user.is_superuser) : false
-  const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const isAdmin = user ? Boolean(user.is_staff || user.is_superuser) : false
+  const loadingTimeoutRef = useRef<number | null>(null)
 
   const checkAuthentication = async (showLoading: boolean = false) => {
     try {
@@ -50,14 +50,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       const response = await Promise.race([checkAuth(), timeoutPromise]) as Awaited<ReturnType<typeof checkAuth>>
       
-      if (response.success && response.authenticated) {
+      if (response.success && response.authenticated && response.user) {
         setUser(response.user)
         setIsAuthenticated(true)
-        setDeviceId(response.device_id)
+        setDeviceId(response.device_id || null)
         
         // Store in localStorage for persistence
         localStorage.setItem('user', JSON.stringify(response.user))
-        localStorage.setItem('device_id', response.device_id)
+        if (response.device_id) {
+          localStorage.setItem('device_id', response.device_id)
+        }
       } else {
         // Only clear auth state if we're not authenticated
         // Don't clear on errors during periodic checks to avoid disrupting user

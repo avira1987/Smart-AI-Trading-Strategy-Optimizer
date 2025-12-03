@@ -15,15 +15,12 @@ interface AIRecommendationsProps {
   strategyName?: string
 }
 
-const RECOMMENDATION_PRICE = 150000 // 150,000 Toman
-
 export default function AIRecommendations({ strategyId, strategyName }: AIRecommendationsProps) {
   const [recommendations, setRecommendations] = useState<AIRecommendationType[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [purchasing, setPurchasing] = useState<number | null>(null)
   const [walletBalance, setWalletBalance] = useState<number | null>(null)
-  const [loadingBalance, setLoadingBalance] = useState(true)
   const { showToast } = useToast()
   const navigate = useNavigate()
   const rateLimitClickGenerate = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: `aiRecommendations-generate-${strategyId}` })
@@ -42,10 +39,10 @@ export default function AIRecommendations({ strategyId, strategyName }: AIRecomm
       
       if (Array.isArray(response.data)) {
         recommendationsData = response.data
-      } else if (response.data?.results) {
-        recommendationsData = response.data.results
-      } else if (response.data?.data) {
-        recommendationsData = response.data.data
+      } else if (response.data && 'results' in response.data && Array.isArray((response.data as any).results)) {
+        recommendationsData = (response.data as any).results
+      } else if (response.data && 'data' in response.data && Array.isArray((response.data as any).data)) {
+        recommendationsData = (response.data as any).data
       }
 
       setRecommendations(recommendationsData)
@@ -59,15 +56,12 @@ export default function AIRecommendations({ strategyId, strategyName }: AIRecomm
 
   const loadWalletBalance = async () => {
     try {
-      setLoadingBalance(true)
       const response = await getWalletBalance()
       setWalletBalance(response.data.balance)
     } catch (error: any) {
       console.error('Error loading wallet balance:', error)
       // If not authenticated, set to null
       setWalletBalance(null)
-    } finally {
-      setLoadingBalance(false)
     }
   }
 
@@ -80,7 +74,8 @@ export default function AIRecommendations({ strategyId, strategyName }: AIRecomm
         showToast(`با موفقیت ${response.data.count} پیشنهاد تولید شد!`, { type: 'success' })
         await loadRecommendations()
       } else {
-        showToast(response.data.error || 'خطا در تولید پیشنهادات', { type: 'error' })
+        const errorMessage = (response.data as any).error || 'خطا در تولید پیشنهادات'
+        showToast(errorMessage, { type: 'error' })
       }
     } catch (error: any) {
       console.error('Error generating recommendations:', error)

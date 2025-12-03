@@ -1,9 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { useSearchParams, useNavigate, Link } from 'react-router-dom'
+import { useState, useEffect, useCallback } from 'react'
+import { useSearchParams, Link } from 'react-router-dom'
 import Strategies from '../components/Strategies'
 import Jobs from '../components/Jobs'
 import { useToast } from '../components/ToastProvider'
-import { useAuth } from '../context/AuthContext'
 import { getStrategies, getJobs, getWalletBalance, getResults } from '../api/client'
 import { useFeatureFlags } from '../context/FeatureFlagsContext'
 
@@ -26,10 +25,8 @@ export default function Dashboard() {
   const [file, setFile] = useState<File | null>(null)
   const [strategyRefreshKey, setStrategyRefreshKey] = useState(0)
   const { showToast } = useToast()
-  const { user } = useAuth()
   const { liveTradingEnabled } = useFeatureFlags()
   const [searchParams, setSearchParams] = useSearchParams()
-  const navigate = useNavigate()
   
   // Stats state
   const [stats, setStats] = useState({
@@ -115,7 +112,6 @@ export default function Dashboard() {
   useEffect(() => {
     const paymentSuccess = searchParams.get('payment_success')
     const paymentError = searchParams.get('payment_error')
-    const transactionId = searchParams.get('transaction_id')
 
     if (paymentSuccess === '1') {
       showToast('پرداخت با موفقیت انجام شد! حساب شما شارژ شد.', { type: 'success', duration: 5000 })
@@ -156,18 +152,24 @@ export default function Dashboard() {
     }
 
     try {
+      // Ensure CSRF token is available before uploading
+      try {
+        const { ensureCsrfToken } = await import('../api/client')
+        await ensureCsrfToken()
+      } catch (csrfError) {
+        console.warn('CSRF token check failed, proceeding anyway:', csrfError)
+      }
+
       const formData = new FormData()
       formData.append('name', strategyName)
       formData.append('description', strategyDesc)
       formData.append('strategy_file', file)
 
-      const response = await fetch('/api/strategies/', {
-        method: 'POST',
-        body: formData,
-        credentials: 'include' // Important for session cookies
-      })
+      // Use client from api/client.ts instead of fetch for better CSRF handling
+      const { addStrategy } = await import('../api/client')
+      const response = await addStrategy(formData)
 
-      if (response.ok) {
+      if (response.data) {
         showToast('استراتژی با موفقیت آپلود شد!', { type: 'success' })
         setShowStrategyModal(false)
         setStrategyName('')
@@ -175,13 +177,30 @@ export default function Dashboard() {
         setFile(null)
         // Trigger a refresh of the Strategies component
         setStrategyRefreshKey(prev => prev + 1)
-      } else {
-        const error = await response.text()
-        showToast('خطا در آپلود استراتژی: ' + error, { type: 'error' })
       }
     } catch (error: any) {
-      console.error('Error uploading strategy:', error)
-      showToast('خطا در آپلود استراتژی: ' + error, { type: 'error' })
+      console.error('========== DASHBOARD: Error uploading strategy ==========')
+      console.error('Error object:', error)
+      console.error('Error message:', error?.message)
+      console.error('Error response:', error?.response)
+      console.error('Error response data:', error?.response?.data)
+      console.error('Error response status:', error?.response?.status)
+      
+      // Try to extract detailed error message
+      let errorMsg = 'خطای نامشخص'
+      if (error?.response?.data) {
+        const data = error.response.data
+        errorMsg = data.message || data.detail || data.error || JSON.stringify(data) || 'خطای نامشخص'
+        console.error('Extracted error message:', errorMsg)
+      } else if (error?.message) {
+        errorMsg = error.message
+        console.error('Using error.message:', errorMsg)
+      }
+      
+      console.error('Final error message to show:', errorMsg)
+      console.error('========================================================')
+      
+      showToast('خطا در آپلود استراتژی: ' + errorMsg, { type: 'error' })
     }
   }
 

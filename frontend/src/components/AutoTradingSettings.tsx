@@ -48,11 +48,9 @@ export default function AutoTradingSettings() {
   const loadRecommendedSymbol = async () => {
     try {
       const response = await getAccountInfo()
-      if (response.data.status === 'success' && response.data.recommended_symbol) {
-        // Auto-set symbol if it's the default
-        if (formData.symbol === 'XAUUSD') {
-          setFormData(prev => ({ ...prev, symbol: response.data.recommended_symbol }))
-        }
+      if (response.data.status === 'success') {
+        // Account info loaded successfully
+        // Note: recommended_symbol is not part of the API response type
       }
     } catch (error) {
       // Account info may not be available
@@ -78,14 +76,14 @@ export default function AutoTradingSettings() {
       
       // Handle pagination format from Django REST Framework
       let strategiesData: TradingStrategy[] = []
-      if (response.data && Array.isArray(response.data)) {
+      if (Array.isArray(response.data)) {
         strategiesData = response.data
         console.log('✅ Found direct array format')
-      } else if (response.data && response.data.results && Array.isArray(response.data.results)) {
-        strategiesData = response.data.results
+      } else if (response.data && 'results' in response.data && Array.isArray((response.data as any).results)) {
+        strategiesData = (response.data as any).results
         console.log('✅ Found paginated format (results)')
-      } else if (response.data && Array.isArray(response.data.data)) {
-        strategiesData = response.data.data
+      } else if (response.data && 'data' in response.data && Array.isArray((response.data as any).data)) {
+        strategiesData = (response.data as any).data
         console.log('✅ Found nested data format')
       }
       
@@ -119,12 +117,12 @@ export default function AutoTradingSettings() {
       const response = await getAutoTradingSettings()
       // Handle pagination format from Django REST Framework
       let settingsData: AutoTradingSettingsType[] = []
-      if (response.data && Array.isArray(response.data)) {
+      if (Array.isArray(response.data)) {
         settingsData = response.data
-      } else if (response.data && response.data.results && Array.isArray(response.data.results)) {
-        settingsData = response.data.results
-      } else if (response.data && Array.isArray(response.data.data)) {
-        settingsData = response.data.data
+      } else if (response.data && 'results' in response.data && Array.isArray((response.data as any).results)) {
+        settingsData = (response.data as any).results
+      } else if (response.data && 'data' in response.data && Array.isArray((response.data as any).data)) {
+        settingsData = (response.data as any).data
       }
       
       setSettings(settingsData)
@@ -139,12 +137,12 @@ export default function AutoTradingSettings() {
       const response = await getAutoTradingSettings(strategyId)
       // Handle pagination format from Django REST Framework
       let settingsData: AutoTradingSettingsType[] = []
-      if (response.data && Array.isArray(response.data)) {
+      if (Array.isArray(response.data)) {
         settingsData = response.data
-      } else if (response.data && response.data.results && Array.isArray(response.data.results)) {
-        settingsData = response.data.results
-      } else if (response.data && Array.isArray(response.data.data)) {
-        settingsData = response.data.data
+      } else if (response.data && 'results' in response.data && Array.isArray((response.data as any).results)) {
+        settingsData = (response.data as any).results
+      } else if (response.data && 'data' in response.data && Array.isArray((response.data as any).data)) {
+        settingsData = (response.data as any).data
       }
       
       if (settingsData.length > 0) {

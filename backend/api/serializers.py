@@ -145,7 +145,7 @@ class APIConfigurationSerializer(serializers.ModelSerializer):
 class SystemSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = SystemSettings
-        fields = ['live_trading_enabled', 'use_ai_cache', 'token_cost_per_1000', 'backtest_cost', 'strategy_processing_cost', 'registration_bonus']
+        fields = ['live_trading_enabled', 'use_ai_cache', 'token_cost_per_1000', 'backtest_cost', 'strategy_processing_cost', 'registration_bonus', 'model_costs']
 
 
 class PublicSystemSettingsSerializer(serializers.Serializer):
@@ -167,6 +167,68 @@ class TradingStrategySerializer(serializers.ModelSerializer):
                   'marketplace_listing_id', 'marketplace_listing_status']
         read_only_fields = ['user', 'uploaded_at', 'parsed_strategy_data', 'processing_status', 'processed_at', 
                            'processing_error', 'questions_count', 'analysis_sources', 'analysis_sources_display']
+    
+    def validate_strategy_file(self, value):
+        """اعتبارسنجی فایل آپلود شده برای امنیت"""
+        import os
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info(f"Validating strategy file: name={value.name if value else 'None'}, size={value.size if value else 'None'}")
+        
+        # بررسی وجود فایل
+        if not value:
+            logger.error("Strategy file is None or empty")
+            raise serializers.ValidationError('فایل استراتژی الزامی است')
+        
+        # بررسی پسوند فایل
+        ALLOWED_EXTENSIONS = ['.docx', '.txt', '.doc']
+        file_ext = os.path.splitext(value.name)[1].lower()
+        logger.info(f"File extension: {file_ext}")
+        
+        if file_ext not in ALLOWED_EXTENSIONS:
+            logger.error(f"Invalid file extension: {file_ext}, allowed: {ALLOWED_EXTENSIONS}")
+            raise serializers.ValidationError(
+                f'نوع فایل مجاز نیست. فقط فایل‌های {", ".join(ALLOWED_EXTENSIONS)} مجاز هستند.'
+            )
+        
+        # بررسی اندازه فایل (حداکثر 10 مگابایت)
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+        if value.size > MAX_FILE_SIZE:
+            logger.error(f"File too large: {value.size} bytes, max: {MAX_FILE_SIZE} bytes")
+            raise serializers.ValidationError(
+                f'اندازه فایل بیش از حد مجاز است. حداکثر اندازه: {MAX_FILE_SIZE // (1024*1024)} مگابایت'
+            )
+        
+        # بررسی حداقل اندازه (فایل خالی)
+        MIN_FILE_SIZE = 10  # 10 bytes
+        if value.size < MIN_FILE_SIZE:
+            logger.error(f"File too small: {value.size} bytes, min: {MIN_FILE_SIZE} bytes")
+            raise serializers.ValidationError('فایل خالی است یا خیلی کوچک است')
+        
+        # بررسی نام فایل (جلوگیری از path traversal)
+        file_name = os.path.basename(value.name)
+        if '..' in file_name or '/' in file_name or '\\' in file_name:
+            logger.error(f"Invalid file name: {file_name}")
+            raise serializers.ValidationError('نام فایل نامعتبر است')
+        
+        logger.info(f"File validation passed: {file_name}")
+        
+        # بررسی magic bytes برای docx (امنیت بیشتر)
+        if file_ext == '.docx':
+            try:
+                value.seek(0)
+                header = value.read(4)
+                # Magic bytes for ZIP (docx is a ZIP file)
+                if not header.startswith(b'PK\x03\x04'):
+                    raise serializers.ValidationError(
+                        'محتوای فایل docx نامعتبر است. فایل باید یک فایل Word معتبر باشد.'
+                    )
+                value.seek(0)  # Reset file pointer
+            except Exception as e:
+                raise serializers.ValidationError(f'خطا در بررسی فایل: {str(e)}')
+        
+        return value
     
     def get_questions_count(self, obj):
         return obj.questions.count()

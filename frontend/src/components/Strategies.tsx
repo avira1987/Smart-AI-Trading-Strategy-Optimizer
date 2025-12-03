@@ -263,11 +263,20 @@ export default function Strategies() {
     deleteAction()
   }
 
+  // @ts-ignore - Reserved for future use
   const handleProcess = (id: number, name: string) => {
     const processAction = rateLimitClickProcess(async () => {
       try {
         const processStartedAt = performance.now()
         showToast('در حال پردازش استراتژی...', { type: 'info' })
+        
+        // Ensure CSRF token is available before processing
+        try {
+          const { ensureCsrfToken } = await import('../api/client')
+          await ensureCsrfToken()
+        } catch (csrfError) {
+          console.warn('CSRF token check failed, proceeding anyway:', csrfError)
+        }
         
         // Initialize progress tracking
         setProcessingStrategies(prev => new Map(prev).set(id, { progress: 0, stage: 'شروع', message: 'در حال آماده‌سازی...' }))
@@ -427,7 +436,7 @@ export default function Strategies() {
     setPrimaryAction()
   }
 
-  const handleDownload = async (id: number, name: string) => {
+  const handleDownload = async (id: number, _name: string) => {
     try {
       const response = await downloadStrategy(id)
       

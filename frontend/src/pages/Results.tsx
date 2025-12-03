@@ -57,21 +57,22 @@ export default function Results() {
     try {
       const jobsResponse = await getJobs()
       const jobsData = normalizeArrayResponse<Job>(jobsResponse.data)
-      const jobResults = jobsData
+      const jobResults: Result[] = jobsData
         .map((job) => {
           if (!job.result) return null
+          const strategyName = job.strategy_name || job.result.strategy_name || null
           return { 
             ...job.result, 
             job: job.result.job ?? job.id,
-            strategy_name: job.strategy_name || job.result.strategy_name || null
-          }
+            strategy_name: strategyName
+          } as Result
         })
-        .filter((item): item is Result => Boolean(item))
+        .filter((item): item is Result => item !== null)
 
       const unique: Result[] = []
       const seen = new Set<number>()
       for (const result of jobResults) {
-        if (!seen.has(result.id)) {
+        if (result && !seen.has(result.id)) {
           seen.add(result.id)
           unique.push(result)
         }

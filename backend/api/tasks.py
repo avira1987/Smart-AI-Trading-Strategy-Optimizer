@@ -1,6 +1,6 @@
 from celery import shared_task
 from django.utils import timezone
-from datetime import timedelta
+from datetime import timedelta, datetime
 from core.models import Job, Result, TradingStrategy
 from api.data_providers import DataProviderManager
 from ai_module.nlp_parser import parse_strategy_file
@@ -11,9 +11,40 @@ import os
 import logging
 import re
 import pandas as pd
+import numpy as np
 from typing import Any, List
 
 logger = logging.getLogger(__name__)
+
+
+def make_json_serializable(obj: Any) -> Any:
+    """Recursively convert object to JSON-serializable types.
+    
+    Handles pandas Timestamp, numpy types, datetime objects, and other non-JSON types.
+    """
+    if obj is None:
+        return None
+    elif isinstance(obj, (str, int, float, bool)):
+        return obj
+    elif isinstance(obj, (pd.Timestamp, datetime)):
+        return obj.isoformat() if hasattr(obj, 'isoformat') else str(obj)
+    elif isinstance(obj, (np.integer, np.floating)):
+        return obj.item()
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: make_json_serializable(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [make_json_serializable(item) for item in obj]
+    else:
+        # Fallback: convert to string for any other type
+        try:
+            # Try to convert to native Python type first
+            if hasattr(obj, 'item'):
+                return obj.item()
+            return str(obj)
+        except Exception:
+            return None
 
 
 def _mt5_symbol_from(symbol: Any) -> str:
@@ -108,6 +139,19 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                     settings = SystemSettings.load()
                     backtest_cost = settings.backtest_cost
                     
+                    # Validate backtest_cost
+                    if backtest_cost is None or backtest_cost < 0:
+                        error_msg = f"هزینه بک‌تست نامعتبر است: {backtest_cost}"
+                        logger.error(f"Invalid backtest_cost: {backtest_cost}")
+                        job.status = 'failed'
+                        job.error_message = error_msg
+                        job.save()
+                        return
+                    
+                    # Convert to Decimal if needed
+                    if not isinstance(backtest_cost, Decimal):
+                        backtest_cost = Decimal(str(backtest_cost))
+                    
                     # Check balance
                     if wallet.balance >= backtest_cost:
                         wallet.balance -= backtest_cost
@@ -131,8 +175,12 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                         job.save()
                         return
             except Exception as e:
+                error_msg = f"خطا در کسر هزینه بک‌تست: {str(e)}"
                 logger.error(f"Error deducting backtest cost from wallet: {e}")
-                # Continue with backtest even if deduction fails (for now)
+                job.status = 'failed'
+                job.error_message = error_msg
+                job.save()
+                return
         
         job.status = 'running'
         job.started_at = timezone.now()
@@ -566,6 +614,26 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                     ai_analysis = None
             
             # Prepare data sources information with detailed metrics
+            # Convert pandas Timestamps to strings properly
+            first_date_str = None
+            last_date_str = None
+            if not data.empty:
+                try:
+                    first_date = data.index[0]
+                    last_date = data.index[-1]
+                    # Convert pandas Timestamp to ISO format string
+                    if isinstance(first_date, pd.Timestamp):
+                        first_date_str = first_date.isoformat()
+                    else:
+                        first_date_str = str(first_date)
+                    if isinstance(last_date, pd.Timestamp):
+                        last_date_str = last_date.isoformat()
+                    else:
+                        last_date_str = str(last_date)
+                except Exception:
+                    first_date_str = None
+                    last_date_str = None
+            
             data_sources_info = {
                 'provider': provider_used or 'unknown',
                 'symbol': symbol,
@@ -576,8 +644,8 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                 'timeframe_days': days,
                 'strategy_timeframe': strategy_timeframe,  # Original timeframe from strategy text
                 'data_range': {
-                    'first_date': str(data.index[0]) if not data.empty else None,
-                    'last_date': str(data.index[-1]) if not data.empty else None,
+                    'first_date': first_date_str,
+                    'last_date': last_date_str,
                 },
                 # جزئیات اجرای بک‌تست
                 'execution_details': {
@@ -752,6 +820,13 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             if 'execution_details' in data_sources_info:
                 data_sources_info['execution_details']['total_duration_seconds'] = round(total_duration, 2)
             
+            # Ensure data_sources_info is JSON-serializable before saving
+            try:
+                data_sources_info = make_json_serializable(data_sources_info)
+            except Exception as json_error:
+                logger.warning(f"Error serializing data_sources_info: {json_error}, using empty dict")
+                data_sources_info = {}
+            
             # Create result with error handling
             result = Result.objects.create(
                 job=job,
@@ -802,6 +877,8 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                     'symbol': symbol if 'symbol' in locals() else 'unknown',
                     'error': str(result_error)
                 }
+                # Ensure data_sources_info is JSON-serializable
+                data_sources_info = make_json_serializable(data_sources_info)
                 result = Result.objects.create(
                     job=job,
                     total_return=0.0,

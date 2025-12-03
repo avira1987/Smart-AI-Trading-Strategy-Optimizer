@@ -1,0 +1,28 @@
+# robots.txt for myaibaz.ir
+# Allow all search engines to crawl the website
+
+User-agent: *
+Allow: /
+
+# Disallow admin and API endpoints from being indexed
+Disallow: /api/
+Disallow: /admin/
+Disallow: /admin/security
+Disallow: /admin/users
+Disallow: /admin/settings
+
+# Allow public pages
+Allow: /
+Allow: /about
+Allow: /tutorial
+Allow: /terms
+Allow: /login
+Allow: /guides/
+
+# Sitemap location
+Sitemap: https://myaibaz.ir/sitemap.xml
+Sitemap: https://www.myaibaz.ir/sitemap.xml
+
+# Crawl delay (optional, helps prevent server overload)
+Crawl-delay: 1
+

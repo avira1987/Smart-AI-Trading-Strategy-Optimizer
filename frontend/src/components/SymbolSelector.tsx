@@ -8,7 +8,7 @@ export default function SymbolSelector() {
   const { selectedSymbol, setSelectedSymbol } = useSymbol()
   const { showToast } = useToast()
   const [mt5Symbols, setMt5Symbols] = useState<MT5Symbol[]>([])
-  const [loadingSymbols, setLoadingSymbols] = useState(false)
+  const [, setLoadingSymbols] = useState(false)
 
   type SymbolOption = {
     value: string

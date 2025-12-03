@@ -10,7 +10,7 @@ import {
   OptimizationCreateRequest
 } from '../api/client'
 import { useToast } from './ToastProvider'
-import SymbolSelector from './SymbolSelector'
+// import SymbolSelector from './SymbolSelector' // Not used, replaced with select element
 
 interface StrategyOptimizerProps {
   strategyId: number
@@ -102,10 +102,10 @@ export default function StrategyOptimizer({ strategyId, strategyName }: Strategy
       
       if (Array.isArray(response.data)) {
         optimizationsData = response.data
-      } else if (response.data?.results) {
-        optimizationsData = response.data.results
-      } else if (response.data?.data) {
-        optimizationsData = response.data.data
+      } else if (response.data && 'results' in response.data && Array.isArray((response.data as any).results)) {
+        optimizationsData = (response.data as any).results
+      } else if (response.data && 'data' in response.data && Array.isArray((response.data as any).data)) {
+        optimizationsData = (response.data as any).data
       }
 
       setOptimizations(optimizationsData)
@@ -134,7 +134,7 @@ export default function StrategyOptimizer({ strategyId, strategyName }: Strategy
       }
     } catch (error: any) {
       console.error('Error loading optimizations:', error)
-      showToast('خطا در بارگذاری بهینه‌سازی‌ها', 'error')
+      showToast('خطا در بارگذاری بهینه‌سازی‌ها', { type: 'error' })
     } finally {
       setLoading(false)
     }
@@ -157,16 +157,15 @@ export default function StrategyOptimizer({ strategyId, strategyName }: Strategy
         symbol: symbol || undefined
       }
 
-      let response
       if (editingId) {
         // Update existing optimization
-        response = await updateStrategyOptimization(editingId, request)
-        showToast('بهینه‌سازی با موفقیت ویرایش شد!', 'success')
+        await updateStrategyOptimization(editingId, request)
+        showToast('بهینه‌سازی با موفقیت ویرایش شد!', { type: 'success' })
         setEditingId(null)
       } else {
         // Create new optimization
-        response = await createStrategyOptimization(request)
-        showToast('بهینه‌سازی با موفقیت شروع شد!', 'success')
+        const response = await createStrategyOptimization(request)
+        showToast('بهینه‌سازی با موفقیت شروع شد!', { type: 'success' })
         
         // Add to list and start polling
         setOptimizations(prev => [response.data, ...prev])
@@ -187,7 +186,7 @@ export default function StrategyOptimizer({ strategyId, strategyName }: Strategy
       console.error('Error creating/updating optimization:', error)
       showToast(
         error.response?.data?.error || (editingId ? 'خطا در ویرایش بهینه‌سازی' : 'خطا در ایجاد بهینه‌سازی'),
-        'error'
+        { type: 'error' }
       )
     } finally {
       setCreating(false)
@@ -195,8 +194,8 @@ export default function StrategyOptimizer({ strategyId, strategyName }: Strategy
   }
 
   const handleEdit = (optimization: StrategyOptimization) => {
-    if (optimization.status !== 'pending' && optimization.status !== 'failed' && optimization.status !== 'cancelled') {
-      showToast('فقط بهینه‌سازی‌های در انتظار، خطا یا لغو شده قابل ویرایش هستند', 'error')
+    if (optimization.status !== 'pending' && optimization.status !== 'failed') {
+      showToast('فقط بهینه‌سازی‌های در انتظار یا خطا خورده قابل ویرایش هستند', { type: 'error' })
       return
     }
     
@@ -221,10 +220,10 @@ export default function StrategyOptimizer({ strategyId, strategyName }: Strategy
     try {
       setDeletingId(id)
       await deleteStrategyOptimization(id)
-      showToast('بهینه‌سازی با موفقیت حذف شد', 'success')
+      showToast('بهینه‌سازی با موفقیت حذف شد', { type: 'success' })
       await loadOptimizations()
     } catch (error: any) {
-      showToast(error.response?.data?.error || 'خطا در حذف بهینه‌سازی', 'error')
+      showToast(error.response?.data?.error || 'خطا در حذف بهینه‌سازی', { type: 'error' })
     } finally {
       setDeletingId(null)
     }
@@ -238,7 +237,7 @@ export default function StrategyOptimizer({ strategyId, strategyName }: Strategy
     try {
       setCancellingId(id)
       await cancelStrategyOptimization(id)
-      showToast('بهینه‌سازی با موفقیت لغو شد', 'success')
+      showToast('بهینه‌سازی با موفقیت لغو شد', { type: 'success' })
       // Stop polling for this optimization
       setPollingOptimizations(prev => {
         const next = new Set(prev)
@@ -247,7 +246,7 @@ export default function StrategyOptimizer({ strategyId, strategyName }: Strategy
       })
       await loadOptimizations()
     } catch (error: any) {
-      showToast(error.response?.data?.error || 'خطا در لغو بهینه‌سازی', 'error')
+      showToast(error.response?.data?.error || 'خطا در لغو بهینه‌سازی', { type: 'error' })
     } finally {
       setCancellingId(null)
     }
@@ -413,11 +412,17 @@ export default function StrategyOptimizer({ strategyId, strategyName }: Strategy
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 نماد معاملاتی
               </label>
-              <SymbolSelector
+              <select
                 value={symbol}
-                onChange={setSymbol}
-                className="w-full"
-              />
+                onChange={(e) => setSymbol(e.target.value)}
+                className="w-full px-4 py-2 text-sm bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              >
+                <option value="EURUSD">EURUSD</option>
+                <option value="GBPUSD">GBPUSD</option>
+                <option value="USDJPY">USDJPY</option>
+                <option value="XAUUSD">XAUUSD</option>
+                <option value="BTCUSD">BTCUSD</option>
+              </select>
             </div>
 
             {(method === 'ml' || method === 'hybrid' || method === 'auto') && (
@@ -561,7 +566,7 @@ export default function StrategyOptimizer({ strategyId, strategyName }: Strategy
                         </button>
                       )}
                       
-                      {(optimization.status === 'pending' || optimization.status === 'failed' || optimization.status === 'cancelled') && (
+                      {(optimization.status === 'pending' || optimization.status === 'failed') && (
                         <>
                           <button
                             onClick={() => handleEdit(optimization)}
@@ -580,7 +585,7 @@ export default function StrategyOptimizer({ strategyId, strategyName }: Strategy
                       )}
                       
                       {optimization.status !== 'running' && optimization.status !== 'pending' && 
-                       optimization.status !== 'failed' && optimization.status !== 'cancelled' && (
+                       optimization.status !== 'failed' && (
                         <button
                           onClick={() => handleDelete(optimization.id)}
                           disabled={deletingId === optimization.id}

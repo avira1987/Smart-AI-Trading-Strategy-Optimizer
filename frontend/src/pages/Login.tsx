@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { sendOTP, verifyOTP } from '../api/auth'
@@ -13,9 +13,17 @@ export default function Login() {
   const [countdown, setCountdown] = useState(0)
   const [captchaChallenge, setCaptchaChallenge] = useState('')
   const [captchaAnswer, setCaptchaAnswer] = useState('')
+  const [captchaLoading, setCaptchaLoading] = useState(true)
+  const [captchaError, setCaptchaError] = useState<string | null>(null)
+  const [failedAttempts, setFailedAttempts] = useState(0)
+  const [isBlocked, setIsBlocked] = useState(false)
+  const [otpCodeFromBackend, setOtpCodeFromBackend] = useState<string | null>(null)
   const { login, isAuthenticated } = useAuth()
   const navigate = useNavigate()
   const { showToast } = useToast()
+  const isSubmittingRef = useRef(false) // Prevent multiple simultaneous submissions
+  
+  const MAX_FAILED_ATTEMPTS = 5
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -29,11 +37,15 @@ export default function Login() {
     loadCaptcha()
   }, [])
 
-  const loadCaptcha = async () => {
+  const loadCaptcha = async (showErrorToast: boolean = true) => {
+    setCaptchaLoading(true)
+    setCaptchaError(null)
+    
     try {
       const captcha = await getCaptcha('login')
       setCaptchaChallenge(captcha.challenge)
       setCaptchaAnswer('') // Clear previous answer
+      setCaptchaError(null)
     } catch (error: any) {
       console.error('Failed to load CAPTCHA:', error)
       
@@ -42,26 +54,35 @@ export default function Login() {
       const errorText = error.message || error.toString() || ''
       
       if (errorText.includes('ECONNREFUSED') || errorText.includes('Failed to fetch') || errorText.includes('NetworkError')) {
-        errorMessage = 'Backend در حال اجرا نیست. لطفا مطمئن شوید که Backend روی پورت 8000 در حال اجرا است.'
+        errorMessage = 'اتصال به سرور برقرار نشد. لطفا اتصال اینترنت خود را بررسی کنید.'
       } else if (errorText.includes('CORS')) {
         errorMessage = 'خطای CORS. لطفا تنظیمات CORS در Backend را بررسی کنید.'
+      } else if (errorText.includes('timeout') || errorText.includes('ECONNABORTED')) {
+        errorMessage = 'زمان درخواست به پایان رسید. لطفا دوباره تلاش کنید.'
       } else {
         errorMessage = errorText || 'خطا در بارگذاری سوال امنیتی'
       }
       
-      showToast(`خطا: ${errorMessage}`, { type: 'error', duration: 5000 })
+      setCaptchaError(errorMessage)
+      setCaptchaChallenge('') // Clear challenge on error
       
-      // تلاش مجدد فقط اگر خطا مربوط به network نباشد
-      if (!errorText.includes('ECONNREFUSED') && !errorText.includes('Failed to fetch')) {
-        setTimeout(() => {
-          loadCaptcha()
-        }, 2000)
+      if (showErrorToast) {
+        showToast(`خطا: ${errorMessage}`, { type: 'error', duration: 5000 })
       }
+      
+      // تلاش مجدد خودکار فقط برای خطاهای timeout (نه برای خطاهای شبکه)
+      if (errorText.includes('timeout') || errorText.includes('ECONNABORTED')) {
+        setTimeout(() => {
+          loadCaptcha(false) // Retry without showing toast again
+        }, 3000)
+      }
+    } finally {
+      setCaptchaLoading(false)
     }
   }
 
   const handleRefreshCaptcha = async () => {
-    await loadCaptcha()
+    await loadCaptcha(true)
   }
 
   useEffect(() => {
@@ -70,6 +91,135 @@ export default function Login() {
       return () => clearTimeout(timer)
     }
   }, [countdown])
+
+  // Auto-verify OTP when 4 digits are entered
+  useEffect(() => {
+    if (step === 'otp' && otpCode.length === 4 && !loading && !isBlocked && otpCode.match(/^\d+$/) && !isSubmittingRef.current) {
+      // Auto-submit OTP when 4 digits are entered
+      const autoSubmit = async () => {
+        // Prevent multiple simultaneous submissions
+        if (isSubmittingRef.current) {
+          return
+        }
+        
+        isSubmittingRef.current = true
+        setLoading(true)
+        
+        try {
+          // Prepare CAPTCHA data (optional for OTP verification)
+          const captchaData = captchaAnswer ? prepareCaptchaData(Number(captchaAnswer)) : null
+          
+          const response = await verifyOTP(phoneNumber, otpCode, captchaData)
+          
+          // Only proceed with login if response is explicitly successful
+          if (response.success && response.user && response.device_id) {
+            // Reset failed attempts on success
+            setFailedAttempts(0)
+            setIsBlocked(false)
+            clearCaptcha() // Clear CAPTCHA after successful submission
+            login(response.user, response.device_id)
+            
+            // Check if this is a new user
+            const isNewUser = response.is_new_user || false
+            
+            if (isNewUser) {
+              // Show welcome message with registration bonus
+              showToast(
+                '🎉 به پلتفرم خوش آمدید! مبلغ 399 تومان هدیه ثبت‌نام به حساب شما اضافه شد.',
+                { type: 'success', duration: 8000 }
+              )
+              navigate('/complete-profile')
+            } else {
+              showToast('ورود با موفقیت انجام شد', { type: 'success' })
+              navigate('/')
+            }
+            // Clear OTP code after successful login
+            setOtpCode('')
+          } else {
+            // Explicitly handle failure - do NOT login
+            const errorMessage = response.message || 'کد وارد شده اشتباه است'
+            
+            // Clear OTP code on error to prevent re-submission
+            setOtpCode('')
+            
+            // Increment failed attempts for wrong OTP codes
+            if (errorMessage.includes('اشتباه') || errorMessage.includes('کد وارد شده')) {
+              const newFailedAttempts = failedAttempts + 1
+              setFailedAttempts(newFailedAttempts)
+              
+              if (newFailedAttempts >= MAX_FAILED_ATTEMPTS) {
+                setIsBlocked(true)
+                showToast(
+                  `شما ${MAX_FAILED_ATTEMPTS} بار کد اشتباه وارد کرده‌اید. لطفا کد جدید درخواست کنید.`,
+                  { type: 'error', duration: 10000 }
+                )
+                return
+              } else {
+                const remainingAttempts = MAX_FAILED_ATTEMPTS - newFailedAttempts
+                showToast(
+                  `کد اشتباه است. ${remainingAttempts} تلاش باقی مانده است.`,
+                  { type: 'error', duration: 5000 }
+                )
+              }
+            }
+            
+            // اگر خطا مربوط به CAPTCHA منقضی شده است
+            if (errorMessage.includes('منقضی شده') || errorMessage.includes('expired')) {
+              await loadCaptcha()
+              showToast('CAPTCHA منقضی شده است. لطفا CAPTCHA جدید را حل کنید.', { type: 'error' })
+            } else if (errorMessage.includes('wrong_answer')) {
+              await loadCaptcha()
+              showToast('پاسخ CAPTCHA اشتباه است. لطفا CAPTCHA جدید را حل کنید.', { type: 'error' })
+            } else if (!errorMessage.includes('اشتباه') && !errorMessage.includes('کد وارد شده')) {
+              showToast(errorMessage, { type: 'error' })
+            }
+          }
+        } catch (error: any) {
+          // On error, explicitly do NOT login
+          const errorMsg = error.response?.data?.message || 'خطا در تایید کد'
+          
+          // Clear OTP code on error
+          setOtpCode('')
+          
+          // Increment failed attempts for network errors too
+          if (errorMsg.includes('اشتباه') || errorMsg.includes('کد وارد شده')) {
+            const newFailedAttempts = failedAttempts + 1
+            setFailedAttempts(newFailedAttempts)
+            
+            if (newFailedAttempts >= MAX_FAILED_ATTEMPTS) {
+              setIsBlocked(true)
+              showToast(
+                `شما ${MAX_FAILED_ATTEMPTS} بار کد اشتباه وارد کرده‌اید. لطفا کد جدید درخواست کنید.`,
+                { type: 'error', duration: 10000 }
+              )
+            } else {
+              const remainingAttempts = MAX_FAILED_ATTEMPTS - newFailedAttempts
+              showToast(
+                `کد اشتباه است. ${remainingAttempts} تلاش باقی مانده است.`,
+                { type: 'error', duration: 5000 }
+              )
+            }
+          } else {
+            showToast(errorMsg, { type: 'error' })
+          }
+        } finally {
+          setLoading(false)
+          isSubmittingRef.current = false
+        }
+      }
+      
+      // Small delay to allow user to see the code they entered
+      const timeoutId = setTimeout(() => {
+        autoSubmit()
+      }, 500)
+      
+      return () => {
+        clearTimeout(timeoutId)
+        isSubmittingRef.current = false
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otpCode, step, loading, isBlocked, failedAttempts])
 
   const handlePhoneSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -93,12 +243,30 @@ export default function Login() {
       const response = await sendOTP(phoneNumber, captchaData)
       if (response.success) {
         clearCaptcha() // Clear CAPTCHA after successful submission
-        showToast('کد یکبار مصرف به شماره شما ارسال شد', { type: 'success' })
+        
+        // Reset failed attempts and block status when new OTP is sent
+        setFailedAttempts(0)
+        setIsBlocked(false)
+        
+        // Check if this is development mode (API key not configured)
+        const isDevMode = (response as any).development_mode
+        const otpCode = (response as any).otp_code
+        
+        // Store OTP code from backend for debugging
+        if (isDevMode && otpCode) {
+          setOtpCodeFromBackend(otpCode)
+          showToast(`کد یکبار مصرف: ${otpCode} (حالت توسعه)`, { type: 'success', duration: 10000 })
+        } else {
+          setOtpCodeFromBackend(null)
+          showToast('کد یکبار مصرف به شماره شما ارسال شد', { type: 'success' })
+        }
+        
         setStep('otp')
         setCountdown(300) // 5 minutes
         // Load new CAPTCHA for OTP step
         await loadCaptcha()
         setCaptchaAnswer('')
+        setOtpCode('') // Clear previous OTP code
       } else {
         // نمایش پیام خطای واضح‌تر
         const errorMessage = response.message || 'خطا در ارسال کد'
@@ -142,18 +310,35 @@ export default function Login() {
   const handleOTPSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     
+    if (isBlocked) {
+      showToast('شما بلاک شده‌اید. لطفا کد جدید درخواست کنید.', { type: 'error' })
+      return
+    }
+    
     if (otpCode.length !== 4 || !otpCode.match(/^\d+$/)) {
       showToast('کد باید 4 رقم باشد', { type: 'error' })
       return
     }
 
+    // Prevent multiple simultaneous submissions
+    if (isSubmittingRef.current) {
+      return
+    }
+
+    isSubmittingRef.current = true
     setLoading(true)
+    
     try {
       // Prepare CAPTCHA data (optional for OTP verification)
       const captchaData = captchaAnswer ? prepareCaptchaData(Number(captchaAnswer)) : null
       
       const response = await verifyOTP(phoneNumber, otpCode, captchaData)
-      if (response.success) {
+      
+      // Only proceed with login if response is explicitly successful
+      if (response.success && response.user && response.device_id) {
+        // Reset failed attempts on success
+        setFailedAttempts(0)
+        setIsBlocked(false)
         clearCaptcha() // Clear CAPTCHA after successful submission
         login(response.user, response.device_id)
         
@@ -171,24 +356,78 @@ export default function Login() {
           showToast('ورود با موفقیت انجام شد', { type: 'success' })
           navigate('/')
         }
+        // Clear OTP code after successful login
+        setOtpCode('')
       } else {
+        // Explicitly handle failure - do NOT login
         const errorMessage = response.message || 'کد وارد شده اشتباه است'
+        
+        // Clear OTP code on error to prevent re-submission
+        setOtpCode('')
+        
+        // Increment failed attempts for wrong OTP codes
+        if (errorMessage.includes('اشتباه') || errorMessage.includes('کد وارد شده')) {
+          const newFailedAttempts = failedAttempts + 1
+          setFailedAttempts(newFailedAttempts)
+          
+          if (newFailedAttempts >= MAX_FAILED_ATTEMPTS) {
+            setIsBlocked(true)
+            showToast(
+              `شما ${MAX_FAILED_ATTEMPTS} بار کد اشتباه وارد کرده‌اید. لطفا کد جدید درخواست کنید.`,
+              { type: 'error', duration: 10000 }
+            )
+            return
+          } else {
+            const remainingAttempts = MAX_FAILED_ATTEMPTS - newFailedAttempts
+            showToast(
+              `کد اشتباه است. ${remainingAttempts} تلاش باقی مانده است.`,
+              { type: 'error', duration: 5000 }
+            )
+          }
+        }
         
         // اگر خطا مربوط به CAPTCHA منقضی شده است
         if (errorMessage.includes('منقضی شده') || errorMessage.includes('expired')) {
           await loadCaptcha()
           showToast('CAPTCHA منقضی شده است. لطفا CAPTCHA جدید را حل کنید.', { type: 'error' })
-        } else if (errorMessage.includes('اشتباه') || errorMessage.includes('wrong_answer')) {
+        } else if (errorMessage.includes('wrong_answer')) {
           await loadCaptcha()
           showToast('پاسخ CAPTCHA اشتباه است. لطفا CAPTCHA جدید را حل کنید.', { type: 'error' })
-        } else {
+        } else if (!errorMessage.includes('اشتباه') && !errorMessage.includes('کد وارد شده')) {
           showToast(errorMessage, { type: 'error' })
         }
       }
     } catch (error: any) {
-      showToast(error.response?.data?.message || 'خطا در تایید کد', { type: 'error' })
+      // On error, explicitly do NOT login
+      const errorMsg = error.response?.data?.message || 'خطا در تایید کد'
+      
+      // Clear OTP code on error
+      setOtpCode('')
+      
+      // Increment failed attempts for network errors too
+      if (errorMsg.includes('اشتباه') || errorMsg.includes('کد وارد شده')) {
+        const newFailedAttempts = failedAttempts + 1
+        setFailedAttempts(newFailedAttempts)
+        
+        if (newFailedAttempts >= MAX_FAILED_ATTEMPTS) {
+          setIsBlocked(true)
+          showToast(
+            `شما ${MAX_FAILED_ATTEMPTS} بار کد اشتباه وارد کرده‌اید. لطفا کد جدید درخواست کنید.`,
+            { type: 'error', duration: 10000 }
+          )
+        } else {
+          const remainingAttempts = MAX_FAILED_ATTEMPTS - newFailedAttempts
+          showToast(
+            `کد اشتباه است. ${remainingAttempts} تلاش باقی مانده است.`,
+            { type: 'error', duration: 5000 }
+          )
+        }
+      } else {
+        showToast(errorMsg, { type: 'error' })
+      }
     } finally {
       setLoading(false)
+      isSubmittingRef.current = false
     }
   }
 
@@ -207,8 +446,25 @@ export default function Login() {
       const response = await sendOTP(phoneNumber, captchaData)
       if (response.success) {
         clearCaptcha() // Clear CAPTCHA after successful submission
+        
+        // Reset failed attempts and block status when resending OTP
+        setFailedAttempts(0)
+        setIsBlocked(false)
+        
+        // Check if this is development mode (API key not configured)
+        const isDevMode = (response as any).development_mode
+        const otpCode = (response as any).otp_code
+        
+        // Store OTP code from backend for debugging
+        if (isDevMode && otpCode) {
+          setOtpCodeFromBackend(otpCode)
+        } else {
+          setOtpCodeFromBackend(null)
+        }
+        
         showToast('کد مجددا ارسال شد', { type: 'success' })
         setCountdown(300)
+        setOtpCode('') // Clear previous OTP code
         // Reload CAPTCHA
         await loadCaptcha()
         setCaptchaAnswer('')
@@ -263,35 +519,68 @@ export default function Login() {
                 </div>
 
                 {/* CAPTCHA Challenge */}
-                {captchaChallenge && (
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <label htmlFor="captcha" className="label-standard text-center flex-1">
-                        امنیت: {captchaChallenge} = ?
-                      </label>
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label htmlFor="captcha" className="label-standard text-center flex-1">
+                      {captchaLoading ? (
+                        <span className="text-gray-400">در حال بارگذاری سوال امنیتی...</span>
+                      ) : captchaError ? (
+                        <span className="text-red-400">خطا در بارگذاری سوال امنیتی</span>
+                      ) : captchaChallenge ? (
+                        <>امنیت: {captchaChallenge} = ?</>
+                      ) : (
+                        <span className="text-gray-400">سوال امنیتی</span>
+                      )}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleRefreshCaptcha}
+                      disabled={loading || captchaLoading}
+                      className="mr-2 p-2 text-blue-400 hover:text-blue-300 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                      title="تازه‌سازی CAPTCHA"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="h-5 w-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                  
+                  {captchaLoading ? (
+                    <div className="input-standard-lg text-center text-gray-400 py-3">
+                      <div className="flex items-center justify-center gap-2">
+                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>در حال بارگذاری...</span>
+                      </div>
+                    </div>
+                  ) : captchaError ? (
+                    <div className="space-y-2">
+                      <div className="input-standard-lg text-center text-red-400 py-3 bg-red-900/20 border-red-500/50">
+                        {captchaError}
+                      </div>
                       <button
                         type="button"
                         onClick={handleRefreshCaptcha}
                         disabled={loading}
-                        className="mr-2 p-2 text-blue-400 hover:text-blue-300 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                        title="تازه‌سازی CAPTCHA"
+                        className="w-full btn-secondary py-2 text-sm"
                       >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          className="h-5 w-5"
-                          fill="none"
-                          viewBox="0 0 24 24"
-                          stroke="currentColor"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                          />
-                        </svg>
+                        تلاش مجدد
                       </button>
                     </div>
+                  ) : captchaChallenge ? (
                     <input
                       type="number"
                       id="captcha"
@@ -303,8 +592,8 @@ export default function Login() {
                       disabled={loading}
                       dir="ltr"
                     />
-                  </div>
-                )}
+                  ) : null}
+                </div>
 
                 {/* Honeypot field - hidden from users */}
                 <input
@@ -318,7 +607,7 @@ export default function Login() {
 
                 <button
                   type="submit"
-                  disabled={loading || phoneNumber.length !== 11 || !captchaAnswer}
+                  disabled={loading || phoneNumber.length !== 11 || !captchaAnswer || !captchaChallenge || captchaLoading}
                   className="w-full btn-primary py-3"
                 >
                   {loading ? 'در حال ارسال...' : 'ارسال کد'}
@@ -334,19 +623,60 @@ export default function Login() {
                 <input
                   type="text"
                   id="otp"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
                   value={otpCode}
-                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  onChange={(e) => {
+                    if (!isBlocked) {
+                      setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 4))
+                    }
+                  }}
                   placeholder="1234"
-                  className="input-standard-lg placeholder-gray-400 text-center text-2xl tracking-widest font-mono"
+                  className={`input-standard-lg placeholder-gray-400 text-center text-2xl tracking-widest font-mono ${
+                    isBlocked ? 'bg-red-900/20 border-red-500 cursor-not-allowed' : ''
+                  }`}
                   required
-                  disabled={loading}
+                  disabled={loading || isBlocked}
                   dir="ltr"
                   maxLength={4}
                 />
                 <p className="text-sm text-gray-400 mt-2 text-center">
                   کد به شماره {phoneNumber} ارسال شد
                 </p>
+                {isBlocked && (
+                  <p className="text-sm text-red-400 mt-2 text-center">
+                    شما {MAX_FAILED_ATTEMPTS} بار کد اشتباه وارد کرده‌اید. لطفا کد جدید درخواست کنید.
+                  </p>
+                )}
+                {failedAttempts > 0 && !isBlocked && (
+                  <p className="text-sm text-yellow-400 mt-2 text-center">
+                    {MAX_FAILED_ATTEMPTS - failedAttempts} تلاش باقی مانده است
+                  </p>
+                )}
               </div>
+              
+              {/* Display OTP code from backend for debugging (development mode only) */}
+              {otpCodeFromBackend && (
+                <div className="bg-gray-700/50 border border-gray-600 rounded-lg p-3">
+                  <label className="text-xs text-gray-400 block mb-1">
+                    کد ارسال شده (فقط برای debugging - حالت توسعه):
+                  </label>
+                  <input
+                    type="text"
+                    value={otpCodeFromBackend}
+                    readOnly
+                    className="w-full px-3 py-2 bg-gray-800 text-white text-center text-lg font-mono rounded border border-gray-600 cursor-text"
+                    onClick={(e) => {
+                      (e.target as HTMLInputElement).select()
+                      document.execCommand('copy')
+                      showToast('کد کپی شد', { type: 'success', duration: 2000 })
+                    }}
+                  />
+                  <p className="text-xs text-gray-500 mt-1 text-center">
+                    برای کپی کردن کد، روی آن کلیک کنید
+                  </p>
+                </div>
+              )}
 
               {/* Honeypot field */}
               <input
@@ -369,10 +699,10 @@ export default function Login() {
                 </button>
                 <button
                   type="submit"
-                  disabled={loading || otpCode.length !== 4}
-                  className="flex-1 btn-primary py-3"
+                  disabled={loading || otpCode.length !== 4 || isBlocked}
+                  className="flex-1 btn-primary py-3 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {loading ? 'در حال بررسی...' : 'ورود'}
+                  {loading ? 'در حال بررسی...' : isBlocked ? 'بلاک شده' : 'ورود'}
                 </button>
               </div>
 

@@ -7,6 +7,8 @@ import {
   updateSystemSettings,
   clearAICache,
   type SystemSettingsResponse,
+  getGapGPTModels,
+  type GapGPTModel,
 } from '../api/client'
 
 export default function SystemSettings() {
@@ -17,10 +19,13 @@ export default function SystemSettings() {
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [settingsActionLoading, setSettingsActionLoading] = useState(false)
   const [clearingCache, setClearingCache] = useState(false)
+  const [models, setModels] = useState<GapGPTModel[]>([])
+  const [loadingModels, setLoadingModels] = useState(false)
 
   useEffect(() => {
     if (isAdmin) {
       loadSystemSettings()
+      loadModels()
     }
   }, [isAdmin])
 
@@ -46,6 +51,42 @@ export default function SystemSettings() {
       showToast('خطا در بارگذاری تنظیمات سیستم', { type: 'error' })
     } finally {
       setSettingsLoading(false)
+    }
+  }
+
+  const loadModels = async () => {
+    try {
+      setLoadingModels(true)
+      const response = await getGapGPTModels()
+      if (response.data.status === 'success') {
+        setModels(response.data.models || [])
+      }
+    } catch (error) {
+      console.error('Error loading models:', error)
+    } finally {
+      setLoadingModels(false)
+    }
+  }
+
+  const handleModelCostChange = async (modelId: string, cost: number) => {
+    if (!systemSettings) return
+    
+    const updatedCosts = {
+      ...(systemSettings.model_costs || {}),
+      [modelId]: cost
+    }
+    
+    try {
+      setSettingsActionLoading(true)
+      const response = await updateSystemSettings({
+        model_costs: updatedCosts
+      })
+      setSystemSettings(response.data)
+      showToast('هزینه مدل به‌روزرسانی شد', { type: 'success' })
+    } catch (error: any) {
+      showToast('خطا در به‌روزرسانی هزینه مدل', { type: 'error' })
+    } finally {
+      setSettingsActionLoading(false)
     }
   }
 
@@ -358,6 +399,48 @@ export default function SystemSettings() {
                     min="0"
                     step="0.01"
                   />
+                </div>
+
+                {/* تنظیمات هزینه مدل‌ها */}
+                <div className="mt-6 pt-6 border-t border-gray-700">
+                  <h5 className="text-md font-semibold text-white mb-3">هزینه هر کلمه برای مدل‌های AI (تومان)</h5>
+                  {loadingModels ? (
+                    <div className="text-gray-400 text-center py-4">در حال بارگذاری مدل‌ها...</div>
+                  ) : models.length === 0 ? (
+                    <div className="text-yellow-400 text-center py-4 text-sm">
+                      هیچ مدلی یافت نشد. لطفاً کلید API GapGPT را در تنظیمات اضافه کنید.
+                    </div>
+                  ) : (
+                    <div className="space-y-3 max-h-[400px] overflow-y-auto">
+                      {models.map((model) => {
+                        const currentCost = systemSettings?.model_costs?.[model.id] || 0.001
+                        return (
+                          <div key={model.id} className="flex items-center justify-between bg-gray-800 p-3 rounded">
+                            <div className="flex-1">
+                              <span className="text-white font-medium">{model.name}</span>
+                              {model.owned_by && (
+                                <span className="text-gray-400 text-sm mr-2">({model.owned_by})</span>
+                              )}
+                            </div>
+                            <input
+                              type="number"
+                              value={currentCost}
+                              onChange={(e) => {
+                                const value = parseFloat(e.target.value)
+                                if (!isNaN(value) && value >= 0) {
+                                  handleModelCostChange(model.id, value)
+                                }
+                              }}
+                              className="w-32 px-3 py-1 bg-gray-700 text-white rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              min="0"
+                              step="0.0001"
+                              placeholder="0.001"
+                            />
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

@@ -34,10 +34,10 @@ export default function StrategyQuestions({ strategyId, onComplete }: StrategyQu
       let questionsData: StrategyQuestion[] = []
       if (Array.isArray(response.data)) {
         questionsData = response.data
-      } else if (response.data && Array.isArray(response.data.results)) {
-        questionsData = response.data.results
-      } else if (response.data && response.data.data && Array.isArray(response.data.data)) {
-        questionsData = response.data.data
+      } else if (response.data && 'results' in response.data && Array.isArray((response.data as any).results)) {
+        questionsData = (response.data as any).results
+      } else if (response.data && 'data' in response.data && Array.isArray((response.data as any).data)) {
+        questionsData = (response.data as any).data
       }
       
       setQuestions(questionsData || [])
@@ -53,7 +53,7 @@ export default function StrategyQuestions({ strategyId, onComplete }: StrategyQu
       setAnswers(existingAnswers)
     } catch (error: any) {
       console.error('Error loading questions:', error)
-      showToast('خطا در بارگذاری سوالات', 'error')
+      showToast('خطا در بارگذاری سوالات', { type: 'error' })
       setQuestions([]) // Ensure questions is set to empty array on error
     } finally {
       setLoading(false)
@@ -65,20 +65,20 @@ export default function StrategyQuestions({ strategyId, onComplete }: StrategyQu
       setGenerating(true)
       const response = await generateStrategyQuestions(strategyId)
       if (response.data.status === 'success') {
-        showToast(`${response.data.message}`, 'success')
+        showToast(`${response.data.message}`, { type: 'success' })
         // Only reload questions after generating new ones
         await loadQuestions()
       } else {
         const errorMessage = response.data.message || 'خطا در تولید سوالات'
         // Show multi-line error messages properly
-        showToast(errorMessage.replace(/\n/g, ' '), 'error')
+        showToast(errorMessage.replace(/\n/g, ' '), { type: 'error' })
         console.error('Error generating questions:', response.data)
       }
     } catch (error: any) {
       const errorMessage = error?.response?.data?.message || 
                           error?.message || 
                           'خطا در تولید سوالات. لطفاً Gemini API را بررسی کنید.'
-      showToast(errorMessage.replace(/\n/g, ' '), 'error')
+      showToast(errorMessage.replace(/\n/g, ' '), { type: 'error' })
       console.error('Error generating questions:', error)
       console.error('Error response:', error?.response?.data)
     } finally {
@@ -93,13 +93,13 @@ export default function StrategyQuestions({ strategyId, onComplete }: StrategyQu
   const handleSaveAnswer = async (question: StrategyQuestion) => {
     const answer = answers[question.id]
     if (!answer && question.question_type !== 'boolean') {
-      showToast('لطفاً جواب را وارد کنید', 'warning')
+      showToast('لطفاً جواب را وارد کنید', { type: 'warning' })
       return
     }
 
     try {
-      const response = await updateQuestionAnswer(question.id, answer || '', 'answered')
-      showToast('جواب ذخیره شد', 'success')
+      await updateQuestionAnswer(question.id, answer || '', 'answered')
+      showToast('جواب ذخیره شد', { type: 'success' })
       setEditingQuestionId(null) // Exit edit mode
       
       // Update the question in state instead of reloading all questions
@@ -111,7 +111,7 @@ export default function StrategyQuestions({ strategyId, onComplete }: StrategyQu
         )
       )
     } catch (error: any) {
-      showToast('خطا در ذخیره جواب', 'error')
+      showToast('خطا در ذخیره جواب', { type: 'error' })
       console.error('Error saving answer:', error)
     }
   }
@@ -131,7 +131,7 @@ export default function StrategyQuestions({ strategyId, onComplete }: StrategyQu
   const handleSkipQuestion = async (question: StrategyQuestion) => {
     try {
       await updateQuestionAnswer(question.id, '', 'skipped')
-      showToast('سوال رد شد', 'info')
+      showToast('سوال رد شد', { type: 'info' })
       
       // Update the question in state instead of reloading all questions
       setQuestions(prevQuestions => 
@@ -148,7 +148,7 @@ export default function StrategyQuestions({ strategyId, onComplete }: StrategyQu
         return newAnswers
       })
     } catch (error: any) {
-      showToast('خطا در رد سوال', 'error')
+      showToast('خطا در رد سوال', { type: 'error' })
       console.error('Error skipping question:', error)
     }
   }
@@ -159,23 +159,32 @@ export default function StrategyQuestions({ strategyId, onComplete }: StrategyQu
     )
 
     if (unanswered.length > 0) {
-      showToast('لطفاً به همه سوالات پاسخ دهید یا آنها را رد کنید', 'warning')
+      showToast('لطفاً به همه سوالات پاسخ دهید یا آنها را رد کنید', { type: 'warning' })
       return
     }
 
     try {
       setProcessing(true)
+      
+      // Ensure CSRF token is available before processing
+      try {
+        const { ensureCsrfToken } = await import('../api/client')
+        await ensureCsrfToken()
+      } catch (csrfError) {
+        console.warn('CSRF token check failed, proceeding anyway:', csrfError)
+      }
+      
       const response = await processStrategyWithAnswers(strategyId)
       if (response.data.status === 'success') {
-        showToast('استراتژی با موفقیت پردازش شد!', 'success')
+        showToast('استراتژی با موفقیت پردازش شد!', { type: 'success' })
         if (onComplete) {
           onComplete()
         }
       } else {
-        showToast(response.data.message || 'خطا در پردازش استراتژی', 'error')
+        showToast(response.data.message || 'خطا در پردازش استراتژی', { type: 'error' })
       }
     } catch (error: any) {
-      showToast('خطا در پردازش استراتژی', 'error')
+      showToast('خطا در پردازش استراتژی', { type: 'error' })
       console.error('Error processing strategy:', error)
     } finally {
       setProcessing(false)

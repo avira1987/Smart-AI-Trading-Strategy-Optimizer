@@ -28,7 +28,6 @@ from .views import (
 )
 from .auth_views import SendOTPView, VerifyOTPView, check_auth, logout, get_csrf_token, check_profile_completion, update_profile, check_ip_location, get_user_activity_logs
 from .captcha_views import GetCaptchaView
-from .test_endpoints import test_sms, test_backend_status, test_kavenegar_config, emergency_set_kavenegar_api_key
 from .gold_price_views import GoldPriceView
 from .gold_access_views import GoldAPIAccessRequestViewSet, UserGoldAPIAccessView
 from .demo_trading_views import (
@@ -75,11 +74,6 @@ urlpatterns = [
     # System settings
     path('system-settings/', SystemSettingsView.as_view(), name='system_settings'),
     path('admin/clear-ai-cache/', ClearAICacheView.as_view(), name='clear_ai_cache'),
-    # Test endpoints
-    path('test/sms/', test_sms, name='test_sms'),
-    path('test/backend-status/', test_backend_status, name='test_backend_status'),
-    path('test/kavenegar-config/', test_kavenegar_config, name='test_kavenegar_config'),
-    path('emergency/set-kavenegar-api-key/', emergency_set_kavenegar_api_key, name='emergency_set_kavenegar_api_key'),
     # Gold price endpoints
     path('gold-price/', GoldPriceView.as_view(), name='gold_price'),
     path('gold-access/self/', UserGoldAPIAccessView.as_view(), name='gold_api_access_self'),

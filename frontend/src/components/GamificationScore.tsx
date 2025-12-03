@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { get } from '../api/client'
 
 // Wrap in try-catch to prevent crashes

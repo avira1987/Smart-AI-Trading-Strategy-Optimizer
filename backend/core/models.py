@@ -1268,6 +1268,13 @@ class SystemSettings(models.Model):
         help_text="مبلغ هدیه ثبت‌نام به تومان"
     )
     
+    # هزینه‌های مدل‌ها (هر کلمه به تومان)
+    model_costs = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="هزینه هر کلمه برای هر مدل به تومان (JSON: {'model_id': cost})"
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

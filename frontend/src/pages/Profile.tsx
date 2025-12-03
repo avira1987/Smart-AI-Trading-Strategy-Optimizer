@@ -128,7 +128,7 @@ export default function Profile() {
   // Load profile and wallet when component mounts or user becomes available
   useEffect(() => {
     let isMounted = true
-    let timeoutId: NodeJS.Timeout | null = null
+    let timeoutId: number | null = null
     
     const initializeProfile = async () => {
       if (!isMounted) return

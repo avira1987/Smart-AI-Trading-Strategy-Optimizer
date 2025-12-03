@@ -82,7 +82,7 @@ export default function APIConfigurations() {
       
       // Note: Backend filtering is done on the server side, but we also filter here for safety
       if (!isAdmin) {
-        apisData = apisData.filter(api => !backendProviderNames.includes(api.provider))
+        apisData = apisData.filter((api: APIConfiguration) => !backendProviderNames.includes(api.provider))
       }
       
       console.log('Final API Configurations data:', apisData) // Debug log

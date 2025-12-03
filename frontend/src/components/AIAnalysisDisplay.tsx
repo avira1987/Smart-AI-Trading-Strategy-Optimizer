@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 
 interface AIAnalysisDisplayProps {
   analysisText: string
@@ -137,7 +137,7 @@ export default function AIAnalysisDisplay({ analysisText, resultMetrics }: AIAna
   const getPerformanceMessage = () => {
     if (!resultMetrics) return null
     
-    const { total_return, win_rate, max_drawdown } = resultMetrics
+    const { total_return, win_rate } = resultMetrics
     
     if (total_return >= 30 && win_rate >= 60) {
       return {

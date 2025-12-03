@@ -1,5 +1,4 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
-import { getAccountInfo } from '../api/client'
 import { checkProfileCompletion } from '../api/auth'
 import { useAuth } from './AuthContext'
 
@@ -35,10 +34,8 @@ export function SymbolProvider({ children }: { children: React.ReactNode }) {
         }
         
         // Fallback to account info
-        const response = await getAccountInfo()
-        if (mounted && response?.data?.recommended_symbol) {
-          setSelectedSymbol(response.data.recommended_symbol)
-        }
+        // Note: recommended_symbol is not available in AccountInfo response
+        // Using default symbol instead
       } catch (_) {
         // ignore if not available, use default
       }

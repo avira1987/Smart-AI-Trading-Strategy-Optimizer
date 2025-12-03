@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getStrategies, getLiveTrades, getAccountInfo, getMarketStatus, openTrade, closeTrade, syncPositions, getMT5Positions, TradingStrategy, LiveTrade, AccountInfo } from '../api/client'
+import { getStrategies, getLiveTrades, getAccountInfo, getMarketStatus, openTrade, closeTrade, syncPositions, TradingStrategy, LiveTrade, AccountInfo } from '../api/client'
 import { useToast } from './ToastProvider'
 import { useSymbol } from '../context/SymbolContext'
 import AutoTradingSettings from './AutoTradingSettings'
@@ -14,7 +14,7 @@ export default function LiveTrading() {
   const [marketOpen, setMarketOpen] = useState<boolean>(false)
   const [marketMessage, setMarketMessage] = useState<string>('')
   const [loading, setLoading] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
+  const [, setRefreshing] = useState(false)
   const { showToast } = useToast()
   const rateLimitClickOpenTrade = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'liveTrading-openTrade' })
   const rateLimitClickCloseTrade = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'liveTrading-closeTrade' })
@@ -134,12 +134,12 @@ export default function LiveTrading() {
       const response = await getLiveTrades()
       // Handle pagination format from Django REST Framework
       let tradesData: LiveTrade[] = []
-      if (response.data && Array.isArray(response.data)) {
+      if (Array.isArray(response.data)) {
         tradesData = response.data
-      } else if (response.data && response.data.results && Array.isArray(response.data.results)) {
-        tradesData = response.data.results
-      } else if (response.data && Array.isArray(response.data.data)) {
-        tradesData = response.data.data
+      } else if (response.data && 'results' in response.data && Array.isArray((response.data as any).results)) {
+        tradesData = (response.data as any).results
+      } else if (response.data && 'data' in response.data && Array.isArray((response.data as any).data)) {
+        tradesData = (response.data as any).data
       }
       
       setTrades(tradesData)
@@ -166,10 +166,6 @@ export default function LiveTrading() {
       const response = await getAccountInfo()
       if (response.data.status === 'success') {
         setAccountInfo(response.data.account)
-        // Auto-set symbol based on account type if not manually set
-        if (response.data.recommended_symbol && symbol === 'XAUUSD') {
-          setSymbol(response.data.recommended_symbol)
-        }
       }
     } catch (error: any) {
       // Account info may not be available

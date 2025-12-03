@@ -115,16 +115,172 @@ export default function StrategyTesting() {
     }
   }
 
+  // Popularity ranking for currency pairs (higher number = more popular)
+  const getSymbolPopularity = (symbolName: string): number => {
+    const name = symbolName.toUpperCase()
+    
+    // Gold - Most popular
+    if (name === 'XAUUSD') return 1000
+    if (name.includes('XAU')) return 900
+    
+    // Major Forex Pairs (Most traded)
+    const majorPairs: { [key: string]: number } = {
+      'EURUSD': 950,
+      'GBPUSD': 940,
+      'USDJPY': 930,
+      'USDCHF': 920,
+      'AUDUSD': 910,
+      'USDCAD': 900,
+      'NZDUSD': 890,
+      'EURGBP': 880,
+      'EURJPY': 870,
+      'GBPJPY': 860,
+      'EURCHF': 850,
+      'AUDJPY': 840,
+      'EURAUD': 830,
+      'EURCAD': 820,
+      'GBPAUD': 810,
+      'GBPCAD': 800,
+      'AUDCAD': 790,
+      'AUDNZD': 780,
+      'NZDCAD': 770,
+      'NZDJPY': 760,
+    }
+    
+    if (majorPairs[name]) return majorPairs[name]
+    
+    // Minor Forex Pairs
+    const minorPairs: { [key: string]: number } = {
+      'USDSEK': 700,
+      'USDNOK': 690,
+      'USDDKK': 680,
+      'USDZAR': 670,
+      'USDMXN': 660,
+      'USDBRL': 650,
+      'USDTRY': 640,
+      'USDCNH': 630,
+      'USDSGD': 620,
+      'USDHKD': 610,
+      'EURSEK': 600,
+      'EURNOK': 590,
+      'EURDKK': 580,
+      'EURTRY': 570,
+      'EURPLN': 560,
+      'EURZAR': 550,
+      'GBPSEK': 540,
+      'GBPNOK': 530,
+      'GBPTRY': 520,
+      'GBPZAR': 510,
+    }
+    
+    if (minorPairs[name]) return minorPairs[name]
+    
+    // Popular Crypto
+    const cryptoPairs: { [key: string]: number } = {
+      'BTCUSD': 850,
+      'ETHUSD': 840,
+      'BNBUSD': 830,
+      'ADAUSD': 820,
+      'SOLUSD': 810,
+      'XRPUSD': 800,
+      'DOTUSD': 790,
+      'DOGEUSD': 780,
+      'AVAXUSD': 770,
+      'MATICUSD': 760,
+      'LINKUSD': 750,
+      'UNIUSD': 740,
+      'LTCUSD': 730,
+      'ATOMUSD': 720,
+      'ALGOUSD': 710,
+    }
+    
+    if (cryptoPairs[name]) return cryptoPairs[name]
+    
+    // Check if it's a crypto pair
+    if (name.includes('BTC') || name.includes('ETH') || name.includes('CRYPTO') || 
+        name.includes('USDT') || name.includes('USDC')) {
+      return 500
+    }
+    
+    // Check if it's a forex pair (contains common currency codes)
+    const forexPattern = /(USD|EUR|GBP|JPY|CHF|AUD|CAD|NZD|SEK|NOK|DKK|ZAR|MXN|BRL|TRY|CNH|SGD|HKD|PLN)/
+    if (forexPattern.test(name)) {
+      return 400
+    }
+    
+    // Unknown/Exotic pairs - lowest priority
+    return 100
+  }
+  
+  // Categorize symbol
+  const getSymbolCategory = (symbolName: string): 'gold' | 'major_forex' | 'minor_forex' | 'crypto' | 'other' => {
+    const name = symbolName.toUpperCase()
+    
+    if (name.includes('XAU') || name.includes('GOLD')) {
+      return 'gold'
+    }
+    
+    if (name.includes('BTC') || name.includes('ETH') || name.includes('CRYPTO') || 
+        name.includes('USDT') || name.includes('USDC') || name.includes('BNB') ||
+        name.includes('ADA') || name.includes('SOL') || name.includes('XRP') ||
+        name.includes('DOT') || name.includes('DOGE') || name.includes('AVAX') ||
+        name.includes('MATIC') || name.includes('LINK') || name.includes('UNI') ||
+        name.includes('LTC') || name.includes('ATOM') || name.includes('ALGO')) {
+      return 'crypto'
+    }
+    
+    // Major pairs
+    const majorPairs = ['EURUSD', 'GBPUSD', 'USDJPY', 'USDCHF', 'AUDUSD', 'USDCAD', 
+                       'NZDUSD', 'EURGBP', 'EURJPY', 'GBPJPY', 'EURCHF', 'AUDJPY',
+                       'EURAUD', 'EURCAD', 'GBPAUD', 'GBPCAD', 'AUDCAD', 'AUDNZD',
+                       'NZDCAD', 'NZDJPY']
+    if (majorPairs.includes(name)) {
+      return 'major_forex'
+    }
+    
+    // Check if it's a forex pair
+    const forexPattern = /(USD|EUR|GBP|JPY|CHF|AUD|CAD|NZD|SEK|NOK|DKK|ZAR|MXN|BRL|TRY|CNH|SGD|HKD|PLN)/
+    if (forexPattern.test(name)) {
+      return 'minor_forex'
+    }
+    
+    return 'other'
+  }
+
   const loadMT5Symbols = async () => {
     setLoadingSymbols(true)
     try {
       const response = await getMT5Symbols(true) // only available symbols
       if (response.data?.status === 'success' && response.data.symbols) {
         const symbols = response.data.symbols as MT5Symbol[]
-        setAvailableSymbols(symbols)
+        // Sort symbols by popularity and category
+        const sortedSymbols = symbols
+          .filter(s => s.is_available)
+          .sort((a, b) => {
+            const catA = getSymbolCategory(a.name)
+            const catB = getSymbolCategory(b.name)
+            
+            // Category order: gold > major_forex > minor_forex > crypto > other
+            const categoryOrder: { [key: string]: number } = {
+              'gold': 1,
+              'major_forex': 2,
+              'minor_forex': 3,
+              'crypto': 4,
+              'other': 5
+            }
+            
+            const catDiff = categoryOrder[catA] - categoryOrder[catB]
+            if (catDiff !== 0) return catDiff
+            
+            // Within same category, sort by popularity
+            const popA = getSymbolPopularity(a.name)
+            const popB = getSymbolPopularity(b.name)
+            return popB - popA // Higher popularity first
+          })
+        setAvailableSymbols(sortedSymbols)
         // Don't auto-select symbol - user must choose
         // Only set if symbol is completely empty and we have a selectedSymbol from context
-        if (symbols.length > 0 && !symbol && selectedSymbol) {
+        if (sortedSymbols.length > 0 && !symbol && selectedSymbol) {
           setSymbol(selectedSymbol)
         }
       }
@@ -402,22 +558,80 @@ export default function StrategyTesting() {
                 {loadingSymbols ? (
                   <option value="">در حال بارگذاری...</option>
                 ) : availableSymbols.length > 0 ? (
-                  <>
-                    <option value="">انتخاب جفت ارز...</option>
-                    {availableSymbols
-                      .filter(s => s.is_available)
-                      .map((sym) => (
-                        <option key={sym.name} value={sym.name}>
-                          {sym.name} {sym.description ? `(${sym.description})` : ''}
-                        </option>
-                      ))}
-                  </>
+                  (() => {
+                    // Group symbols by category
+                    const grouped: { [key: string]: MT5Symbol[] } = {
+                      gold: [],
+                      major_forex: [],
+                      minor_forex: [],
+                      crypto: [],
+                      other: []
+                    }
+                    
+                    availableSymbols.forEach(sym => {
+                      const category = getSymbolCategory(sym.name)
+                      grouped[category].push(sym)
+                    })
+                    
+                    return (
+                      <>
+                        <option value="">انتخاب جفت ارز...</option>
+                        {grouped.gold.length > 0 && (
+                          <optgroup label="🥇 طلا (Gold)">
+                            {grouped.gold.map((sym) => (
+                              <option key={sym.name} value={sym.name}>
+                                {sym.name} {sym.description ? `- ${sym.description}` : ''}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {grouped.major_forex.length > 0 && (
+                          <optgroup label="💱 فارکس اصلی (Major Forex)">
+                            {grouped.major_forex.map((sym) => (
+                              <option key={sym.name} value={sym.name}>
+                                {sym.name} {sym.description ? `- ${sym.description}` : ''}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {grouped.minor_forex.length > 0 && (
+                          <optgroup label="💱 فارکس فرعی (Minor Forex)">
+                            {grouped.minor_forex.map((sym) => (
+                              <option key={sym.name} value={sym.name}>
+                                {sym.name} {sym.description ? `- ${sym.description}` : ''}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {grouped.crypto.length > 0 && (
+                          <optgroup label="₿ کریپتو (Cryptocurrency)">
+                            {grouped.crypto.map((sym) => (
+                              <option key={sym.name} value={sym.name}>
+                                {sym.name} {sym.description ? `- ${sym.description}` : ''}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {grouped.other.length > 0 && (
+                          <optgroup label="📊 سایر (Other)">
+                            {grouped.other.map((sym) => (
+                              <option key={sym.name} value={sym.name}>
+                                {sym.name} {sym.description ? `- ${sym.description}` : ''}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </>
+                    )
+                  })()
                 ) : (
                   <>
                     <option value="">انتخاب جفت ارز...</option>
-                    <option value="XAUUSD">XAUUSD (Gold/USD)</option>
-                    <option value="XAUUSD_l">XAUUSD_l (Gold/USD Live)</option>
-                    <option value="XAUUSD_o">XAUUSD_o (Gold/USD Demo)</option>
+                    <optgroup label="🥇 طلا (Gold)">
+                      <option value="XAUUSD">XAUUSD - Gold/USD</option>
+                      <option value="XAUUSD_l">XAUUSD_l - Gold/USD (Live)</option>
+                      <option value="XAUUSD_o">XAUUSD_o - Gold/USD (Demo)</option>
+                    </optgroup>
                   </>
                 )}
               </select>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { getTickets, createTicket, addTicketMessage, closeTicket, getTicket, Ticket, TicketMessage } from '../api/tickets'
+import { getTickets, createTicket, addTicketMessage, closeTicket, getTicket, Ticket } from '../api/tickets'
 import { useToast } from '../components/ToastProvider'
 
 const categoryLabels: Record<string, string> = {
@@ -98,12 +98,12 @@ export default function Tickets() {
       
       const response = await getTickets(params)
       // Handle both paginated and non-paginated responses
-      let ticketsData = []
+      let ticketsData: Ticket[] = []
       if (response.data) {
         if (Array.isArray(response.data)) {
           ticketsData = response.data
-        } else if (response.data.results && Array.isArray(response.data.results)) {
-          ticketsData = response.data.results
+        } else if (typeof response.data === 'object' && 'results' in response.data && Array.isArray((response.data as any).results)) {
+          ticketsData = (response.data as any).results
         }
       }
       setTickets(ticketsData)

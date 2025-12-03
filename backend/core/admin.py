@@ -272,8 +272,8 @@ class SystemSettingsAdmin(admin.ModelAdmin):
             'description': 'کنترل استفاده از کش برای پردازش تبدیل متن انسانی به مدل هوش مصنوعی'
         }),
         ('هزینه‌های مصرف', {
-            'fields': ('token_cost_per_1000', 'backtest_cost', 'strategy_processing_cost', 'registration_bonus'),
-            'description': 'مدیریت هزینه‌های مصرف توکن، بک‌تست، پردازش استراتژی و هدیه ثبت‌نام'
+            'fields': ('token_cost_per_1000', 'backtest_cost', 'strategy_processing_cost', 'registration_bonus', 'model_costs'),
+            'description': 'مدیریت هزینه‌های مصرف توکن، بک‌تست، پردازش استراتژی، هدیه ثبت‌نام و هزینه‌های مدل‌های AI (هر کلمه به تومان)'
         }),
         ('اطلاعات سیستم', {
             'fields': ('created_at', 'updated_at'),

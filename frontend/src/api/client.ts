@@ -4,29 +4,37 @@ import { navigateTo } from '../utils/navigation'
 // Auto-detect API URL based on current hostname
 // This allows access from local network IPs
 function getApiBaseUrl(): string {
-  // Check for environment variable first (for production builds with custom backend)
+  // In production (built files), always use relative URL
+  // This ensures requests go through Nginx proxy instead of direct backend access
+  if (import.meta.env.PROD) {
+    return '/api'
+  }
+  
+  // In development, check for environment variable (for custom backend URL)
   const envBackendUrl = import.meta.env.VITE_BACKEND_URL
-  if (envBackendUrl) {
+  if (envBackendUrl && import.meta.env.DEV) {
+    // Only use env variable in development mode
     // Ensure it ends with /api
     return envBackendUrl.endsWith('/api') ? envBackendUrl : `${envBackendUrl}/api`
   }
   
-  // In both development and production, use relative URL
-  // This works with:
-  // - Vite dev server proxy (development)
-  // - Nginx reverse proxy (production with Docker)
-  // The proxy will forward requests to backend
+  // Default: use relative URL (works with Vite dev server proxy and Nginx)
   return '/api'
 }
 
 const API_BASE_URL = getApiBaseUrl()
 
-// Log API base URL for debugging (only in development)
-if (import.meta.env.DEV) {
-  console.log('API Base URL:', API_BASE_URL)
-  console.log('Current hostname:', window.location.hostname)
-  console.log('Using Vite proxy:', API_BASE_URL === '/api')
-}
+// Log API base URL and timeout for debugging
+// Always log in production to help debug issues
+console.log('API Configuration:', {
+  baseURL: API_BASE_URL,
+  hostname: window.location.hostname,
+  origin: window.location.origin,
+  isProduction: import.meta.env.PROD,
+  isDevelopment: import.meta.env.DEV,
+  timeout: getRequestTimeout(),
+  usingRelativeURL: API_BASE_URL === '/api',
+})
 
 // Function to get CSRF token from cookies
 function getCsrfToken(): string | null {
@@ -45,13 +53,63 @@ function getCsrfToken(): string | null {
   return cookieValue
 }
 
+// Function to ensure CSRF token is available
+export async function ensureCsrfToken(): Promise<void> {
+  let token = getCsrfToken()
+  if (!token) {
+    try {
+      // Fetch CSRF token from backend - this will set the cookie via @ensure_csrf_cookie
+      const response = await client.get('/auth/csrf-token/', { withCredentials: true })
+      
+      // Wait a bit for cookie to be set by browser
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // Check again after request - cookie should be set now
+      token = getCsrfToken()
+      
+      if (!token) {
+        // If still no token, try to get it from response (though backend should set cookie)
+        const responseData = response?.data
+        if (responseData?.csrfToken) {
+          // Backend returned token in response, but cookie might not be set
+          // This is a fallback - normally cookie should be set by @ensure_csrf_cookie
+          console.warn('CSRF token in response but not in cookie. Cookie might not be set properly.')
+        }
+        console.warn('CSRF token still not found after fetch. Available cookies:', document.cookie)
+      } else {
+        console.log('CSRF token successfully retrieved and set in cookie')
+      }
+    } catch (error) {
+      console.error('Failed to fetch CSRF token:', error)
+      // Don't throw - let the request proceed, backend will handle it
+    }
+  }
+}
+
+// Determine timeout based on connection type
+// For localhost, use shorter timeout (10s)
+// For internet access, use longer timeout (60s) to handle higher latency
+function getRequestTimeout(): number {
+  const hostname = window.location.hostname
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0'
+  
+  // Check for environment variable override
+  const envTimeout = import.meta.env.VITE_API_TIMEOUT
+  if (envTimeout) {
+    return parseInt(envTimeout, 10)
+  }
+  
+  // Use longer timeout for internet access (non-localhost)
+  return isLocalhost ? 10000 : 60000 // 10s for localhost, 60s for internet
+}
+
 const client = axios.create({
   baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  // Don't set default Content-Type - let axios set it automatically based on data type
+  // For JSON: application/json
+  // For FormData: multipart/form-data with boundary
   withCredentials: true, // Important for session cookies
-  timeout: 10000, // 10 second timeout to prevent hanging
+  timeout: getRequestTimeout(), // Adaptive timeout based on connection type
 })
 
 // Client with longer timeout for GapGPT operations (can take 30-60 seconds)
@@ -99,17 +157,50 @@ gapGPTClient.interceptors.response.use(
 // Add request interceptor to include CSRF token
 client.interceptors.request.use(
   (config) => {
+    // IMPORTANT: If data is FormData, remove Content-Type header to let axios set it automatically
+    // with the correct boundary. Otherwise axios will send wrong Content-Type.
+    if (config.data instanceof FormData) {
+      // Delete Content-Type header - axios will set it automatically with boundary
+      delete config.headers['Content-Type']
+      console.log('[Interceptor] FormData detected - removed Content-Type header to let axios set it automatically')
+    } else if (!config.headers['Content-Type']) {
+      // Only set Content-Type for non-FormData requests
+      config.headers['Content-Type'] = 'application/json'
+    }
+    
     // Get CSRF token from cookie
     const csrfToken = getCsrfToken()
-    if (csrfToken) {
-      // Set X-CSRFToken header for state-changing operations
-      if (config.method && ['post', 'put', 'patch', 'delete'].includes(config.method.toLowerCase())) {
+    const isStateChanging = config.method && ['post', 'put', 'patch', 'delete'].includes(config.method.toLowerCase())
+    
+    if (isStateChanging) {
+      if (csrfToken) {
+        // Set X-CSRFToken header for state-changing operations
         config.headers['X-CSRFToken'] = csrfToken
+        console.log(`[Interceptor] Added X-CSRFToken header for ${config.method?.toUpperCase()} ${config.url}`)
+      } else {
+        console.warn(`[Interceptor] No CSRF token found for ${config.method?.toUpperCase()} ${config.url}`)
+        console.warn('[Interceptor] Available cookies:', document.cookie)
       }
     }
+    
+    // Log request details for debugging
+    if (config.url?.includes('/strategies/') && isStateChanging) {
+      console.log('[Interceptor] Request config:', {
+        url: config.url,
+        method: config.method,
+        isFormData: config.data instanceof FormData,
+        headers: {
+          'X-CSRFToken': config.headers['X-CSRFToken'] ? 'Present' : 'Missing',
+          'Content-Type': config.headers['Content-Type'] || 'Will be set by axios'
+        },
+        hasData: !!config.data
+      })
+    }
+    
     return config
   },
   (error) => {
+    console.error('[Interceptor] Request error:', error)
     return Promise.reject(error)
   }
 )
@@ -152,16 +243,36 @@ client.interceptors.response.use(
     
     if (error.response?.status === 403) {
       // 403 Forbidden - authentication failed or CSRF token missing
-      console.error('403 Forbidden - Authentication required or CSRF token missing')
+      const errorDetail = error.response?.data?.detail || error.response?.data?.message || error.response?.data?.error
+      console.error('403 Forbidden:', {
+        url: error.config?.url,
+        detail: errorDetail,
+        hasCsrfToken: !!getCsrfToken(),
+        pathname: window.location.pathname
+      })
       
       // Don't redirect if this is an authentication check endpoint (periodic background check)
       // This prevents page refreshes during periodic authentication checks
       const requestUrl = error.config?.url || ''
       const isAuthCheckEndpoint = requestUrl.includes('/auth/check/')
       
+      // Try to get CSRF token if missing (might be a CSRF issue)
+      if (!getCsrfToken() && !isAuthCheckEndpoint) {
+        // Use Promise to handle async operation in non-async function
+        ensureCsrfToken().then(() => {
+          console.log('CSRF token refreshed, you may retry the request')
+        }).catch((csrfError) => {
+          console.error('Failed to refresh CSRF token:', csrfError)
+        })
+      }
+      
       // Only redirect for user-initiated requests, not background checks
       if (!isAuthCheckEndpoint && !isRedirectingToLogin && window.location.pathname !== '/login') {
         isRedirectingToLogin = true
+        
+        // Log error message for debugging
+        const errorMessage = errorDetail || 'دسترسی مجاز نیست. لطفاً دوباره وارد شوید.'
+        console.error('Redirecting to login due to 403 error:', errorMessage)
         
         // Clear local storage
         localStorage.removeItem('user')
@@ -386,9 +497,80 @@ export const deleteAPIConfiguration = (id: number) => client.delete(`/apis/${id}
 
 // Strategies
 export const getStrategies = () => client.get('/strategies/')
-export const addStrategy = (formData: FormData) => client.post('/strategies/', formData, {
-  headers: { 'Content-Type': 'multipart/form-data' },
-})
+export const addStrategy = async (formData: FormData) => {
+  // Ensure CSRF token is available before making the request
+  await ensureCsrfToken()
+  
+  // Get CSRF token after ensuring it's available
+  const csrfToken = getCsrfToken()
+  
+  if (!csrfToken) {
+    console.error('CSRF token not found after ensureCsrfToken. This may cause the request to fail.')
+    console.error('Available cookies:', document.cookie)
+  } else {
+    console.log('CSRF token found, length:', csrfToken.length)
+  }
+  
+  // IMPORTANT: Do NOT set headers in config - it will replace interceptor headers!
+  // The interceptor (line 139-154) runs FIRST and adds X-CSRFToken to config.headers
+  // If we set config.headers as a new object here, it will REPLACE (not merge) the interceptor headers
+  // Axios will automatically set Content-Type for FormData with correct boundary
+  
+  // Log for debugging
+  console.log('Uploading strategy with config:', {
+    hasCsrfToken: !!csrfToken,
+    csrfTokenLength: csrfToken?.length || 0,
+    formDataKeys: Array.from(formData.keys()),
+    note: 'Relying on interceptor to add X-CSRFToken header'
+  })
+  
+  try {
+    // Pass empty config - interceptor will handle CSRF token
+    // Axios will handle Content-Type for FormData automatically
+    console.log('Sending POST request to /strategies/')
+    console.log('FormData contents:', {
+      name: formData.get('name'),
+      description: formData.get('description'),
+      file: formData.get('strategy_file') ? (formData.get('strategy_file') as File).name : 'No file'
+    })
+    
+    const response = await client.post('/strategies/', formData)
+    console.log('Strategy upload successful:', {
+      status: response.status,
+      data: response.data
+    })
+    return response
+  } catch (error: any) {
+    // Detailed error logging
+    console.error('========== STRATEGY UPLOAD ERROR ==========')
+    console.error('Error type:', error?.constructor?.name)
+    console.error('Error message:', error?.message)
+    console.error('Error code:', error?.code)
+    console.error('Request URL:', error?.config?.url)
+    console.error('Request method:', error?.config?.method)
+    console.error('Request headers:', error?.config?.headers)
+    
+    if (error?.response) {
+      console.error('Response status:', error.response.status)
+      console.error('Response status text:', error.response.statusText)
+      console.error('Response headers:', error.response.headers)
+      console.error('Response data (full):', error.response.data)
+      console.error('Response data (message):', error.response.data?.message)
+      console.error('Response data (detail):', error.response.data?.detail)
+      console.error('Response data (error):', error.response.data?.error)
+      console.error('Response data (errors):', error.response.data?.errors)
+    } else if (error?.request) {
+      console.error('Request was made but no response received')
+      console.error('Request:', error.request)
+    } else {
+      console.error('Error setting up request:', error.message)
+    }
+    console.error('Full error object:', error)
+    console.error('==========================================')
+    
+    throw error
+  }
+}
 export const deleteStrategy = (id: number) => client.delete(`/strategies/${id}/`)
 export const processStrategy = (id: number) => client.post(`/strategies/${id}/process/`, {}, {
   timeout: 60000, // 60 seconds timeout for strategy processing (can take longer due to AI analysis)
@@ -723,6 +905,7 @@ export interface SystemSettingsResponse {
   backtest_cost?: number
   strategy_processing_cost?: number
   registration_bonus?: number
+  model_costs?: { [modelId: string]: number }
 }
 
 export const getSystemSettings = () =>

@@ -47,7 +47,7 @@ export const executeRecaptcha = async (action: string = 'submit'): Promise<strin
   }
   
   try {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       window.grecaptcha!.ready(() => {
         window.grecaptcha!
           .execute(siteKey, { action })

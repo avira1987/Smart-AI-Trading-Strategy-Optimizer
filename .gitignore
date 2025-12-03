@@ -25,11 +25,13 @@ wheels/
 
 # Django
 *.log
+*.log.*
 db.sqlite3
 db.sqlite3-journal
 /staticfiles/
 /media/
 /cache/
+/logs/
 
 # Node
 node_modules/
@@ -68,6 +70,9 @@ htmlcov/
 celerybeat-schedule
 celerybeat-schedule-shm
 celerybeat-schedule-wal
+celerybeat-schedule.*
+celerybeat-schedule.dat
+celerybeat-schedule.dir
 
 # Misc
 .DS_Store

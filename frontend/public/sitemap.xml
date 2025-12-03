@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  
+  <!-- Homepage / Landing Page -->
+  <url>
+    <loc>https://myaibaz.ir/</loc>
+    <lastmod>2024-12-20</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://myaibaz.ir/" />
+  </url>
+  
+  <!-- About Page -->
+  <url>
+    <loc>https://myaibaz.ir/about</loc>
+    <lastmod>2024-12-20</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/about" />
+  </url>
+  
+  <!-- Tutorial Page -->
+  <url>
+    <loc>https://myaibaz.ir/tutorial</loc>
+    <lastmod>2024-12-20</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/tutorial" />
+  </url>
+  
+  <!-- Terms Page -->
+  <url>
+    <loc>https://myaibaz.ir/terms</loc>
+    <lastmod>2024-12-20</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/terms" />
+  </url>
+  
+  <!-- Login Page -->
+  <url>
+    <loc>https://myaibaz.ir/login</loc>
+    <lastmod>2024-12-20</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/login" />
+  </url>
+  
+  <!-- Free Gold API Guide -->
+  <url>
+    <loc>https://myaibaz.ir/guides/free-gold-api</loc>
+    <lastmod>2024-12-20</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/guides/free-gold-api" />
+  </url>
+  
+</urlset>
+

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getGapGPTModels, convertStrategyWithGapGPT, compareModelsWithGapGPT, GapGPTModel, saveGapGPTConversion } from '../api/client'
+import { getGapGPTModels, convertStrategyWithGapGPT, compareModelsWithGapGPT, GapGPTModel, saveGapGPTConversion, getSystemSettings } from '../api/client'
 import { useToast } from './ToastProvider'
 
 interface GapGPTConverterProps {
@@ -10,36 +10,38 @@ interface GapGPTConverterProps {
   onSave?: () => void  // Callback بعد از ذخیره موفق
 }
 
-// Mapping برای توضیحات، هزینه و کاربردهای مدل‌ها
-const getModelInfo = (model: GapGPTModel) => {
+// Mapping برای توضیحات و کاربردهای مدل‌ها (بدون هزینه hardcoded)
+const getModelInfo = (model: GapGPTModel, costPerWord: number = 0.001) => {
   const nameLower = model.name.toLowerCase()
   const ownedByLower = model.owned_by?.toLowerCase() || ''
+  
+  const costDisplay = `~${costPerWord.toFixed(4)} تومان/کلمه`
   
   // تشخیص نوع مدل بر اساس نام یا provider
   if (ownedByLower.includes('openai') || nameLower.includes('gpt')) {
     if (nameLower.includes('gpt-5') || nameLower.includes('gpt5')) {
       return {
         description: 'مدل پیشرفته و قدرتمند OpenAI با قابلیت‌های استدلال پیشرفته',
-        cost: '~0.002 تومان/کلمه',
+        cost: costDisplay,
         suitableFor: 'تحلیل‌های پیچیده، استدلال پیشرفته، کدنویسی و ریاضیات'
       }
     } else if (nameLower.includes('gpt-4.5') || nameLower.includes('gpt4.5')) {
       return {
         description: 'مدل خلاقانه و پیشرفته OpenAI برای وظایف پیچیده',
-        cost: '~0.0015 تومان/کلمه',
+        cost: costDisplay,
         suitableFor: 'تولید محتوای خلاقانه، برنامه‌ریزی پیچیده، تحلیل‌های حرفه‌ای'
       }
     } else if (nameLower.includes('gpt-4o') || nameLower.includes('gpt4o') || nameLower.includes('gpt-40')) {
       if (nameLower.includes('mini')) {
         return {
           description: 'مدل سریع و مقرون‌به‌صرفه OpenAI با عملکرد عالی',
-          cost: '~0.0008 تومان/کلمه',
+          cost: costDisplay,
           suitableFor: 'تحلیل‌های روزمره، تبدیل استراتژی‌ها، کارهای سریع'
         }
       } else {
         return {
           description: 'مدل قدرتمند و همه‌کاره OpenAI با دقت بالا',
-          cost: '~0.0012 تومان/کلمه',
+          cost: costDisplay,
           suitableFor: 'تحلیل‌های دقیق، تبدیل استراتژی‌های پیچیده، تولید محتوای باکیفیت'
         }
       }
@@ -47,53 +49,53 @@ const getModelInfo = (model: GapGPTModel) => {
       if (nameLower.includes('mini')) {
         return {
           description: 'نسخه کوچک و سریع GPT-4.1 برای کارهای سریع',
-          cost: '~0.0006 تومان/کلمه',
+          cost: costDisplay,
           suitableFor: 'کارهای سریع، تحلیل‌های ساده، تبدیل استراتژی‌های کوتاه'
         }
       } else {
         return {
           description: 'مدل پیشرفته GPT-4.1 با قابلیت‌های بهبود یافته',
-          cost: '~0.001 تومان/کلمه',
+          cost: costDisplay,
           suitableFor: 'تحلیل‌های متوسط تا پیچیده، تبدیل استراتژی‌ها'
         }
       }
     } else if (nameLower.includes('chatgpt')) {
       return {
         description: 'مدل ChatGPT برای مکالمات و تحلیل‌های تعاملی',
-        cost: '~0.0008 تومان/کلمه',
+        cost: costDisplay,
         suitableFor: 'مکالمات تعاملی، تحلیل‌های سریع، تبدیل استراتژی‌ها'
       }
     }
     // پیش‌فرض برای مدل‌های OpenAI دیگر
     return {
       description: 'مدل OpenAI با عملکرد متعادل',
-      cost: '~0.001 تومان/کلمه',
+      cost: costDisplay,
       suitableFor: 'تحلیل و تبدیل استراتژی‌های معاملاتی'
     }
   } else if (ownedByLower.includes('anthropic') || ownedByLower.includes('vertex') || nameLower.includes('claude')) {
     if (nameLower.includes('haiku')) {
       return {
         description: 'مدل سریع و مقرون‌به‌صرفه Anthropic برای کارهای سریع',
-        cost: '~0.0005 تومان/کلمه',
+        cost: costDisplay,
         suitableFor: 'تحلیل‌های سریع، تبدیل استراتژی‌های ساده، کارهای روزمره'
       }
     } else if (nameLower.includes('sonnet')) {
       return {
         description: 'مدل متعادل Anthropic با تعادل خوب بین سرعت و کیفیت',
-        cost: '~0.001 تومان/کلمه',
+        cost: costDisplay,
         suitableFor: 'تحلیل‌های متوسط، تبدیل استراتژی‌های پیچیده، تولید محتوا'
       }
     } else if (nameLower.includes('opus')) {
       return {
         description: 'قدرتمندترین مدل Anthropic با بالاترین دقت',
-        cost: '~0.002 تومان/کلمه',
+        cost: costDisplay,
         suitableFor: 'تحلیل‌های پیچیده و حرفه‌ای، تبدیل استراتژی‌های پیشرفته'
       }
     }
     // پیش‌فرض برای مدل‌های Anthropic
     return {
       description: 'مدل Anthropic با تمرکز بر ایمنی و دقت',
-      cost: '~0.001 تومان/کلمه',
+      cost: costDisplay,
       suitableFor: 'تحلیل و تبدیل استراتژی‌های معاملاتی با دقت بالا'
     }
   }
@@ -101,7 +103,7 @@ const getModelInfo = (model: GapGPTModel) => {
   // پیش‌فرض برای سایر مدل‌ها
   return {
     description: model.description || 'مدل هوش مصنوعی برای تبدیل استراتژی',
-    cost: '~0.001 تومان/کلمه',
+    cost: costDisplay,
     suitableFor: 'تحلیل و تبدیل استراتژی‌های معاملاتی'
   }
 }
@@ -121,11 +123,25 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
   const [result, setResult] = useState<any>(null)
   const [compareResults, setCompareResults] = useState<any>(null)
   const [saving, setSaving] = useState(false)
+  const [modelCosts, setModelCosts] = useState<{ [key: string]: number }>({})
+  const defaultCost = 0.001
   const { showToast } = useToast()
 
   useEffect(() => {
     loadModels()
+    loadModelCosts()
   }, [])
+
+  const loadModelCosts = async () => {
+    try {
+      const response = await getSystemSettings()
+      if (response.data.model_costs) {
+        setModelCosts(response.data.model_costs)
+      }
+    } catch (error) {
+      console.error('Error loading model costs:', error)
+    }
+  }
 
   useEffect(() => {
     if (strategyText) {
@@ -329,7 +345,8 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
                 className="w-full bg-gray-700 text-white rounded p-3 border border-gray-600 focus:border-blue-500 focus:outline-none"
               >
                 {models.map((model) => {
-                  const modelInfo = getModelInfo(model)
+                  const costPerWord = modelCosts[model.id] || defaultCost
+                  const modelInfo = getModelInfo(model, costPerWord)
                   return (
                     <option key={model.id} value={model.id}>
                       {model.name} - {modelInfo.description} (هزینه: {modelInfo.cost})
@@ -340,7 +357,8 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
               {selectedModel && (() => {
                 const selectedModelData = models.find(m => m.id === selectedModel)
                 if (!selectedModelData) return null
-                const modelInfo = getModelInfo(selectedModelData)
+                const costPerWord = modelCosts[selectedModelData.id] || defaultCost
+                const modelInfo = getModelInfo(selectedModelData, costPerWord)
                 return (
                   <div className="mt-3 p-3 bg-gray-900 rounded-lg border border-gray-700">
                     <p className="text-sm text-gray-300 mb-2">
@@ -366,7 +384,8 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
               <label className="block text-white mb-2 font-semibold">انتخاب مدل‌ها برای مقایسه</label>
               <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto bg-gray-700 p-3 rounded border border-gray-600">
                 {models.map((model) => {
-                  const modelInfo = getModelInfo(model)
+                  const costPerWord = modelCosts[model.id] || defaultCost
+                  const modelInfo = getModelInfo(model, costPerWord)
                   return (
                     <label key={model.id} className="flex items-start space-x-2 space-x-reverse text-white cursor-pointer hover:bg-gray-600 p-2 rounded">
                       <input

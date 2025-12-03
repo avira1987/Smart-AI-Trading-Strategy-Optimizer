@@ -1031,9 +1031,43 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
 
     def create(self, request):
         """Upload new strategy"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Log request details
+        logger.info(f"Strategy upload request from user: {request.user.username if request.user.is_authenticated else 'Anonymous'}")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Content-Type: {request.content_type}")
+        logger.info(f"Request data keys: {list(request.data.keys()) if hasattr(request.data, 'keys') else 'N/A'}")
+        
+        # Log file details if present
+        if 'strategy_file' in request.FILES:
+            file = request.FILES['strategy_file']
+            logger.info(f"File name: {file.name}")
+            logger.info(f"File size: {file.size} bytes")
+            logger.info(f"Content-Type: {file.content_type}")
+        else:
+            logger.warning("No strategy_file in request.FILES")
+            logger.warning(f"request.FILES keys: {list(request.FILES.keys())}")
+        
+        # Log form data
+        if 'name' in request.data:
+            logger.info(f"Strategy name: {request.data.get('name')}")
+        if 'description' in request.data:
+            logger.info(f"Strategy description length: {len(request.data.get('description', ''))}")
+        
         serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        
+        # Check validation before raising exception
+        if not serializer.is_valid():
+            logger.error(f"Serializer validation failed: {serializer.errors}")
+            logger.error(f"Request data: {dict(request.data)}")
+            if 'strategy_file' in request.FILES:
+                logger.error(f"File details: name={request.FILES['strategy_file'].name}, size={request.FILES['strategy_file'].size}")
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
         self.perform_create(serializer)
+        logger.info(f"Strategy created successfully: {serializer.data.get('id')}")
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     def perform_create(self, serializer):
@@ -1239,6 +1273,21 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                     wallet, _ = Wallet.objects.select_for_update().get_or_create(user=user)
                     settings = SystemSettings.load()
                     processing_cost = settings.strategy_processing_cost
+                    
+                    # Validate processing_cost
+                    from decimal import Decimal
+                    if processing_cost is None or processing_cost < 0:
+                        error_msg = f"هزینه پردازش نامعتبر است: {processing_cost}"
+                        logger.error(f"Invalid processing_cost: {processing_cost}")
+                        return Response({
+                            'status': 'error',
+                            'message': error_msg,
+                            'error': 'invalid_cost'
+                        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                    
+                    # Convert to Decimal if needed
+                    if not isinstance(processing_cost, Decimal):
+                        processing_cost = Decimal(str(processing_cost))
                     
                     # Check balance
                     if wallet.balance < processing_cost:
@@ -4287,6 +4336,39 @@ class GapGPTViewSet(viewsets.ViewSet):
             
             user = request.user if request.user.is_authenticated else None
             
+            # بررسی موجودی قبل از تبدیل استراتژی (بر اساس تخمین هزینه)
+            if user and user.is_authenticated:
+                from core.models import Wallet, SystemSettings
+                from decimal import Decimal
+                from django.db import transaction as db_transaction
+                
+                try:
+                    with db_transaction.atomic():
+                        wallet, _ = Wallet.objects.select_for_update().get_or_create(user=user)
+                        settings = SystemSettings.load()
+                        
+                        # تخمین هزینه بر اساس max_tokens (حداکثر توکن‌های ممکن)
+                        estimated_tokens = max_tokens  # استفاده از max_tokens به عنوان تخمین
+                        estimated_cost = (Decimal(str(estimated_tokens)) / Decimal('1000')) * settings.token_cost_per_1000
+                        
+                        # بررسی موجودی
+                        if wallet.balance < estimated_cost:
+                            error_msg = f"موجودی کافی نیست. هزینه تخمینی تبدیل: {estimated_cost:,.0f} تومان، موجودی: {wallet.balance:,.0f} تومان"
+                            logger.warning(f"Insufficient balance for user {user.username}: {error_msg}")
+                            return Response({
+                                'status': 'error',
+                                'message': error_msg,
+                                'error': 'insufficient_balance'
+                            }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                except Exception as e:
+                    error_msg = f"خطا در بررسی موجودی: {str(e)}"
+                    logger.error(f"Error checking balance for strategy conversion: {e}")
+                    return Response({
+                        'status': 'error',
+                        'message': error_msg,
+                        'error': 'balance_check_failed'
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
             # افزایش timeout برای تبدیل استراتژی (ممکن است طول بکشد)
             result = convert_strategy_with_gapgpt(
                 strategy_text=strategy_text,
@@ -4298,6 +4380,57 @@ class GapGPTViewSet(viewsets.ViewSet):
             )
             
             if result['success']:
+                # کسر اعتبار از کیف پول کاربر در صورت احراز هویت
+                if user and user.is_authenticated:
+                    from core.models import Wallet, SystemSettings, Transaction
+                    from decimal import Decimal
+                    from django.db import transaction as db_transaction
+                    
+                    try:
+                        tokens_used = result.get('tokens_used', 0)
+                        if tokens_used > 0:
+                            with db_transaction.atomic():
+                                wallet, _ = Wallet.objects.select_for_update().get_or_create(user=user)
+                                settings = SystemSettings.load()
+                                
+                                # محاسبه هزینه بر اساس تعداد توکن‌ها
+                                token_cost = (Decimal(str(tokens_used)) / Decimal('1000')) * settings.token_cost_per_1000
+                                
+                                # بررسی موجودی
+                                if wallet.balance >= token_cost:
+                                    wallet.balance -= token_cost
+                                    wallet.save(update_fields=['balance', 'updated_at'])
+                                    
+                                    # ایجاد تراکنش
+                                    Transaction.objects.create(
+                                        wallet=wallet,
+                                        transaction_type='payment',
+                                        amount=token_cost,
+                                        status='completed',
+                                        description=f'تبدیل استراتژی با مدل {result.get("model_used", "نامشخص")} ({tokens_used:,} توکن)',
+                                        completed_at=timezone.now()
+                                    )
+                                    logger.info(f"Deducted {token_cost} Toman from user {user.username} for strategy conversion ({tokens_used} tokens)")
+                                else:
+                                    logger.warning(f"Insufficient balance for user {user.username}. Required: {token_cost}, Available: {wallet.balance}")
+                                    # اگر موجودی کافی نبود، خطا برمی‌گردانیم
+                                    return Response({
+                                        'status': 'error',
+                                        'message': f'موجودی کافی نیست. هزینه تبدیل: {token_cost:,.0f} تومان، موجودی: {wallet.balance:,.0f} تومان',
+                                        'error': 'insufficient_balance',
+                                        'data': result
+                                    }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                    except Exception as e:
+                        error_msg = f"خطا در کسر هزینه تبدیل استراتژی: {str(e)}"
+                        logger.error(f"Error deducting strategy conversion cost from wallet: {e}")
+                        # در صورت خطا در کسر اعتبار، خطا برمی‌گردانیم
+                        return Response({
+                            'status': 'error',
+                            'message': error_msg,
+                            'error': 'deduction_failed',
+                            'data': result
+                        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
                 return Response({
                     'status': 'success',
                     'data': result
@@ -4349,6 +4482,47 @@ class GapGPTViewSet(viewsets.ViewSet):
             
             user = request.user if request.user.is_authenticated else None
             
+            # بررسی موجودی قبل از مقایسه مدل‌ها (بر اساس تخمین هزینه)
+            if user and user.is_authenticated:
+                from core.models import Wallet, SystemSettings
+                from decimal import Decimal
+                from django.db import transaction as db_transaction
+                
+                try:
+                    # تعیین تعداد مدل‌ها
+                    if models is None:
+                        # اگر models مشخص نشده، از 5 مدل پیش‌فرض استفاده می‌شود
+                        num_models = 5
+                    else:
+                        num_models = len(models) if isinstance(models, list) else 1
+                    
+                    with db_transaction.atomic():
+                        wallet, _ = Wallet.objects.select_for_update().get_or_create(user=user)
+                        settings = SystemSettings.load()
+                        
+                        # تخمین هزینه بر اساس max_tokens * تعداد مدل‌ها
+                        estimated_tokens_per_model = max_tokens
+                        estimated_total_tokens = estimated_tokens_per_model * num_models
+                        estimated_cost = (Decimal(str(estimated_total_tokens)) / Decimal('1000')) * settings.token_cost_per_1000
+                        
+                        # بررسی موجودی
+                        if wallet.balance < estimated_cost:
+                            error_msg = f"موجودی کافی نیست. هزینه تخمینی مقایسه {num_models} مدل: {estimated_cost:,.0f} تومان، موجودی: {wallet.balance:,.0f} تومان"
+                            logger.warning(f"Insufficient balance for user {user.username}: {error_msg}")
+                            return Response({
+                                'status': 'error',
+                                'message': error_msg,
+                                'error': 'insufficient_balance'
+                            }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                except Exception as e:
+                    error_msg = f"خطا در بررسی موجودی: {str(e)}"
+                    logger.error(f"Error checking balance for model comparison: {e}")
+                    return Response({
+                        'status': 'error',
+                        'message': error_msg,
+                        'error': 'balance_check_failed'
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
             # افزایش timeout برای مقایسه مدل‌ها (ممکن است بیشتر طول بکشد)
             result = analyze_strategy_with_multiple_models(
                 strategy_text=strategy_text,
@@ -4358,6 +4532,70 @@ class GapGPTViewSet(viewsets.ViewSet):
                 max_tokens=max_tokens,
                 timeout=180  # 180 ثانیه (3 دقیقه) برای مقایسه چند مدل
             )
+            
+            # کسر اعتبار از کیف پول کاربر در صورت احراز هویت
+            if user and user.is_authenticated:
+                from core.models import Wallet, SystemSettings, Transaction
+                from decimal import Decimal
+                from django.db import transaction as db_transaction
+                
+                try:
+                    # جمع کردن توکن‌های استفاده شده از تمام مدل‌ها
+                    all_results = result.get('all_results', {})
+                    total_tokens_used = 0
+                    
+                    for model_id, model_result in all_results.items():
+                        if isinstance(model_result, dict) and model_result.get('success'):
+                            tokens_used = model_result.get('tokens_used', 0)
+                            total_tokens_used += tokens_used
+                    
+                    if total_tokens_used > 0:
+                        with db_transaction.atomic():
+                            wallet, _ = Wallet.objects.select_for_update().get_or_create(user=user)
+                            settings = SystemSettings.load()
+                            
+                            # محاسبه هزینه بر اساس تعداد کل توکن‌ها
+                            token_cost = (Decimal(str(total_tokens_used)) / Decimal('1000')) * settings.token_cost_per_1000
+                            
+                            # بررسی موجودی
+                            if wallet.balance >= token_cost:
+                                wallet.balance -= token_cost
+                                wallet.save(update_fields=['balance', 'updated_at'])
+                                
+                                # ایجاد تراکنش
+                                models_tested = result.get('models_tested', [])
+                                models_str = ', '.join(models_tested[:3])  # نمایش 3 مدل اول
+                                if len(models_tested) > 3:
+                                    models_str += f' و {len(models_tested) - 3} مدل دیگر'
+                                
+                                Transaction.objects.create(
+                                    wallet=wallet,
+                                    transaction_type='payment',
+                                    amount=token_cost,
+                                    status='completed',
+                                    description=f'مقایسه {len(models_tested)} مدل برای تبدیل استراتژی ({total_tokens_used:,} توکن)',
+                                    completed_at=timezone.now()
+                                )
+                                logger.info(f"Deducted {token_cost} Toman from user {user.username} for model comparison ({total_tokens_used} tokens across {len(models_tested)} models)")
+                            else:
+                                logger.warning(f"Insufficient balance for user {user.username}. Required: {token_cost}, Available: {wallet.balance}")
+                                # اگر موجودی کافی نبود، خطا برمی‌گردانیم
+                                return Response({
+                                    'status': 'error',
+                                    'message': f'موجودی کافی نیست. هزینه مقایسه: {token_cost:,.0f} تومان، موجودی: {wallet.balance:,.0f} تومان',
+                                    'error': 'insufficient_balance',
+                                    'data': result
+                                }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                except Exception as e:
+                    error_msg = f"خطا در کسر هزینه مقایسه مدل‌ها: {str(e)}"
+                    logger.error(f"Error deducting model comparison cost from wallet: {e}")
+                    # در صورت خطا در کسر اعتبار، خطا برمی‌گردانیم
+                    return Response({
+                        'status': 'error',
+                        'message': error_msg,
+                        'error': 'deduction_failed',
+                        'data': result
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             return Response({
                 'status': 'success',

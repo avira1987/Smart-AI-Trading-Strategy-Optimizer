@@ -20,9 +20,20 @@ if sys.platform == 'win32':
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-please-change-in-production')
-DEBUG = os.environ.get('DEBUG', 'True') == 'True'
+# ENV باید قبل از SECRET_KEY تعریف شود
 ENV = os.environ.get('ENV', 'LOCAL')
+
+# SECRET_KEY - باید در production تنظیم شود
+SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-please-change-in-production')
+if not SECRET_KEY or SECRET_KEY == 'django-insecure-please-change-in-production':
+    if ENV != 'LOCAL':
+        raise ValueError(
+            "SECRET_KEY must be set in environment variables for production! "
+            "Generate a new key using: python -c \"from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())\""
+        )
+
+# DEBUG - پیش‌فرض False برای امنیت بیشتر
+DEBUG = os.environ.get('DEBUG', 'False').lower() in ('true', '1', 'yes')
 
 # Admin phone number for identifying system-level API keys
 ADMIN_PHONE_NUMBER = os.environ.get('ADMIN_PHONE_NUMBER', '09035760718')
@@ -220,21 +231,32 @@ def get_local_network_hosts():
         pass
     return hosts
 
-# Get ALLOWED_HOSTS
+# Get ALLOWED_HOSTS - محدود کردن برای امنیت
 if DEBUG:
     # In debug mode, allow local network access and public IP if set
-    ALLOWED_HOSTS = get_local_network_hosts()
+    ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
     # Also add any explicitly configured hosts from environment
     env_hosts = os.environ.get('ALLOWED_HOSTS', '')
     if env_hosts:
         for host in env_hosts.split(','):
             host = host.strip()
-            if host and host not in ALLOWED_HOSTS:
+            # جلوگیری از استفاده از * برای امنیت
+            if host and host != '*' and host not in ALLOWED_HOSTS:
                 ALLOWED_HOSTS.append(host)
+    # اضافه کردن IP عمومی فقط اگر تنظیم شده باشد
+    if PUBLIC_IP and PUBLIC_IP not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(PUBLIC_IP)
 else:
-    # In production, use environment variable or default
-    env_hosts = os.environ.get('ALLOWED_HOSTS', default_allowed_hosts)
-    ALLOWED_HOSTS = [h.strip() for h in env_hosts.split(',') if h.strip()]
+    # In production, ALLOWED_HOSTS باید از environment variable تنظیم شود
+    env_hosts = os.environ.get('ALLOWED_HOSTS', '')
+    if not env_hosts:
+        raise ValueError(
+            "ALLOWED_HOSTS must be set in environment variables for production! "
+            "Example: ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com"
+        )
+    ALLOWED_HOSTS = [h.strip() for h in env_hosts.split(',') if h.strip() and h.strip() != '*']
+    if not ALLOWED_HOSTS:
+        raise ValueError("ALLOWED_HOSTS cannot be empty in production!")
     # Always add public IP if configured
     if PUBLIC_IP and PUBLIC_IP not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(PUBLIC_IP)
@@ -371,32 +393,114 @@ REST_FRAMEWORK = {
 
 # CORS
 # Allow CORS from local network and public IP
+def get_local_network_cors_origins():
+    """Get local network IP addresses for CORS_ALLOWED_ORIGINS"""
+    origins = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost",
+        "http://127.0.0.1",
+    ]
+    
+    # Add public IP if configured
+    if PUBLIC_IP:
+        origins.extend([
+            f"http://{PUBLIC_IP}",
+            f"https://{PUBLIC_IP}",
+            f"http://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
+            f"https://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
+        ])
+    
+    try:
+        import socket
+        # Get local IP address
+        hostname = socket.gethostname()
+        local_ip = socket.gethostbyname(hostname)
+        if local_ip and local_ip not in ['127.0.0.1', 'localhost']:
+            # Add local IP with common ports
+            for port in [80, 3000, 8000]:
+                origins.extend([
+                    f"http://{local_ip}",
+                    f"http://{local_ip}:{port}",
+                ])
+        
+        # Try to get all network interfaces
+        import subprocess
+        if sys.platform == 'win32':
+            # Windows: Get IP addresses using ipconfig
+            result = subprocess.run(['ipconfig'], capture_output=True, text=True, timeout=2)
+            for line in result.stdout.split('\n'):
+                if 'IPv4' in line or 'IP Address' in line:
+                    ip = line.split(':')[-1].strip()
+                    if ip and ip.startswith(('192.168.', '10.', '172.')):
+                        # Add IP with common ports
+                        for port in [80, 3000, 8000]:
+                            origin_http = f"http://{ip}"
+                            origin_port = f"http://{ip}:{port}"
+                            if origin_http not in origins:
+                                origins.append(origin_http)
+                            if origin_port not in origins:
+                                origins.append(origin_port)
+        else:
+            # Linux/Mac: Get IP addresses
+            result = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=2)
+            if result.returncode == 0:
+                for ip in result.stdout.strip().split():
+                    if ip and ip.startswith(('192.168.', '10.', '172.')):
+                        for port in [80, 3000, 8000]:
+                            origin_http = f"http://{ip}"
+                            origin_port = f"http://{ip}:{port}"
+                            if origin_http not in origins:
+                                origins.append(origin_http)
+                            if origin_port not in origins:
+                                origins.append(origin_port)
+    except Exception as e:
+        # If we can't detect IPs, just use defaults
+        logging.warning(f"Could not detect local network IPs for CORS: {e}")
+        pass
+    
+    return origins
+
+# CORS Configuration - محدود کردن برای امنیت
+CORS_ALLOW_ALL_ORIGINS = False  # همیشه False برای امنیت
+
 if DEBUG:
-    # In debug mode, allow all origins for local network and internet access
-    CORS_ALLOW_ALL_ORIGINS = True
-else:
-    # In production, allow specific origins including public IP
+    # در حالت توسعه، فقط localhost مجاز است
     CORS_ALLOWED_ORIGINS = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost",
         "http://127.0.0.1",
     ]
-    # Add public IP if configured
+    # اضافه کردن IP عمومی فقط اگر تنظیم شده باشد
     if PUBLIC_IP:
         CORS_ALLOWED_ORIGINS.extend([
-            f"http://{PUBLIC_IP}",
-            f"https://{PUBLIC_IP}",
             f"http://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
-            f"https://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
+            f"http://{PUBLIC_IP}",
         ])
-    # Also add any custom CORS origins from environment
+else:
+    # در production، فقط origins مشخص شده در environment
+    CORS_ALLOWED_ORIGINS = []
+    
+    # خواندن از environment variable (اجباری در production)
     env_cors_origins = os.environ.get('CORS_ALLOWED_ORIGINS', '')
-    if env_cors_origins:
+    if not env_cors_origins:
+        logging.warning("CORS_ALLOWED_ORIGINS not set in environment. CORS will be restricted.")
+    else:
         for origin in env_cors_origins.split(','):
             origin = origin.strip()
-            if origin and origin not in CORS_ALLOWED_ORIGINS:
+            if origin:
                 CORS_ALLOWED_ORIGINS.append(origin)
+    
+    # اضافه کردن IP عمومی اگر تنظیم شده باشد
+    if PUBLIC_IP:
+        CORS_ALLOWED_ORIGINS.extend([
+            f"https://{PUBLIC_IP}",
+            f"http://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
+        ])
+    
+    # Log CORS origins for debugging
+    logging.info(f"CORS_ALLOWED_ORIGINS configured with {len(CORS_ALLOWED_ORIGINS)} origins")
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -518,40 +622,48 @@ def get_local_network_origins():
     
     return origins
 
+# CSRF_TRUSTED_ORIGINS - محدود کردن برای امنیت
 if DEBUG:
-    # In debug mode, allow all local network IPs and public IP
-    CSRF_TRUSTED_ORIGINS = get_local_network_origins()
-else:
-    # In production, allow specific origins including public IP
+    # In debug mode, only allow localhost
     CSRF_TRUSTED_ORIGINS = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://localhost",
         "http://127.0.0.1",
     ]
-    # Add public IP if configured
+    # Add public IP if configured (only in DEBUG)
     if PUBLIC_IP:
         CSRF_TRUSTED_ORIGINS.extend([
-            f"http://{PUBLIC_IP}",
-            f"https://{PUBLIC_IP}",
             f"http://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
-            f"http://{PUBLIC_IP}:{PUBLIC_PORT}",
+            f"http://{PUBLIC_IP}",
+        ])
+else:
+    # In production, only allow origins from environment variable
+    CSRF_TRUSTED_ORIGINS = []
+    
+    # خواندن از environment variable (اجباری در production)
+    env_csrf_origins = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
+    if not env_csrf_origins:
+        logging.warning("CSRF_TRUSTED_ORIGINS not set in environment. CSRF protection may be too restrictive.")
+    else:
+        for origin in env_csrf_origins.split(','):
+            origin = origin.strip()
+            if origin:
+                CSRF_TRUSTED_ORIGINS.append(origin)
+    
+    # Add public IP if configured (with HTTPS preferred)
+    if PUBLIC_IP:
+        CSRF_TRUSTED_ORIGINS.extend([
+            f"https://{PUBLIC_IP}",
             f"https://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
             f"https://{PUBLIC_IP}:{PUBLIC_PORT}",
         ])
-    # Also add any custom CSRF origins from environment
-    env_csrf_origins = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
-    if env_csrf_origins:
-        for origin in env_csrf_origins.split(','):
-            origin = origin.strip()
-            if origin and origin not in CSRF_TRUSTED_ORIGINS:
-                CSRF_TRUSTED_ORIGINS.append(origin)
 
 # Disable CSRF for API endpoints (handled by DRF)
 # تنظیم امنیتی برای HTTPS
 USE_HTTPS = os.environ.get('USE_HTTPS', 'False') == 'True'
 CSRF_COOKIE_SECURE = USE_HTTPS  # True if using HTTPS
-CSRF_COOKIE_HTTPONLY = True  # برای امنیت بیشتر
+CSRF_COOKIE_HTTPONLY = False  # Must be False - JavaScript needs to read CSRF token to send in header
 SESSION_COOKIE_SECURE = USE_HTTPS  # برای امنیت session
 SESSION_COOKIE_HTTPONLY = True  # برای امنیت session
 

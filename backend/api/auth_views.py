@@ -13,7 +13,7 @@ from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.middleware.csrf import get_token
 from core.models import UserProfile, OTPCode, Device, SystemSettings, UserActivityLog
 from .serializers import PhoneNumberSerializer, OTPVerificationSerializer, UserSerializer
-from .sms_service import send_otp_sms
+from .sms_service import send_otp_sms, get_kavenegar_api_key
 from .self_captcha import verify_captcha, get_client_ip
 import logging
 import os
@@ -76,11 +76,40 @@ class SendOTPView(APIView):
             # Create or get OTP
             otp = OTPCode.create_otp(phone_number)
             
-            # Send SMS
+            # Log OTP code in backend (for debugging and mobile login)
+            # امنیت: فقط 4 رقم اول شماره تلفن را لاگ می‌کنیم
+            phone_display = phone_number[:4] + '****' if len(phone_number) > 4 else '****'
+            logger.info("=" * 80)
+            logger.info(f"📱 OTP Code Generated for Phone: {phone_display}")
+            logger.info(f"🔐 OTP Code: {otp.code} (stored in database, expires at {otp.expires_at})")
+            logger.info("=" * 80)
+            
+            # Check if we're in DEBUG mode and API key is not configured
+            from django.conf import settings
+            api_key = get_kavenegar_api_key()
+            
+            # In development mode, if API key is not configured, skip SMS and log OTP
+            if settings.DEBUG and not api_key:
+                logger.warning("⚠️  DEVELOPMENT MODE: Kavenegar API key not configured")
+                logger.warning("You can use this OTP code to login. In production, configure KAVENEGAR_API_KEY.")
+                logger.warning("=" * 80)
+                
+                # Return success but with a development message
+                return Response({
+                    'success': True,
+                    'message': f'کد یکبار مصرف: {otp.code} (حالت توسعه - API key تنظیم نشده)',
+                    'expires_in': 300,  # 5 minutes in seconds
+                    'development_mode': True,
+                    'otp_code': otp.code  # Include OTP in response for development (only in DEBUG mode)
+                }, status=status.HTTP_200_OK)
+            
+            # Send SMS (only if API key is configured)
             sms_result = send_otp_sms(phone_number, otp.code)
             
             if not sms_result['success']:
+                # In production or if API key is configured but SMS failed
                 logger.error(f"Failed to send SMS to {phone_number}: {sms_result['message']}")
+                logger.info(f"⚠️  OTP Code {otp.code} is still valid and stored in database for phone {phone_display}")
                 return Response(
                     {
                         'success': False,
@@ -90,7 +119,7 @@ class SendOTPView(APIView):
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR
                 )
             
-            logger.info(f"OTP sent successfully to {phone_number}")
+            logger.info(f"✅ OTP sent successfully to {phone_number} via SMS")
             
             return Response({
                 'success': True,
@@ -163,6 +192,10 @@ class VerifyOTPView(APIView):
         phone_number = serializer.validated_data['phone_number']
         otp_code = serializer.validated_data['otp_code']
         
+        # Log OTP verification attempt
+        phone_display = phone_number[:4] + '****' if len(phone_number) > 4 else '****'
+        logger.info(f"🔐 OTP Verification Attempt - Phone: {phone_display}, Code: {otp_code}")
+        
         try:
             # Find valid OTP
             otp = OTPCode.objects.filter(
@@ -172,6 +205,30 @@ class VerifyOTPView(APIView):
             ).order_by('-created_at').first()
             
             if not otp:
+                logger.warning(f"❌ Invalid OTP code {otp_code} for phone {phone_display}")
+                
+                # Find the latest unused OTP for this phone to increment attempts
+                latest_otp = OTPCode.objects.filter(
+                    phone_number=phone_number,
+                    is_used=False
+                ).order_by('-created_at').first()
+                
+                if latest_otp and latest_otp.is_valid():
+                    latest_otp.increment_attempts()
+                    logger.info(f"⚠️  Incremented attempts for latest OTP (phone: {phone_display}, attempts: {latest_otp.attempts})")
+                    
+                    # If too many attempts, mark as used
+                    if latest_otp.attempts >= 5:
+                        latest_otp.mark_as_used()
+                        logger.warning(f"🚫 Too many failed attempts for OTP (phone: {phone_display})")
+                        return Response(
+                            {
+                                'success': False,
+                                'message': 'تعداد تلاش‌های ناموفق بیش از حد مجاز است. لطفا کد جدید درخواست کنید'
+                            },
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                
                 return Response(
                     {
                         'success': False,
@@ -183,6 +240,20 @@ class VerifyOTPView(APIView):
             # Check if OTP is expired
             if not otp.is_valid():
                 otp.increment_attempts()
+                logger.warning(f"⏰ Expired OTP code {otp_code} for phone {phone_display}")
+                
+                # Check if too many attempts after incrementing
+                if otp.attempts >= 5:
+                    otp.mark_as_used()
+                    logger.warning(f"🚫 Too many failed attempts for expired OTP (phone: {phone_display})")
+                    return Response(
+                        {
+                            'success': False,
+                            'message': 'تعداد تلاش‌های ناموفق بیش از حد مجاز است. لطفا کد جدید درخواست کنید'
+                        },
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
                 return Response(
                     {
                         'success': False,
@@ -194,6 +265,7 @@ class VerifyOTPView(APIView):
             # Check attempts (max 5 attempts)
             if otp.attempts >= 5:
                 otp.mark_as_used()
+                logger.warning(f"🚫 Too many failed attempts for OTP code {otp_code} (phone: {phone_display})")
                 return Response(
                     {
                         'success': False,
@@ -204,6 +276,7 @@ class VerifyOTPView(APIView):
             
             # Mark OTP as used
             otp.mark_as_used()
+            logger.info(f"✅ OTP code {otp_code} verified successfully for phone {phone_display}")
             
             # Get or create user
             user, created = User.objects.get_or_create(
@@ -262,13 +335,13 @@ class VerifyOTPView(APIView):
             device.is_active = True
             device.save()
             
-            # Login user
+            # Login user automatically (if code is correct)
             login(request, user)
             
             # Serialize user data
             user_serializer = UserSerializer(user)
             
-            logger.info(f"User {user.username} logged in successfully from device {device_id[:20]}")
+            logger.info(f"✅ User {user.username} logged in successfully from device {device_id[:20]} (Auto-login after OTP verification)")
             
             # Check if user is new (just created)
             is_new_user = created
@@ -295,11 +368,20 @@ class VerifyOTPView(APIView):
 
 
 @api_view(['GET'])
-@permission_classes([IsAuthenticated])
+@permission_classes([AllowAny])
 def check_auth(request):
     """
     Check if user is authenticated and device is valid
+    This endpoint allows unauthenticated access to check auth status
     """
+    # Check if user is authenticated
+    if not request.user.is_authenticated:
+        return Response({
+            'success': False,
+            'authenticated': False,
+            'message': 'کاربر وارد نشده است'
+        }, status=status.HTTP_200_OK)
+    
     user = request.user
     
     try:
@@ -321,7 +403,7 @@ def check_auth(request):
                     'authenticated': False,
                     'message': 'دستگاه شما شناسایی نشد. لطفا مجددا وارد شوید'
                 },
-                status=status.HTTP_401_UNAUTHORIZED
+                status=status.HTTP_200_OK
             )
         
         # Update last login
@@ -346,7 +428,7 @@ def check_auth(request):
                 'message': 'خطا در بررسی وضعیت ورود',
                 'error': str(e)
             },
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_200_OK
         )
 
 
