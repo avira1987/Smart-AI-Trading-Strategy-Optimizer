@@ -13,10 +13,10 @@ export default function Landing() {
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h1 className="text-5xl md:text-6xl font-bold text-white mb-6 leading-tight">
-              سامانه مدیریت هوشمند معاملات فارکس
+              ترید با هوش مصنوعی | ترید به کمک هوش مصنوعی
             </h1>
             <p className="text-xl md:text-2xl text-gray-300 mb-8 max-w-3xl mx-auto">
-              با استفاده از هوش مصنوعی، استراتژی‌های معاملاتی خود را بهینه کنید و معاملات خودکار انجام دهید
+              سامانه پیشرفته ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی. با استفاده از هوش مصنوعی، استراتژی‌های معاملاتی خود را بهینه کنید و معاملات هوشمند خودکار انجام دهید
             </p>
             {!isAuthenticated && (
               <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
@@ -178,11 +178,45 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* AI Trading Section */}
+      <section className="py-16 px-4 sm:px-6 lg:px-8 bg-gray-800/30">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
+              چرا ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی؟
+            </h2>
+            <p className="text-lg text-gray-300 max-w-3xl mx-auto">
+              ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی، انقلابی در دنیای معاملات است. با استفاده از الگوریتم‌های پیشرفته AI، می‌توانید استراتژی‌های معاملاتی خود را بهینه کرده و تصمیمات دقیق‌تری بگیرید. سیستم ما با ترکیب هوش مصنوعی و تجزیه و تحلیل داده‌ها، امکان ترید هوشمند و خودکار را فراهم می‌کند.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-gradient-to-br from-blue-900/50 to-blue-800/30 rounded-xl p-6 border border-blue-500/30">
+              <h3 className="text-xl font-semibold text-blue-300 mb-3">ترید با هوش مصنوعی</h3>
+              <p className="text-gray-300">
+                استفاده از هوش مصنوعی برای تحلیل بازار و شناسایی فرصت‌های معاملاتی بهینه. سیستم ما با یادگیری از داده‌های تاریخی، الگوهای معاملاتی را شناسایی می‌کند.
+              </p>
+            </div>
+            <div className="bg-gradient-to-br from-purple-900/50 to-purple-800/30 rounded-xl p-6 border border-purple-500/30">
+              <h3 className="text-xl font-semibold text-purple-300 mb-3">ترید به کمک هوش مصنوعی</h3>
+              <p className="text-gray-300">
+                هوش مصنوعی به عنوان دستیار معاملاتی شما عمل می‌کند. استراتژی‌های شما را تجزیه و تحلیل کرده و پیشنهادات بهینه برای بهبود عملکرد ارائه می‌دهد.
+              </p>
+            </div>
+            <div className="bg-gradient-to-br from-green-900/50 to-green-800/30 rounded-xl p-6 border border-green-500/30">
+              <h3 className="text-xl font-semibold text-green-300 mb-3">معاملات هوشمند</h3>
+              <p className="text-gray-300">
+                ترکیب هوش مصنوعی با تجزیه و تحلیل تکنیکال برای انجام معاملات هوشمند. سیستم به صورت خودکار بهترین نقاط ورود و خروج را شناسایی می‌کند.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Features Section */}
       <section className="py-16 px-4 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto">
           <h2 className="text-3xl md:text-4xl font-bold text-white text-center mb-12">
-            ویژگی‌های کلیدی
+            ویژگی‌های کلیدی ترید با هوش مصنوعی
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {/* Feature 1 */}
@@ -195,9 +229,9 @@ export default function Landing() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
               </div>
-              <h3 className="text-xl font-semibold text-white mb-3">تحلیل هوشمند با AI</h3>
+              <h3 className="text-xl font-semibold text-white mb-3">تحلیل هوشمند با AI برای ترید</h3>
               <p className="text-gray-400 leading-relaxed">
-                استراتژی‌های معاملاتی خود را با استفاده از هوش مصنوعی Gemini تجزیه و تحلیل کنید و به کد تبدیل کنید
+                ترید با هوش مصنوعی: استراتژی‌های معاملاتی خود را با استفاده از هوش مصنوعی Gemini تجزیه و تحلیل کنید و به کد تبدیل کنید. سیستم به صورت خودکار بهترین استراتژی‌ها را شناسایی می‌کند.
               </p>
             </button>
 
@@ -266,9 +300,9 @@ export default function Landing() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
                 </svg>
               </div>
-              <h3 className="text-xl font-semibold text-white mb-3">بهینه‌سازی استراتژی</h3>
+              <h3 className="text-xl font-semibold text-white mb-3">بهینه‌سازی استراتژی با AI</h3>
               <p className="text-gray-400 leading-relaxed">
-                با استفاده از الگوریتم‌های بهینه‌سازی ML و DL، پارامترهای استراتژی خود را بهبود دهید
+                ترید به کمک هوش مصنوعی: با استفاده از الگوریتم‌های بهینه‌سازی ML و DL، پارامترهای استراتژی خود را بهبود دهید. هوش مصنوعی بهترین تنظیمات را برای شما پیدا می‌کند.
               </p>
             </button>
 
@@ -357,7 +391,7 @@ export default function Landing() {
               آماده شروع هستید؟
             </h2>
             <p className="text-xl text-gray-300 mb-8">
-              همین حالا ثبت‌نام کنید و از قدرت هوش مصنوعی در معاملات خود بهره‌مند شوید
+              همین حالا ثبت‌نام کنید و تجربه ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی را آغاز کنید. از قدرت هوش مصنوعی در معاملات خود بهره‌مند شوید
             </p>
             <Link
               to="/login"
@@ -372,7 +406,7 @@ export default function Landing() {
       {/* Footer */}
       <footer className="py-8 px-4 sm:px-6 lg:px-8 border-t border-gray-700">
         <div className="max-w-7xl mx-auto text-center text-gray-400">
-          <p>© 2024 سامانه مدیریت هوشمند معاملات فارکس. تمامی حقوق محفوظ است.</p>
+          <p>© 2024 سامانه ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی. تمامی حقوق محفوظ است.</p>
         </div>
       </footer>
     </div>

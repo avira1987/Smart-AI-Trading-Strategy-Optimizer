@@ -2,7 +2,7 @@ export default function Tutorial() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 direction-rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
       <div className="bg-gray-800 rounded-lg p-6 mb-6">
-        <h1 className="text-3xl font-bold text-white mb-6">آموزش استفاده از سیستم</h1>
+        <h1 className="text-3xl font-bold text-white mb-6">آموزش استفاده از سیستم ترید با هوش مصنوعی</h1>
         
         <div className="space-y-6 text-gray-300">
           <section className="bg-gray-900 rounded-lg p-6">
@@ -74,13 +74,13 @@ export default function Tutorial() {
           </section>
 
           <section className="bg-gray-900 rounded-lg p-6">
-            <h2 className="text-2xl font-semibold text-blue-400 mb-4">استراتژی اصلی و اجرای بک‌تست</h2>
+            <h2 className="text-2xl font-semibold text-blue-400 mb-4">استراتژی اصلی و اجرای بک‌تست با ترید به کمک هوش مصنوعی</h2>
             <div className="space-y-4">
               <div className="bg-gray-800 rounded-lg p-4">
-                <h3 className="text-xl font-semibold text-yellow-400 mb-2">چرا استراتژی اصلی مهم است؟</h3>
+                <h3 className="text-xl font-semibold text-yellow-400 mb-2">چرا استراتژی اصلی در ترید با هوش مصنوعی مهم است؟</h3>
                 <p className="leading-relaxed">
-                  سیستم تنها زمانی اجازه اجرای بک‌تست را می‌دهد که یک استراتژی به عنوان <strong>استراتژی اصلی</strong> تعیین شده باشد. 
-                  این استراتژی محور اصلی مدل‌سازی، ترکیب با استراتژی‌های کمکی و تولید گزارش نهایی است. در صورت نبود استراتژی اصلی، 
+                  سیستم <strong className="text-blue-400">ترید با هوش مصنوعی</strong> تنها زمانی اجازه اجرای بک‌تست را می‌دهد که یک استراتژی به عنوان <strong>استراتژی اصلی</strong> تعیین شده باشد. 
+                  این استراتژی محور اصلی مدل‌سازی با استفاده از <strong className="text-green-400">ترید به کمک هوش مصنوعی</strong>، ترکیب با استراتژی‌های کمکی و تولید گزارش نهایی است. در صورت نبود استراتژی اصلی، 
                   گزینه ایجاد بک‌تست غیر فعال شده و پیام خطا دریافت می‌کنید.
                 </p>
                 <ul className="list-disc list-inside space-y-2 mr-4 mt-3 text-sm sm:text-base">
@@ -160,11 +160,11 @@ export default function Tutorial() {
           </section>
 
           <section className="bg-gray-900 rounded-lg p-6">
-            <h2 className="text-2xl font-semibold text-blue-400 mb-4">راهنمای استفاده از استراتژی‌ها</h2>
+            <h2 className="text-2xl font-semibold text-blue-400 mb-4">راهنمای استفاده از استراتژی‌ها در ترید با هوش مصنوعی</h2>
             <div className="space-y-4">
               <div>
-                <h3 className="text-xl font-semibold text-yellow-400 mb-2">نحوه نوشتن استراتژی:</h3>
-                <p className="mb-2">برای نوشتن استراتژی معاملاتی، می‌توانید از فرمت زیر استفاده کنید:</p>
+                <h3 className="text-xl font-semibold text-yellow-400 mb-2">نحوه نوشتن استراتژی برای ترید به کمک هوش مصنوعی:</h3>
+                <p className="mb-2">برای نوشتن استراتژی معاملاتی که با <strong className="text-blue-400">ترید با هوش مصنوعی</strong> کار می‌کند، می‌توانید از فرمت زیر استفاده کنید:</p>
                 <div className="bg-gray-800 rounded p-4 font-mono text-sm overflow-x-auto">
                   <pre className="text-green-400">{`نماد معاملاتی: XAUUSD
 بازه زمانی: M15
