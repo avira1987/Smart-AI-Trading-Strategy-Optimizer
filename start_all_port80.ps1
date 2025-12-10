@@ -28,31 +28,19 @@ if ($port80Check.TcpTestSucceeded) {
     Write-Host "   Port 80 is available" -ForegroundColor Green
 }
 
-# 4. Check if Frontend is built
-Write-Host "`n4. Checking Frontend build..." -ForegroundColor Yellow
-$distPath = "frontend\dist"
-if (-not (Test-Path $distPath) -or (Get-ChildItem $distPath -File -ErrorAction SilentlyContinue).Count -eq 0) {
-    Write-Host "   Building Frontend..." -ForegroundColor Yellow
-    Set-Location frontend
-    npm run build 2>&1 | Out-Null
-    Set-Location ..
-    Write-Host "   Build complete" -ForegroundColor Green
-} else {
-    Write-Host "   Frontend is already built" -ForegroundColor Green
-}
-
-# 5. Set environment variables
+# 4. Set environment variables
 $env:VITE_FRONTEND_PORT = "80"
 $env:VITE_BACKEND_URL = "http://127.0.0.1:8000"
 
-Write-Host "`n5. Starting Frontend on port 80..." -ForegroundColor Yellow
+Write-Host "`n4. Starting Frontend Dev Server on port 80..." -ForegroundColor Yellow
 Write-Host "   Backend URL: $env:VITE_BACKEND_URL" -ForegroundColor Cyan
 Write-Host "   Frontend Port: $env:VITE_FRONTEND_PORT" -ForegroundColor Cyan
+Write-Host "   Mode: Development (No build required)" -ForegroundColor Yellow
 Write-Host ""
 
-# 6. Start Frontend
+# 5. Start Frontend
 Set-Location frontend
-Write-Host "=== Frontend Starting ===" -ForegroundColor Green
+Write-Host "=== Frontend Dev Server Starting ===" -ForegroundColor Green
 Write-Host "Access URLs:" -ForegroundColor Yellow
 Write-Host "  - http://localhost" -ForegroundColor White
 Write-Host "  - http://191.101.113.163" -ForegroundColor White
@@ -61,5 +49,5 @@ Write-Host ""
 Write-Host "Press Ctrl+C to stop" -ForegroundColor Gray
 Write-Host ""
 
-npm run preview -- --port 80 --host 0.0.0.0
+npm run dev -- --port 80 --host 0.0.0.0
 

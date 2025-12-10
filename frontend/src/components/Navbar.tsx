@@ -276,6 +276,17 @@ export default function Navbar() {
                       </Link>
                     )}
                     <Link
+                      to="/blog"
+                      onClick={() => setIsAboutDropdownOpen(false)}
+                      className={`block px-4 py-2 text-sm transition ${
+                        location.pathname.startsWith('/blog')
+                          ? 'bg-gray-700 text-white'
+                          : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                      }`}
+                    >
+                      بلاگ
+                    </Link>
+                    <Link
                       to="/tutorial"
                       onClick={() => setIsAboutDropdownOpen(false)}
                       className={`block px-4 py-2 text-sm transition ${
@@ -544,6 +555,20 @@ export default function Navbar() {
                         تیکت‌ها
                       </Link>
                     )}
+                    <Link
+                      to="/blog"
+                      onClick={() => {
+                        setIsAboutDropdownOpen(false)
+                        setIsMobileMenuOpen(false)
+                      }}
+                      className={`block px-4 py-2 rounded-lg text-sm transition ${
+                        location.pathname.startsWith('/blog')
+                          ? 'bg-gray-700 text-white'
+                          : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                      }`}
+                    >
+                      بلاگ
+                    </Link>
                     <Link
                       to="/tutorial"
                       onClick={() => {

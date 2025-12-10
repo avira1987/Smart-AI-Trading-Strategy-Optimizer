@@ -45,12 +45,36 @@ class AIProviderManager:
 
     def _get_priority_list(self) -> List[str]:
         """
-        Force ChatGPT/OpenAI to be the sole provider for strategy processing.
-        Any configured fallback providers are ignored intentionally.
+        Prioritize GapGPT for strategy processing, but fallback to other providers if GapGPT is not available.
         """
-        if "openai" in self.providers:
-            return ["openai"]
-        return []
+        # Check if GapGPT is available first
+        if "gapgpt" in self.providers:
+            gapgpt_provider = self.providers.get("gapgpt")
+            if gapgpt_provider and gapgpt_provider.is_available():
+                return ["gapgpt"]
+        
+        # Fallback to other available providers if GapGPT is not available
+        fallback_providers = []
+        # Priority order for fallback: OpenAI, Gemini, then others
+        preferred_fallback = ["openai", "gemini", "cohere", "openrouter", "together_ai", "deepinfra", "groq"]
+        
+        # Add all available preferred providers (they will be tried in order)
+        for provider_name in preferred_fallback:
+            if provider_name in self.providers:
+                provider = self.providers.get(provider_name)
+                if provider and provider.is_available():
+                    fallback_providers.append(provider_name)
+        
+        # If no preferred providers are available, try any other available provider
+        if not fallback_providers:
+            for provider_name, provider in self.providers.items():
+                if provider_name not in preferred_fallback and provider_name != "gapgpt":
+                    if provider and provider.is_available():
+                        fallback_providers.append(provider_name)
+                        # Only add the first available non-preferred provider to avoid too many fallbacks
+                        break
+        
+        return fallback_providers if fallback_providers else []
 
     def _log_attempt(self, attempt: ProviderAttempt) -> None:
         if getattr(settings, "AI_PROVIDER_ENABLE_LOGGING", True):
@@ -100,9 +124,15 @@ class AIProviderManager:
             if not provider.is_available():
                 api_key = provider.get_api_key()
                 if not api_key or not api_key.strip():
-                    error_msg = "کلید ChatGPT (OpenAI) تنظیم نشده است. لطفاً در تنظیمات > پیکربندی API، کلید OpenAI را اضافه کنید."
+                    if provider_name == "gapgpt":
+                        error_msg = "کلید GapGPT تنظیم نشده است. لطفاً در تنظیمات > پیکربندی API، کلید GapGPT را اضافه کنید."
+                    else:
+                        error_msg = "کلید ChatGPT (OpenAI) تنظیم نشده است. لطفاً در تنظیمات > پیکربندی API، کلید OpenAI را اضافه کنید."
                 elif len(api_key) < 20:
-                    error_msg = "کلید ChatGPT (OpenAI) نامعتبر است. لطفاً کلید معتبر OpenAI را در تنظیمات > پیکربندی API وارد کنید."
+                    if provider_name == "gapgpt":
+                        error_msg = "کلید GapGPT نامعتبر است. لطفاً کلید معتبر GapGPT را در تنظیمات > پیکربندی API وارد کنید."
+                    else:
+                        error_msg = "کلید ChatGPT (OpenAI) نامعتبر است. لطفاً کلید معتبر OpenAI را در تنظیمات > پیکربندی API وارد کنید."
                 else:
                     error_msg = f"ارائه‌دهنده {provider_name} در دسترس نیست. لطفاً کلید API را بررسی کنید."
                 LOGGER.warning(
@@ -202,7 +232,15 @@ class AIProviderManager:
 
         # Build a more helpful error message
         if not providers_tried:
-            error_message = "کلید ChatGPT (OpenAI) تنظیم نشده است. لطفاً در تنظیمات > پیکربندی API، کلید OpenAI را اضافه کنید."
+            # Check if GapGPT exists but is not available
+            if "gapgpt" in self.providers:
+                gapgpt_provider = self.providers.get("gapgpt")
+                if gapgpt_provider and not gapgpt_provider.is_available():
+                    error_message = "کلید GapGPT تنظیم نشده است. لطفاً در تنظیمات > پیکربندی API، کلید GapGPT را اضافه کنید. یا می‌توانید از ارائه‌دهنده‌های دیگر مانند OpenAI یا Gemini استفاده کنید."
+                else:
+                    error_message = "هیچ ارائه‌دهنده AI در دسترس نیست. لطفاً در تنظیمات > پیکربندی API، حداقل یک کلید API (GapGPT، OpenAI، یا Gemini) را اضافه کنید."
+            else:
+                error_message = "هیچ ارائه‌دهنده AI در دسترس نیست. لطفاً در تنظیمات > پیکربندی API، حداقل یک کلید API (GapGPT، OpenAI، یا Gemini) را اضافه کنید."
         elif attempts:
             # Get the first error message from attempts
             first_error = attempts[0].error if attempts else None
@@ -211,24 +249,112 @@ class AIProviderManager:
             # Handle Rate Limit (429) specifically
             if first_status_code == 429:
                 # Log Rate Limit error once with summary (details are logged at provider level)
-                LOGGER.warning(f"[PROVIDER_MANAGER] Rate Limit (429) from OpenAI API - Provider: {attempts[0].provider}")
+                provider_name_for_log = attempts[0].provider if attempts else "unknown"
+                LOGGER.warning(f"[PROVIDER_MANAGER] Rate Limit (429) from {provider_name_for_log} API - Provider: {provider_name_for_log}")
                 # Detailed error info is already logged at provider level, no need to repeat
-                error_message = "محدودیت نرخ استفاده از ChatGPT (Rate Limit) رسیده است. لطفاً چند دقیقه صبر کنید و دوباره تلاش کنید. برای افزایش محدودیت، به حساب OpenAI خود مراجعه کنید."
-            elif first_status_code and first_status_code != 429:
-                # Log non-429 errors for diagnosis
-                LOGGER.warning(f"[PROVIDER_MANAGER] Non-429 error detected: status_code={first_status_code}, error={first_error}")
+                if provider_name_for_log == "gapgpt":
+                    error_message = "محدودیت نرخ استفاده از GapGPT (Rate Limit) رسیده است. لطفاً چند دقیقه صبر کنید و دوباره تلاش کنید."
+                else:
+                    error_message = "محدودیت نرخ استفاده از ChatGPT (Rate Limit) رسیده است. لطفاً چند دقیقه صبر کنید و دوباره تلاش کنید. برای افزایش محدودیت، به حساب OpenAI خود مراجعه کنید."
             # Handle Invalid API key (401)
             elif first_status_code == 401:
-                error_message = "کلید ChatGPT (OpenAI) نامعتبر است. لطفاً کلید معتبر OpenAI را در تنظیمات > پیکربندی API وارد کنید."
-            # Handle other errors
-            elif first_error and ("کلید" in first_error or "API" in first_error or "ChatGPT" in first_error or "OpenAI" in first_error):
+                provider_name_for_log = attempts[0].provider if attempts else "unknown"
+                if provider_name_for_log == "gapgpt":
+                    error_message = "کلید GapGPT نامعتبر است. لطفاً کلید معتبر GapGPT را در تنظیمات > پیکربندی API وارد کنید."
+                elif provider_name_for_log == "openai":
+                    error_message = "کلید OpenAI نامعتبر است. لطفاً کلید معتبر OpenAI را در تنظیمات > پیکربندی API وارد کنید."
+                else:
+                    error_message = f"کلید API برای {provider_name_for_log} نامعتبر است. لطفاً کلید معتبر را در تنظیمات > پیکربندی API وارد کنید."
+            # Handle Forbidden (403) - API key might be invalid or account suspended
+            elif first_status_code == 403:
+                provider_name_for_log = attempts[0].provider if attempts else "unknown"
+                LOGGER.warning(
+                    f"[PROVIDER_MANAGER] Forbidden (403) error detected: "
+                    f"provider={provider_name_for_log}, status_code={first_status_code}, "
+                    f"error='{first_error[:200] if first_error else None}'"
+                )
+                
+                # بررسی و ترجمه خطاهای چینی مربوط به اعتبار
+                is_quota_error = False
+                remaining = 'نامشخص'
+                required = 'نامشخص'
+                
+                # بررسی خطاهای quota (چینی و انگلیسی) - فقط در صورت وجود شواهد مشخص
+                import re
+                if first_error:
+                    first_error_lower = first_error.lower()
+                    # بررسی برای پیام‌های چینی - باید هم 剩余额度 یا 需要 باشد
+                    has_chinese_quota_indicators = any(char in first_error for char in ['预扣费', '剩余额度', '需要额度'])
+                    # بررسی برای پیام‌های انگلیسی - باید هم quota و هم remain/need باشد
+                    has_english_quota_indicators = (
+                        ('quota' in first_error_lower) and 
+                        (('remain' in first_error_lower) or ('remaining' in first_error_lower) or ('need' in first_error_lower) or ('insufficient' in first_error_lower))
+                    )
+                    
+                    if has_chinese_quota_indicators:
+                        is_quota_error = True
+                        remaining_match = re.search(r'剩余额度[：:]\s*\$?([\d.]+)', first_error)
+                        required_match = re.search(r'需要[^：:]*[：:]\s*\$?([\d.]+)', first_error)
+                        
+                        remaining = remaining_match.group(1) if remaining_match else 'نامشخص'
+                        required = required_match.group(1) if required_match else 'نامشخص'
+                    elif has_english_quota_indicators:
+                        is_quota_error = True
+                        # استخراج مقادیر از پیام انگلیسی
+                        remaining_match = re.search(r'(?:remain|remaining)[\s_]?quota[：:\s]*\$?\??([\d.]+)', first_error, re.IGNORECASE)
+                        required_match = re.search(r'need[\s_]?quota[：:\s]*\$?\??([\d.]+)', first_error, re.IGNORECASE)
+                        
+                        if remaining_match:
+                            remaining = remaining_match.group(1)
+                        if required_match:
+                            required = required_match.group(1)
+                
+                # ارسال پیامک به ادمین در صورت اتمام اعتبار
+                if is_quota_error:
+                    try:
+                        from ai_module.gapgpt_client import _notify_admin_gapgpt_quota_exhausted
+                        _notify_admin_gapgpt_quota_exhausted(remaining, required)
+                    except Exception as e:
+                        LOGGER.warning(f"Failed to notify admin about GapGPT quota: {e}")
+                
+                # پیام دقیق‌تر برای کاربران
+                if is_quota_error:
+                    # Only show quota message if it's actually a quota error
+                    error_message = "سرویس پردازش هوش مصنوعی موقتاً در دسترس نیست. لطفاً چند دقیقه دیگر دوباره تلاش کنید."
+                elif first_error:
+                    # Show the actual error message from the provider
+                    error_lower = first_error.lower()
+                    if 'model' in error_lower and ('not found' in error_lower or 'unavailable' in error_lower):
+                        error_message = f"مدل انتخابی در دسترس نیست. لطفاً مدل دیگری انتخاب کنید."
+                    elif 'permission' in error_lower or 'forbidden' in error_lower:
+                        error_message = f"دسترسی رد شد. لطفاً کلید API و وضعیت حساب را بررسی کنید."
+                    elif 'group' in error_lower or '分组' in first_error:
+                        error_message = f"مدل در گروه فعلی در دسترس نیست. لطفاً مدل دیگری امتحان کنید."
+                    elif "کلید" in first_error or "API" in first_error or "GapGPT" in first_error or "gapgpt" in first_error.lower():
+                        error_message = first_error
+                    else:
+                        # Show the actual error message
+                        error_message = f"خطا در استفاده از سرویس: {first_error}"
+                else:
+                    # Fallback if no error message
+                    error_message = "دسترسی رد شد (403). لطفاً کلید API و وضعیت حساب را بررسی کنید."
+            # Handle other status codes
+            elif first_status_code and first_status_code != 429 and first_status_code != 401 and first_status_code != 403:
+                # Log non-standard errors for diagnosis
+                LOGGER.warning(f"[PROVIDER_MANAGER] Non-standard error detected: status_code={first_status_code}, error={first_error}")
+                if first_error and ("کلید" in first_error or "API" in first_error or "GapGPT" in first_error or "gapgpt" in first_error.lower()):
+                    error_message = first_error
+                else:
+                    error_message = f"خطا در استفاده از GapGPT (کد خطا: {first_status_code}): {first_error or 'خطای نامشخص'}"
+            # Handle error message patterns when status_code is None or not set
+            elif first_error and ("کلید" in first_error or "API" in first_error or "GapGPT" in first_error or "gapgpt" in first_error.lower()):
                 error_message = first_error
             elif first_error and ("Rate limit" in first_error or "rate limit" in first_error):
-                error_message = "محدودیت نرخ استفاده از ChatGPT (Rate Limit) رسیده است. لطفاً چند دقیقه صبر کنید و دوباره تلاش کنید."
+                error_message = "محدودیت نرخ استفاده از GapGPT (Rate Limit) رسیده است. لطفاً چند دقیقه صبر کنید و دوباره تلاش کنید."
             else:
-                error_message = f"خطا در استفاده از ChatGPT: {first_error or 'خطای نامشخص'}"
+                error_message = f"خطا در استفاده از GapGPT: {first_error or 'خطای نامشخص'}"
         else:
-            error_message = "کلید ChatGPT (OpenAI) تنظیم نشده است. لطفاً در تنظیمات > پیکربندی API، کلید OpenAI را اضافه کنید."
+            error_message = "کلید GapGPT تنظیم نشده است. لطفاً در تنظیمات > پیکربندی API، کلید GapGPT را اضافه کنید."
         
         # Log error summary in English only - avoid [FA] spam in console
         # Extract error type from Persian message for console logging

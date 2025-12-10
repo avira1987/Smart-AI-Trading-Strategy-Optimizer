@@ -750,22 +750,41 @@ class DataProviderManager:
     ) -> Any:
         """
         Fetch historical data exclusively from MetaTrader 5.
-        Uses M1 candles and aggregates to the exact timeframe requested (e.g., 77 minutes).
+        
+        Logic:
+        1. Extract timeframe from strategy
+        2. If timeframe is standard MT5 (M1, M5, M15, M30, H1, H4, D1), use it directly
+        3. If timeframe is custom (e.g., 77m), use M1 candles and aggregate to target timeframe
+        4. Use aggregated data for backtest
         """
+        from api.mt5_client import is_standard_mt5_timeframe, fetch_mt5_candles_aggregated
+        
         normalized_symbol = self._normalize_symbol(symbol)
         mt5_symbol = self._format_symbol_for_mt5(normalized_symbol)
         provider = self.providers.get('mt5')
         if provider is None:
             raise RuntimeError("MT5 provider is not initialized")
 
+        # Check if timeframe is standard MT5 or custom
+        is_standard = is_standard_mt5_timeframe(interval)
+        
         # Use original interval (not normalized) to preserve custom timeframes like "77m"
-        # The provider will handle aggregation from M1 candles
         original_timeframe = interval
         count = self._estimate_mt5_count(timeframe_days, interval)
+        
         try:
-            # Pass original timeframe to preserve custom timeframes (e.g., "77m")
-            data = provider.get_historical_data(mt5_symbol, timeframe=original_timeframe, count=count)
-            provider_used = 'mt5'
+            if is_standard:
+                # For standard timeframes, use MT5 provider directly
+                logger.info(f"Using standard MT5 timeframe '{original_timeframe}' directly")
+                data = provider.get_historical_data(mt5_symbol, timeframe=original_timeframe, count=count)
+                provider_used = 'mt5'
+            else:
+                # For custom timeframes, use M1 aggregation
+                logger.info(f"Custom timeframe '{original_timeframe}' detected. Fetching M1 candles and aggregating...")
+                data, error = fetch_mt5_candles_aggregated(mt5_symbol, original_timeframe, count)
+                if error:
+                    raise RuntimeError(f"Failed to fetch aggregated data: {error}")
+                provider_used = 'mt5'
         except Exception as mt5_error:
             logger.error("Failed to fetch data from MT5 for %s: %s", mt5_symbol, mt5_error)
             data = pd.DataFrame()

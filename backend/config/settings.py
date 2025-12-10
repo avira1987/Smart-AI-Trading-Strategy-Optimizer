@@ -231,6 +231,11 @@ def get_local_network_hosts():
         pass
     return hosts
 
+# Helper function to get production domain
+def get_production_domain():
+    """Get production domain from environment or default"""
+    return os.environ.get('PRODUCTION_DOMAIN', 'myaibaz.ir')
+
 # Get ALLOWED_HOSTS - محدود کردن برای امنیت
 if DEBUG:
     # In debug mode, allow local network access and public IP if set
@@ -246,17 +251,32 @@ if DEBUG:
     # اضافه کردن IP عمومی فقط اگر تنظیم شده باشد
     if PUBLIC_IP and PUBLIC_IP not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(PUBLIC_IP)
+    # Also add production domain in DEBUG mode (for testing production domain)
+    production_domain = get_production_domain()
+    if production_domain not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(production_domain)
+    if f"www.{production_domain}" not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(f"www.{production_domain}")
 else:
     # In production, ALLOWED_HOSTS باید از environment variable تنظیم شود
     env_hosts = os.environ.get('ALLOWED_HOSTS', '')
     if not env_hosts:
-        raise ValueError(
-            "ALLOWED_HOSTS must be set in environment variables for production! "
-            "Example: ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com"
-        )
-    ALLOWED_HOSTS = [h.strip() for h in env_hosts.split(',') if h.strip() and h.strip() != '*']
-    if not ALLOWED_HOSTS:
-        raise ValueError("ALLOWED_HOSTS cannot be empty in production!")
+        # اگر تنظیم نشده، از PRODUCTION_DOMAIN استفاده کن
+        production_domain = get_production_domain()
+        logging.warning(f"ALLOWED_HOSTS not set in environment. Using default: {production_domain}")
+        ALLOWED_HOSTS = [production_domain, f"www.{production_domain}"]
+    else:
+        ALLOWED_HOSTS = [h.strip() for h in env_hosts.split(',') if h.strip() and h.strip() != '*']
+        if not ALLOWED_HOSTS:
+            raise ValueError("ALLOWED_HOSTS cannot be empty in production!")
+    
+    # Always add production domain if not already present
+    production_domain = get_production_domain()
+    if production_domain not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(production_domain)
+    if f"www.{production_domain}" not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(f"www.{production_domain}")
+    
     # Always add public IP if configured
     if PUBLIC_IP and PUBLIC_IP not in ALLOWED_HOSTS:
         ALLOWED_HOSTS.append(PUBLIC_IP)
@@ -278,6 +298,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    'api.admin_restriction_middleware.AdminRestrictionMiddleware',  # Restrict Django admin to localhost only
     'api.security_middleware.SecurityMiddleware',  # Bot detection and security headers
     'api.rate_limiter.RateLimitMiddleware',  # Rate limiting
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -478,19 +499,30 @@ if DEBUG:
             f"http://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
             f"http://{PUBLIC_IP}",
         ])
+    # Also add production domain in DEBUG mode (for testing production domain)
+    production_domain = get_production_domain()
+    CORS_ALLOWED_ORIGINS.extend([
+        f"https://{production_domain}",
+        f"https://www.{production_domain}",
+        f"http://{production_domain}",
+        f"http://www.{production_domain}",
+    ])
 else:
     # در production، فقط origins مشخص شده در environment
     CORS_ALLOWED_ORIGINS = []
     
-    # خواندن از environment variable (اجباری در production)
+    # خواندن از environment variable
     env_cors_origins = os.environ.get('CORS_ALLOWED_ORIGINS', '')
     if not env_cors_origins:
-        logging.warning("CORS_ALLOWED_ORIGINS not set in environment. CORS will be restricted.")
-    else:
-        for origin in env_cors_origins.split(','):
-            origin = origin.strip()
-            if origin:
-                CORS_ALLOWED_ORIGINS.append(origin)
+        # اگر تنظیم نشده، از PRODUCTION_DOMAIN استفاده کن
+        production_domain = get_production_domain()
+        logging.warning(f"CORS_ALLOWED_ORIGINS not set in environment. Using default: {production_domain}")
+        env_cors_origins = f"https://{production_domain},https://www.{production_domain}"
+    
+    for origin in env_cors_origins.split(','):
+        origin = origin.strip()
+        if origin:
+            CORS_ALLOWED_ORIGINS.append(origin)
     
     # اضافه کردن IP عمومی اگر تنظیم شده باشد
     if PUBLIC_IP:
@@ -499,8 +531,18 @@ else:
             f"http://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
         ])
     
+    # Always add production domain to CORS_ALLOWED_ORIGINS (even if not in env)
+    production_domain = get_production_domain()
+    production_origins = [
+        f"https://{production_domain}",
+        f"https://www.{production_domain}",
+    ]
+    for origin in production_origins:
+        if origin not in CORS_ALLOWED_ORIGINS:
+            CORS_ALLOWED_ORIGINS.append(origin)
+    
     # Log CORS origins for debugging
-    logging.info(f"CORS_ALLOWED_ORIGINS configured with {len(CORS_ALLOWED_ORIGINS)} origins")
+    logging.info(f"CORS_ALLOWED_ORIGINS configured with {len(CORS_ALLOWED_ORIGINS)} origins: {CORS_ALLOWED_ORIGINS}")
 
 CORS_ALLOW_CREDENTIALS = True
 
@@ -637,19 +679,30 @@ if DEBUG:
             f"http://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
             f"http://{PUBLIC_IP}",
         ])
+    # Also add production domain in DEBUG mode (for testing production domain)
+    production_domain = get_production_domain()
+    CSRF_TRUSTED_ORIGINS.extend([
+        f"https://{production_domain}",
+        f"https://www.{production_domain}",
+        f"http://{production_domain}",
+        f"http://www.{production_domain}",
+    ])
 else:
     # In production, only allow origins from environment variable
     CSRF_TRUSTED_ORIGINS = []
     
-    # خواندن از environment variable (اجباری در production)
+    # خواندن از environment variable
     env_csrf_origins = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
     if not env_csrf_origins:
-        logging.warning("CSRF_TRUSTED_ORIGINS not set in environment. CSRF protection may be too restrictive.")
-    else:
-        for origin in env_csrf_origins.split(','):
-            origin = origin.strip()
-            if origin:
-                CSRF_TRUSTED_ORIGINS.append(origin)
+        # اگر تنظیم نشده، از PRODUCTION_DOMAIN استفاده کن
+        production_domain = get_production_domain()
+        logging.warning(f"CSRF_TRUSTED_ORIGINS not set in environment. Using default: {production_domain}")
+        env_csrf_origins = f"https://{production_domain},https://www.{production_domain}"
+    
+    for origin in env_csrf_origins.split(','):
+        origin = origin.strip()
+        if origin:
+            CSRF_TRUSTED_ORIGINS.append(origin)
     
     # Add public IP if configured (with HTTPS preferred)
     if PUBLIC_IP:
@@ -658,6 +711,19 @@ else:
             f"https://{PUBLIC_IP}:{FRONTEND_PUBLIC_PORT}",
             f"https://{PUBLIC_IP}:{PUBLIC_PORT}",
         ])
+    
+    # Always add production domain to CSRF_TRUSTED_ORIGINS (even if not in env)
+    production_domain = get_production_domain()
+    production_origins = [
+        f"https://{production_domain}",
+        f"https://www.{production_domain}",
+    ]
+    for origin in production_origins:
+        if origin not in CSRF_TRUSTED_ORIGINS:
+            CSRF_TRUSTED_ORIGINS.append(origin)
+    
+    # Log CSRF origins for debugging
+    logging.info(f"CSRF_TRUSTED_ORIGINS configured with {len(CSRF_TRUSTED_ORIGINS)} origins: {CSRF_TRUSTED_ORIGINS}")
 
 # Disable CSRF for API endpoints (handled by DRF)
 # تنظیم امنیتی برای HTTPS

@@ -55,9 +55,10 @@ def calculate_backtest_points(result: Result) -> int:
     elif result.win_rate >= 40:
         points += 5
     
-    # امتیاز بر اساس نسبت سود/ضرر
-    if result.winning_trades > 0 and result.losing_trades > 0:
-        profit_factor = result.winning_trades / result.losing_trades
+    # امتیاز بر اساس نسبت سود/ضرر (Profit Factor)
+    # استفاده از profit_factor واقعی به جای نسبت تعداد معاملات
+    profit_factor = getattr(result, 'profit_factor', 0.0)
+    if profit_factor > 0:
         if profit_factor >= 2.0:
             points += 15
         elif profit_factor >= 1.5:
@@ -80,8 +81,11 @@ def award_backtest_points(user: User, result: Result) -> Dict[str, Any]:
     if result.total_return > score.best_return:
         score.best_return = result.total_return
     
-    # افزودن امتیاز
+    # افزودن امتیاز (این متد فقط total_points و level را ذخیره می‌کند)
     level_up = score.add_points(points, f"بک‌تست با بازدهی {result.total_return:.2f}%")
+    
+    # ذخیره فیلدهای به‌روزرسانی شده (backtests_completed, best_return, total_trades)
+    score.save(update_fields=['backtests_completed', 'best_return', 'total_trades', 'updated_at'])
     
     # بررسی دستاوردها
     new_achievements = check_and_award_achievements(user, result)

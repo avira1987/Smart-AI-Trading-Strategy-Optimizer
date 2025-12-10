@@ -246,6 +246,29 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             strategy_file_path = strategy.strategy_file.path
             detailed_logger.info(f"در حال پارس فایل استراتژی: {strategy_file_path}")
             parsed_strategy = parse_strategy_file(strategy_file_path, user=user)
+            
+            # Check if parsing failed
+            if parsed_strategy.get('error') or parsed_strategy.get('error_type'):
+                error_msg = parsed_strategy.get('error', 'خطا در پارس استراتژی')
+                error_type = parsed_strategy.get('error_type', 'unknown')
+                status_code = parsed_strategy.get('status_code')
+                
+                # Provide user-friendly error message
+                if status_code == 429:
+                    error_msg = "محدودیت نرخ استفاده از GapGPT (Rate Limit) رسیده است. لطفاً چند دقیقه صبر کنید و دوباره تلاش کنید."
+                elif status_code == 403:
+                    error_msg = "دسترسی به GapGPT رد شد (403). لطفاً کلید API و وضعیت حساب خود را بررسی کنید."
+                elif status_code == 401:
+                    error_msg = "کلید GapGPT نامعتبر است. لطفاً کلید معتبر GapGPT را در تنظیمات > پیکربندی API وارد کنید."
+                
+                detailed_logger.error(f"❌ خطا در پارس استراتژی: {error_msg} (نوع: {error_type}, کد: {status_code})")
+                logger.error(f"[BACKTEST] Strategy parsing failed: {error_msg} (type: {error_type}, status: {status_code})")
+                job.status = 'failed'
+                job.error_message = error_msg
+                job.completed_at = timezone.now()
+                job.save()
+                return f"Backtest failed for job {job_id}: {error_msg}"
+            
             detailed_logger.info(f"پارس استراتژی انجام شد:")
             detailed_logger.info(f"  - confidence_score: {parsed_strategy.get('confidence_score', 0):.2f}")
             detailed_logger.info(f"  - entry_conditions: {len(parsed_strategy.get('entry_conditions', []))} شرط")
@@ -311,8 +334,12 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
         start_date = (timezone.now() - timezone.timedelta(days=days)).strftime('%Y-%m-%d')
         end_date = timezone.now().strftime('%Y-%m-%d')
         
-        # Extract exact timeframe from strategy (use as-is, will be aggregated from M1)
+        # Extract exact timeframe from strategy
         strategy_timeframe = parsed_strategy.get('timeframe')
+        
+        # Check if timeframe is standard MT5 or custom
+        from api.mt5_client import is_standard_mt5_timeframe
+        is_standard = is_standard_mt5_timeframe(strategy_timeframe) if strategy_timeframe else False
         
         detailed_logger.info(f"پارامترهای دریافت داده:")
         detailed_logger.info(f"  - symbol: {symbol}")
@@ -320,11 +347,19 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
         detailed_logger.info(f"  - end_date: {end_date}")
         detailed_logger.info(f"  - days: {days}")
         detailed_logger.info(f"  - strategy_timeframe: {strategy_timeframe or 'تعیین نشده'}")
-        detailed_logger.info(f"  - روش: دریافت کندل‌های M1 از MT5 و تجمیع به تایم‌فریم استراتژی")
+        if strategy_timeframe:
+            if is_standard:
+                detailed_logger.info(f"  - نوع تایم‌فریم: استاندارد MT5 ({strategy_timeframe}) - استفاده مستقیم")
+            else:
+                detailed_logger.info(f"  - نوع تایم‌فریم: غیرمتداول ({strategy_timeframe}) - تجمیع از کندل‌های M1")
         
         # دریافت داده از MT5 با تایم‌فریم دقیق استراتژی
-        # همیشه از کندل‌های M1 استفاده می‌شود و به تایم‌فریم موردنیاز تجمیع می‌شود
-        detailed_logger.info(f"در حال دریافت کندل‌های M1 از MT5 و تجمیع به تایم‌فریم استراتژی...")
+        # اگر تایم‌فریم استاندارد باشد (M1, M5, M15, M30, H1, H4, D1)، مستقیماً استفاده می‌شود
+        # اگر تایم‌فریم غیرمتداول باشد (مثل 77 دقیقه)، از کندل‌های M1 استفاده می‌شود و تجمیع می‌شود
+        if is_standard:
+            detailed_logger.info(f"در حال دریافت کندل‌های {strategy_timeframe} از MT5 (استفاده مستقیم)...")
+        else:
+            detailed_logger.info(f"در حال دریافت کندل‌های M1 از MT5 و تجمیع به تایم‌فریم {strategy_timeframe}...")
         try:
             # تبدیل strategy_timeframe به interval برای استفاده در get_historical_data
             # این interval به صورت دقیق استفاده می‌شود (مثلاً "77m") و از M1 تجمیع می‌شود
@@ -341,7 +376,9 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             if not data.empty:
                 detailed_logger.info(f"✅ دریافت داده انجام شد از {provider_used}: {len(data)} ردیف")
                 detailed_logger.info(f"  - تایم‌فریم استفاده شده: {strategy_timeframe or 'پیش‌فرض'}")
-                logger.info(f"Backtest job {job_id}: Received {len(data)} rows from {provider_used} for symbol={symbol} with timeframe={strategy_timeframe} (aggregated from M1)")
+                if not is_standard and strategy_timeframe:
+                    detailed_logger.info(f"  - ✅ تایم‌فریم غیرمتداول از کندل‌های M1 تجمیع شده است")
+                logger.info(f"Backtest job {job_id}: Received {len(data)} rows from {provider_used} for symbol={symbol} with timeframe={strategy_timeframe} ({'standard' if is_standard else 'aggregated from M1'})")
             else:
                 detailed_logger.warning("⚠️ هیچ داده‌ای از MT5 دریافت نشد")
                 logger.warning(f"Backtest job {job_id}: No data received from MT5")
@@ -421,7 +458,9 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                             count = days * bars_per_day
                             logger.info(f"MT5 flat-series fallback: requesting {count} candles for days={days} timeframe={strategy_timeframe or 'default'} ({target_minutes} minutes) symbol={mt5_symbol}")
                             # Use aggregated function to ensure accurate custom timeframes
-                            mt5_df, mt5_err = fetch_mt5_candles_aggregated(mt5_symbol, timeframe=strategy_timeframe or 'M15', count=count)
+                            # Use strategy timeframe if available, otherwise try to get from parsed strategy
+                            fallback_timeframe = parsed_strategy.get('timeframe') or 'M15'
+                            mt5_df, mt5_err = fetch_mt5_candles_aggregated(mt5_symbol, timeframe=strategy_timeframe or fallback_timeframe, count=count)
                             if mt5_err is None and not mt5_df.empty:
                                 data = mt5_df
                                 provider_used = 'mt5'
@@ -538,53 +577,36 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             
             ai_analysis = None
             try:
-                # انتخاب AI provider برای تحلیل
-                # اگر ai_provider مشخص شده باشد، از آن استفاده می‌کنیم
-                # در غیر این صورت از Gemini (پیش‌فرض) استفاده می‌کنیم
-                use_gapgpt = ai_provider and ai_provider.lower() in ['gapgpt', 'gap-gpt']
-                
-                if use_gapgpt:
-                    from ai_module.gapgpt_client import analyze_backtest_trades_with_gapgpt
-                    detailed_logger.info("در حال درخواست تحلیل از GapGPT...")
-                    ai_analysis_result = analyze_backtest_trades_with_gapgpt(
-                        backtest_results=result_data,
-                        strategy=parsed_strategy,
-                        symbol=symbol,
-                        data_provider=provider_display,
-                        data_points=len(data) if not data.empty else 0,
-                        date_range=f"{start_date} تا {end_date}",
-                        user=user
-                    )
-                else:
-                    from ai_module.gemini_client import analyze_backtest_trades_with_ai
-                    detailed_logger.info("در حال درخواست تحلیل از هوش مصنوعی (Gemini/OpenAI)...")
-                    ai_analysis_result = analyze_backtest_trades_with_ai(
-                        backtest_results=result_data,
-                        strategy=parsed_strategy,
-                        symbol=symbol,
-                        data_provider=provider_display,
-                        data_points=len(data) if not data.empty else 0,
-                        date_range=f"{start_date} تا {end_date}",
-                        user=user
-                    )
+                # استفاده از GapGPT برای تحلیل
+                from ai_module.gapgpt_client import analyze_backtest_trades_with_gapgpt
+                detailed_logger.info("در حال درخواست تحلیل از GapGPT...")
+                ai_analysis_result = analyze_backtest_trades_with_gapgpt(
+                    backtest_results=result_data,
+                    strategy=parsed_strategy,
+                    symbol=symbol,
+                    data_provider=provider_display,
+                    data_points=len(data) if not data.empty else 0,
+                    date_range=f"{start_date} تا {end_date}",
+                    user=user
+                )
                 
                 ai_analysis = None
                 if ai_analysis_result.get('ai_status') == 'ok':
                     ai_analysis = ai_analysis_result.get('analysis_text') or ai_analysis_result.get('raw_output', '')
-                    provider_name = 'GapGPT' if use_gapgpt else 'Gemini/OpenAI'
+                    provider_name = 'GapGPT'
                     detailed_logger.info(f"✅ تحلیل هوش مصنوعی با {provider_name} با موفقیت تولید شد")
                     if ai_analysis:
                         logger.info(f"[AI ANALYSIS] Generated AI analysis for backtest using {provider_name}: {len(ai_analysis)} characters")
                 else:
                     message = ai_analysis_result.get(
                         'message',
-                        "AI analysis unavailable. Please configure your AI provider (OpenAI ChatGPT, Gemini, or GapGPT) in Settings."
+                        "AI analysis unavailable. Please configure your GapGPT API key in Settings."
                     )
                     detailed_logger.warning(f"⚠️ تحلیل هوش مصنوعی در دسترس نبود: {message}")
                     logger.warning(f"AI analysis unavailable: {message}")
                     detailed_logger.warning("⚠️ تحلیل هوش مصنوعی در دسترس نبود، استفاده از تحلیل پایه")
                     # Fallback to basic analysis
-                    from ai_module.gemini_client import generate_basic_backtest_analysis
+                    from ai_module.gapgpt_client import generate_basic_backtest_analysis
                     ai_analysis = generate_basic_backtest_analysis(
                         backtest_results=result_data,
                         strategy=parsed_strategy,
@@ -600,7 +622,7 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                 logger.warning(f"AI analysis failed: {ai_error}", exc_info=True)
                 # Fallback to basic analysis
                 try:
-                    from ai_module.gemini_client import generate_basic_backtest_analysis
+                    from ai_module.gapgpt_client import generate_basic_backtest_analysis
                     ai_analysis = generate_basic_backtest_analysis(
                         backtest_results=result_data,
                         strategy=parsed_strategy,
@@ -634,6 +656,9 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                     first_date_str = None
                     last_date_str = None
             
+            # Check if timeframe is standard or custom (reuse the check from above)
+            is_standard_tf = is_standard_mt5_timeframe(strategy_timeframe) if strategy_timeframe else False
+            
             data_sources_info = {
                 'provider': provider_used or 'unknown',
                 'symbol': symbol,
@@ -643,6 +668,8 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                 'available_providers': available_providers,
                 'timeframe_days': days,
                 'strategy_timeframe': strategy_timeframe,  # Original timeframe from strategy text
+                'timeframe_type': 'standard' if is_standard_tf else 'custom' if strategy_timeframe else 'default',  # Type of timeframe
+                'timeframe_aggregation_method': 'direct' if is_standard_tf else 'm1_aggregation' if strategy_timeframe else 'default',  # How timeframe was handled
                 'data_range': {
                     'first_date': first_date_str,
                     'last_date': last_date_str,
@@ -652,7 +679,7 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                     'backtest_duration_seconds': round(backtest_duration, 2) if 'backtest_duration' in locals() else None,
                     'total_duration_seconds': None,  # Will be set later
                     'initial_capital': initial_capital or 10000,
-                    'data_retrieval_method': 'mt5_m1_aggregation' if provider_used == 'mt5' else 'direct',
+                    'data_retrieval_method': 'mt5_m1_aggregation' if (provider_used == 'mt5' and not is_standard_tf) else 'mt5_direct' if (provider_used == 'mt5' and is_standard_tf) else 'direct',
                 },
                 # جزئیات استراتژی
                 'strategy_details': {
@@ -681,19 +708,20 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             if timeframe_minutes:
                 timeframe_display += f" ({timeframe_minutes} دقیقه)"
             
+            # Check if timeframe is standard or custom (reuse the check from above)
+            is_standard_tf = is_standard_mt5_timeframe(strategy_timeframe) if strategy_timeframe else False
+            
             # Build data sources description text (provider_display already defined above)
             data_sources_text = f"\n\n{'=' * 80}\n\n📊 منابع داده استفاده شده:\n\n"
             data_sources_text += f"• ارائه‌دهنده داده: {provider_display}\n"
-            # Add info about M1 aggregation
-            if provider_used == 'mt5':
-                data_sources_text += f"  ℹ️ روش دریافت داده: کندل‌های 1 دقیقه‌ای (M1) از MetaTrader 5 دریافت شده و به تایم‌فریم استراتژی تجمیع شده است.\n"
-                if strategy_timeframe and timeframe_minutes and timeframe_minutes != 1:
-                    data_sources_text += f"  ✅ این روش دقت بک‌تست را برای تایم‌فریم‌های غیراستاندارد (مثل {strategy_timeframe}) تضمین می‌کند.\n"
             data_sources_text += f"• نماد معاملاتی: {symbol}\n"
             if strategy_timeframe:
                 data_sources_text += f"• تایم‌فریم استراتژی: {timeframe_display}\n"
-                if timeframe_minutes and timeframe_minutes != 1:
-                    data_sources_text += f"  (تجمیع شده از کندل‌های M1)\n"
+                if is_standard_tf:
+                    data_sources_text += f"  ✅ تایم‌فریم استاندارد MT5 - استفاده مستقیم از {strategy_timeframe}\n"
+                else:
+                    data_sources_text += f"  🔄 تایم‌فریم غیرمتداول - از کندل‌های M1 تجمیع شده است\n"
+                    data_sources_text += f"  ℹ️ توضیح: برای تایم‌فریم‌های غیرمتداول (مثل {strategy_timeframe})، سیستم از کندل‌های 1 دقیقه‌ای (M1) استفاده می‌کند و آن‌ها را به تایم‌فریم موردنظر تجمیع می‌کند. این روش دقت بک‌تست را برای تایم‌فریم‌های غیراستاندارد تضمین می‌کند.\n"
             else:
                 data_sources_text += f"• تایم‌فریم استفاده شده: پیش‌فرض\n"
             data_sources_text += f"• بازه زمانی: {start_date} تا {end_date} ({days} روز)\n"
@@ -828,6 +856,13 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                 data_sources_info = {}
             
             # Create result with error handling
+            # Handle profit_factor (can be inf or a number)
+            profit_factor_value = result_data.get('profit_factor', 0.0)
+            if profit_factor_value == float('inf') or profit_factor_value == 'inf':
+                profit_factor_value = 999999.0  # Store a large number instead of inf
+            else:
+                profit_factor_value = float(profit_factor_value) if profit_factor_value else 0.0
+            
             result = Result.objects.create(
                 job=job,
                 total_return=float(result_data.get('total_return', 0.0)),
@@ -836,6 +871,7 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                 losing_trades=int(result_data.get('losing_trades', 0)),
                 win_rate=float(result_data.get('win_rate', 0.0)),
                 max_drawdown=float(result_data.get('max_drawdown', 0.0)),
+                profit_factor=profit_factor_value,
                 equity_curve_data=result_data.get('equity_curve_data', []),
                 description=final_description,
                 trades_details=result_data.get('trades', []),

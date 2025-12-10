@@ -6,6 +6,7 @@ import {
   createJob,
   getStrategies,
 } from '../api/client'
+import Breadcrumbs from '../components/Breadcrumbs'
 import {
   createMarketplaceListing,
   deleteMarketplaceListing,
@@ -778,6 +779,7 @@ const StrategyMarketplace = () => {
 
   return (
     <div className="p-6 space-y-6" style={{ direction: 'rtl', textAlign: 'right' }}>
+      <Breadcrumbs />
       <div className="flex flex-col gap-2">
         <h1 className="text-2xl font-bold text-white">مارکت‌پلیس استراتژی‌ها</h1>
         <p className="text-gray-300 text-sm">

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { getStrategies, addStrategy, deleteStrategy as apiDeleteStrategy, processStrategy, getStrategyProgress, getAPIConfigurations, setPrimaryStrategy, downloadStrategy, getStrategyFileContent, toggleStrategyActive } from '../api/client'
+import { getStrategies, addStrategy, deleteStrategy as apiDeleteStrategy, processStrategy, getStrategyProgress, getAPIConfigurations, setPrimaryStrategy, downloadStrategy, getStrategyFileContent, toggleStrategyActive, ensureCsrfToken } from '../api/client'
 import { useToast } from './ToastProvider'
 import StrategyQuestions from './StrategyQuestions'
 import StrategyOptimizer from './StrategyOptimizer'
@@ -57,7 +57,7 @@ export default function Strategies() {
     loadStrategies()
     checkAIProvider()
     
-    // Check Gemini API status periodically with throttling
+    // Check AI provider status periodically with throttling
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) {
         return
@@ -80,8 +80,8 @@ export default function Strategies() {
         apisData = response.data
       }
       
-      // Check if there's an active AI provider configuration (OpenAI/Gemini or other supported LLMs)
-      const aiProviders = ['openai', 'gemini', 'cohere', 'openrouter', 'together_ai', 'deepinfra', 'groq']
+      // Check if there's an active AI provider configuration (GapGPT or other supported LLMs)
+      const aiProviders = ['gapgpt', 'cohere', 'openrouter', 'together_ai', 'deepinfra', 'groq']
       const activeAIProvider = apisData.find((api: any) => 
         aiProviders.includes(api.provider) && api.is_active === true
       )
@@ -241,7 +241,7 @@ export default function Strategies() {
     } catch (error) {
       console.error('Error opening GapGPT modal:', error)
       setLoadingFileContent(false)
-      showToast('خطا در باز کردن مودال GapGPT', { type: 'error' })
+      showToast('خطا در باز کردن مودال GPT', { type: 'error' })
     }
   }
 
@@ -254,9 +254,20 @@ export default function Strategies() {
         await apiDeleteStrategy(id)
         showToast('استراتژی با موفقیت حذف شد', { type: 'success' })
         await loadStrategies()
-      } catch (error) {
+      } catch (error: any) {
         console.error('Error deleting strategy:', error)
-        showToast('خطا در حذف استراتژی', { type: 'error' })
+        console.error('Error response:', error?.response)
+        console.error('Error data:', error?.response?.data)
+        
+        // Extract error message from different possible locations
+        const errorMsg = 
+          error?.response?.data?.error || 
+          error?.response?.data?.message || 
+          error?.response?.data?.detail ||
+          error?.message ||
+          'خطا در حذف استراتژی'
+        
+        showToast(errorMsg, { type: 'error' })
       }
     })
     
@@ -272,7 +283,6 @@ export default function Strategies() {
         
         // Ensure CSRF token is available before processing
         try {
-          const { ensureCsrfToken } = await import('../api/client')
           await ensureCsrfToken()
         } catch (csrfError) {
           console.warn('CSRF token check failed, proceeding anyway:', csrfError)
@@ -754,10 +764,10 @@ export default function Strategies() {
                       <button
                         onClick={() => handleOpenGapGPTModal(strategy)}
                         className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg transition text-sm font-semibold flex items-center gap-2"
-                        title="تبدیل استراتژی با مدل‌های مختلف GapGPT - محتوای فایل به طور خودکار بارگذاری می‌شود"
+                        title="تبدیل استراتژی با مدل‌های مختلف GPT - محتوای فایل به طور خودکار بارگذاری می‌شود"
                       >
                         <span>🔮</span>
-                        <span>تبدیل با GapGPT</span>
+                        <span>تبدیل با GPT</span>
                       </button>
                     </div>
                     <div className="text-gray-300 text-xs space-y-1">
@@ -979,7 +989,7 @@ export default function Strategies() {
                               </div>
                             )}
                             
-                            {/* پیام راهنمایی برای تحلیل پایه - فقط اگر کلید Gemini موجود نباشد */}
+                            {/* پیام راهنمایی برای تحلیل پایه - فقط اگر کلید GapGPT موجود نباشد */}
                             {strategy.parsed_strategy_data.analysis.is_basic && !hasAIProvider && (
                               <div className="mt-3 p-3 bg-blue-900/30 rounded-lg border border-blue-700">
                                 <p className="text-blue-300 text-xs mb-2">
@@ -989,7 +999,7 @@ export default function Strategies() {
                                 برای دریافت تحلیل پیشرفته با هوش مصنوعی:
                                   <br />
                                   <br />
-                                1. از OpenAI (حساب کاربری در <code>platform.openai.com</code>) یا Google AI Studio یک کلید API فعال دریافت کنید
+                                1. از GapGPT (حساب کاربری در <code>gapgpt.app</code>) یک کلید API فعال دریافت کنید
                                   <br />
                                   <br />
                                   2. در داشبورد، به بخش "تنظیمات API" بروید
@@ -998,7 +1008,7 @@ export default function Strategies() {
                                   3. روی دکمه "افزودن کلید API" کلیک کنید
                                   <br />
                                   <br />
-                                4. ارائه‌دهنده را "OpenAI (ChatGPT)" انتخاب کنید یا در صورت تمایل "Gemini AI (Google AI Studio)" را برگزینید
+                                4. ارائه‌دهنده را "GapGPT" انتخاب کنید
                                   <br />
                                   <br />
                                   5. کلید API خود را وارد و ذخیره کنید
@@ -1069,7 +1079,7 @@ export default function Strategies() {
                               </div>
                             )}
                           </div>
-                          {/* پیام راهنمایی - فقط اگر کلید Gemini موجود نباشد */}
+                          {/* پیام راهنمایی - فقط اگر کلید GapGPT موجود نباشد */}
                           {!hasAIProvider && (
                             <div className="mt-3 p-3 bg-blue-900/30 rounded-lg border border-blue-700">
                               <p className="text-blue-300 text-xs mb-2">
@@ -1079,7 +1089,7 @@ export default function Strategies() {
                                 برای دریافت تحلیل پیشرفته با هوش مصنوعی:
                                 <br />
                                 <br />
-                                1. از OpenAI (حساب کاربری در <code>platform.openai.com</code>) یا Google AI Studio یک کلید API فعال دریافت کنید
+                                1. از GapGPT (حساب کاربری در <code>gapgpt.app</code>) یک کلید API فعال دریافت کنید
                                 <br />
                                 <br />
                                 2. در داشبورد، به بخش "تنظیمات API" بروید
@@ -1088,7 +1098,7 @@ export default function Strategies() {
                                 3. روی دکمه "افزودن کلید API" کلیک کنید
                                 <br />
                                 <br />
-                                4. ارائه‌دهنده را "OpenAI (ChatGPT)" انتخاب کنید یا در صورت تمایل "Gemini AI (Google AI Studio)" را برگزینید
+                                4. ارائه‌دهنده را "GapGPT" انتخاب کنید
                                 <br />
                                 <br />
                                 5. کلید API خود را وارد و ذخیره کنید

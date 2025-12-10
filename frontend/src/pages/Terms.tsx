@@ -1,6 +1,20 @@
+import SEO from '../components/SEO'
+import Breadcrumbs from '../components/Breadcrumbs'
+
 export default function Terms() {
   return (
+    <>
+      <SEO
+        title="قوانین و مقررات | ترید با هوش مصنوعی | شرایط استفاده"
+        description="قوانین و مقررات استفاده از سامانه ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی. شرایط عمومی، مسئولیت‌ها و حریم خصوصی"
+        keywords="قوانین ترید با هوش مصنوعی, شرایط استفاده, مقررات معاملات هوشمند, حریم خصوصی"
+        canonical="https://myaibaz.ir/terms"
+        ogTitle="قوانین و مقررات سامانه ترید با هوش مصنوعی"
+        ogDescription="قوانین و مقررات استفاده از سامانه ترید با هوش مصنوعی"
+        ogUrl="https://myaibaz.ir/terms"
+      />
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12 direction-rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
+      <Breadcrumbs />
       <div className="bg-gray-800 rounded-xl shadow-2xl p-8 space-y-6">
         <div>
           <h1 className="text-3xl font-bold text-white mb-4">قوانین و مقررات استفاده از سامانه</h1>
@@ -58,6 +72,7 @@ export default function Terms() {
         </div>
       </div>
     </div>
+    </>
   )
 }
 

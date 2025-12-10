@@ -11,6 +11,14 @@ Disallow: /admin/security
 Disallow: /admin/users
 Disallow: /admin/settings
 
+# Disallow protected routes (require authentication)
+Disallow: /profile
+Disallow: /results
+Disallow: /testing
+Disallow: /trading
+Disallow: /marketplace
+Disallow: /tickets
+
 # Allow public pages
 Allow: /
 Allow: /about
@@ -24,5 +32,6 @@ Sitemap: https://myaibaz.ir/sitemap.xml
 Sitemap: https://www.myaibaz.ir/sitemap.xml
 
 # Crawl delay (optional, helps prevent server overload)
-Crawl-delay: 1
+# Note: Google ignores Crawl-delay, but other bots may respect it
+# Crawl-delay: 1
 

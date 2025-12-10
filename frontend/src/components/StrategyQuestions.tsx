@@ -4,7 +4,8 @@ import {
   generateStrategyQuestions, 
   processStrategyWithAnswers,
   updateQuestionAnswer,
-  StrategyQuestion 
+  StrategyQuestion,
+  ensureCsrfToken
 } from '../api/client'
 import { useToast } from './ToastProvider'
 
@@ -77,7 +78,7 @@ export default function StrategyQuestions({ strategyId, onComplete }: StrategyQu
     } catch (error: any) {
       const errorMessage = error?.response?.data?.message || 
                           error?.message || 
-                          'خطا در تولید سوالات. لطفاً Gemini API را بررسی کنید.'
+                          'خطا در تولید سوالات. لطفاً GapGPT API را بررسی کنید.'
       showToast(errorMessage.replace(/\n/g, ' '), { type: 'error' })
       console.error('Error generating questions:', error)
       console.error('Error response:', error?.response?.data)
@@ -168,7 +169,6 @@ export default function StrategyQuestions({ strategyId, onComplete }: StrategyQu
       
       // Ensure CSRF token is available before processing
       try {
-        const { ensureCsrfToken } = await import('../api/client')
         await ensureCsrfToken()
       } catch (csrfError) {
         console.warn('CSRF token check failed, proceeding anyway:', csrfError)
@@ -302,7 +302,7 @@ export default function StrategyQuestions({ strategyId, onComplete }: StrategyQu
         </h3>
         <p className="text-blue-700 text-sm">
           برای تبدیل دقیق‌تر استراتژی به مدل قابل اجرا، لطفاً به سوالات زیر پاسخ دهید.
-          سیستم از مدل‌های هوش مصنوعی (مانند OpenAI ChatGPT یا Gemini) برای تولید سوالات هوشمند استفاده می‌کند.
+          سیستم از GapGPT برای تولید سوالات هوشمند استفاده می‌کند.
         </p>
       </div>
 

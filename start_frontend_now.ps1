@@ -1,20 +1,15 @@
-# Start Frontend Now
-Write-Host "Starting Frontend..." -ForegroundColor Cyan
+# Start Frontend Now (Development Mode - No build needed)
+Write-Host "Starting Frontend Dev Server..." -ForegroundColor Cyan
 
 Set-Location frontend
 
-# Check if dist exists
-if (-not (Test-Path "dist")) {
-    Write-Host "Building Frontend (this may take a few minutes)..." -ForegroundColor Yellow
-    npm run build 2>&1 | Select-Object -Last 10
-}
-
-Write-Host "`nStarting preview server on port 3000..." -ForegroundColor Green
+Write-Host "`nStarting dev server on port 3000..." -ForegroundColor Green
+Write-Host "Mode: Development (No build required)" -ForegroundColor Yellow
 $env:VITE_FRONTEND_PORT = "3000"
 $env:VITE_BACKEND_URL = "http://127.0.0.1:8000"
 
 # Start in new window
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PWD'; `$env:VITE_FRONTEND_PORT='3000'; `$env:VITE_BACKEND_URL='http://127.0.0.1:8000'; npm run preview -- --port 3000 --host 0.0.0.0"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PWD'; `$env:VITE_FRONTEND_PORT='3000'; `$env:VITE_BACKEND_URL='http://127.0.0.1:8000'; npm run dev -- --port 3000 --host 0.0.0.0"
 
 Write-Host "Frontend starting in new window..." -ForegroundColor Green
 Write-Host "Waiting for it to be ready..." -ForegroundColor Yellow

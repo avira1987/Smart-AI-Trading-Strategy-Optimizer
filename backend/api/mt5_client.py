@@ -45,6 +45,33 @@ def fetch_mt5_m1_candles(symbol: str, count: int = 500) -> pd.DataFrame:
 
 # --- Enhanced helper with timeframe and better diagnostics ---
 
+# Standard MT5 timeframes
+STANDARD_MT5_TIMEFRAMES = {'M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'}
+
+def is_standard_mt5_timeframe(timeframe: str) -> bool:
+    """
+    Check if timeframe is a standard MT5 timeframe.
+    
+    Standard MT5 timeframes: M1, M5, M15, M30, H1, H4, D1
+    Custom timeframes (e.g., 77m, 45m) are not standard and require M1 aggregation.
+    
+    Args:
+        timeframe: Timeframe string (e.g., 'M15', '77m', 'H1')
+    
+    Returns:
+        True if standard MT5 timeframe, False otherwise
+    """
+    if not timeframe:
+        return False
+    
+    timeframe_upper = str(timeframe).upper().strip()
+    
+    # Direct match with standard timeframes
+    if timeframe_upper in STANDARD_MT5_TIMEFRAMES:
+        return True
+    
+    return False
+
 TIMEFRAME_MAP = {
     'M1': mt5.TIMEFRAME_M1,
     'M5': mt5.TIMEFRAME_M5,
@@ -213,8 +240,8 @@ def aggregate_m1_candles_to_timeframe(m1_df: pd.DataFrame, target_minutes: int) 
     df = m1_df.copy()
     
     # Resample to target timeframe
-    # Use 'T' for minutes in pandas
-    rule = f'{target_minutes}T'
+    # Use 'min' for minutes in pandas (replaces deprecated 'T')
+    rule = f'{target_minutes}min'
     
     # Aggregate OHLCV
     aggregated = pd.DataFrame()

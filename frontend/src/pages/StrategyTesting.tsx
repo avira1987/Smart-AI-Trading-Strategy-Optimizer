@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
-import { getStrategies, getJobs, createJob, precheckBacktest, getJobStatus, getMT5Symbols, MT5Symbol } from '../api/client'
+import { getStrategies, getJobs, createJob, precheckBacktest, getJobStatus, getMT5Symbols, MT5Symbol, ensureCsrfToken, getGapGPTModels, GapGPTModel } from '../api/client'
 import { useToast } from '../components/ToastProvider'
 import { useSymbol } from '../context/SymbolContext'
 import { updateProfile } from '../api/auth'
+import Breadcrumbs from '../components/Breadcrumbs'
+import { useRateLimit } from '../hooks/useRateLimit'
 
 interface Strategy {
   id: number
@@ -33,7 +35,9 @@ export default function StrategyTesting() {
   const [selectedIndicators, setSelectedIndicators] = useState<string[]>([])
   const [timeframe, setTimeframe] = useState('7')
   const [initialCapital, setInitialCapital] = useState('10000')
-  const [aiProvider, setAiProvider] = useState<string>('auto') // 'auto', 'gapgpt', 'gemini', 'openai'
+  const [aiProvider, setAiProvider] = useState<string>('') // Will be set to gpt-5.1 or first available model
+  const [availableModels, setAvailableModels] = useState<GapGPTModel[]>([])
+  const [loadingModels, setLoadingModels] = useState(false)
   const { selectedSymbol, setSelectedSymbol } = useSymbol()
   // Initialize symbol from localStorage first (for immediate display), then context will override if available
   const [symbol, setSymbol] = useState(() => {
@@ -44,12 +48,21 @@ export default function StrategyTesting() {
   const [runningJob, setRunningJob] = useState<number | null>(null)
   const [jobStatus, setJobStatus] = useState('')
   const [error, setError] = useState('')
+  const [isProcessingBacktest, setIsProcessingBacktest] = useState(false)
   const { showToast } = useToast()
+  
+  // Rate limiting: 1 backtest per minute (60000ms)
+  const rateLimitClick = useRateLimit({ 
+    minInterval: 60000, 
+    message: 'شما می‌توانید فقط یک بار در دقیقه بک‌تست بگیرید. لطفاً صبر کنید',
+    key: 'backtest-button'
+  })
 
   useEffect(() => {
     loadStrategies()
     loadJobs()
     loadMT5Symbols()
+    loadAvailableModels()
   }, [])
 
   useEffect(() => {
@@ -247,6 +260,56 @@ export default function StrategyTesting() {
     return 'other'
   }
 
+  const loadAvailableModels = async () => {
+    setLoadingModels(true)
+    try {
+      const response = await getGapGPTModels()
+      if (response.data?.status === 'success' && response.data.models) {
+        const models = response.data.models as GapGPTModel[]
+        // Sort models: GPT models first, then others
+        const sortedModels = models.sort((a, b) => {
+          const aIsGPT = a.id.toLowerCase().includes('gpt') || a.owned_by?.toLowerCase().includes('openai')
+          const bIsGPT = b.id.toLowerCase().includes('gpt') || b.owned_by?.toLowerCase().includes('openai')
+          
+          if (aIsGPT && !bIsGPT) return -1
+          if (!aIsGPT && bIsGPT) return 1
+          
+          // Within same category, sort by name
+          return a.name.localeCompare(b.name)
+        })
+        setAvailableModels(sortedModels)
+        
+        // Set default to gpt-5.1 if available, otherwise gpt-5, otherwise first model
+        if (sortedModels.length > 0) {
+          const gpt51Model = sortedModels.find(m => 
+            m.id.toLowerCase().includes('gpt-5.1') || 
+            m.id.toLowerCase().includes('gpt5.1') ||
+            m.id.toLowerCase() === 'gpt-5.1'
+          )
+          const gpt5Model = sortedModels.find(m => 
+            m.id.toLowerCase().includes('gpt-5') && 
+            !m.id.toLowerCase().includes('gpt-5.1') &&
+            !m.id.toLowerCase().includes('gpt-5.0')
+          )
+          
+          if (gpt51Model) {
+            setAiProvider(gpt51Model.id)
+          } else if (gpt5Model) {
+            setAiProvider(gpt5Model.id)
+          } else {
+            // Use first available model
+            setAiProvider(sortedModels[0].id)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading available models:', error)
+      // If API fails, keep empty list - user can still use 'auto'
+    } finally {
+      setLoadingModels(false)
+    }
+  }
+
   const loadMT5Symbols = async () => {
     setLoadingSymbols(true)
     try {
@@ -330,7 +393,7 @@ export default function StrategyTesting() {
     }
   }
 
-  const handleRunBacktest = async (e: React.FormEvent) => {
+  const handleRunBacktest = rateLimitClick(async (e: React.FormEvent) => {
     e.preventDefault()
     
     if (!selectedStrategy) {
@@ -344,85 +407,112 @@ export default function StrategyTesting() {
       return
     }
 
+    // Show immediate feedback
     setError('')
+    setIsProcessingBacktest(true)
+    showToast('در حال شروع بک‌تست...', { type: 'info' })
     
-    try {
-      // Precheck data availability for the selected strategy
-      const pre = await precheckBacktest(selectedStrategy)
-      const preStatus = pre.data?.status
-      const preMsg = pre.data?.message || 'پیش‌بررسی انجام شد'
-      if (preStatus === 'not_ready' || preStatus === 'error') {
-        showToast(preMsg, { type: 'error' })
-        setError(preMsg)
-        return
-      }
-      if (preStatus === 'ready_with_fallback') {
-        showToast(preMsg, { type: 'warning' })
-      } else if (preStatus === 'ready') {
-        showToast(preMsg, { type: 'success' })
-      }
-
-      const response = await createJob({
-        strategy: selectedStrategy,
-        job_type: 'backtest',
-        timeframe_days: Number(timeframe),
-        symbol: symbol,
-        initial_capital: Number(initialCapital),
-        selected_indicators: selectedIndicators,
-        ai_provider: aiProvider !== 'auto' ? aiProvider : undefined
-      })
-      
-      setRunningJob(response.data.id)
-      setJobStatus(response.data.status || 'running')
-      checkJobStatus(response.data.id)
-      showToast('بک‌تست شروع شد! در حال پردازش...', { type: 'info' })
-      if (Number(timeframe) >= 365) {
-        showToast('بک‌تست برای بازه‌های زمانی طولانی ممکن است چند دقیقه طول بکشد. لطفاً منتظر بمانید.', {
-          type: 'warning'
-        })
-      }
-      
-      // Redirect to results page after 3 seconds on success only (handled in status poll)
-    } catch (error: any) {
-      console.error('Error running backtest:', error)
-      if (error?.code === 'ECONNABORTED' || (typeof error?.message === 'string' && error.message.toLowerCase().includes('timeout'))) {
-        // اگر timeout رخ داد، ممکن است job ایجاد شده باشد اما response برنگشته باشد
-        // در این صورت، job را از طریق polling بررسی می‌کنیم
-        const timeoutMessage = 'درخواست بک تست زمان زیادی طول کشید. در حال بررسی وضعیت...'
-        showToast(timeoutMessage, { type: 'info' })
-        
-        // سعی می‌کنیم آخرین job کاربر را پیدا کنیم
+    // Process everything in the background (defer to next event loop tick to allow UI to update)
+    setTimeout(async () => {
+      try {
+        // اطمینان از دریافت CSRF token قبل از درخواست (مشابه handleProcess در Strategies.tsx)
         try {
-          const jobsResponse = await getJobs()
-          if (jobsResponse.data && jobsResponse.data.length > 0) {
-            const latestJob = jobsResponse.data[0]
-            if (latestJob.status === 'pending' || latestJob.status === 'running') {
-              // Job ایجاد شده است، polling را شروع می‌کنیم
-              setRunningJob(latestJob.id)
-              setJobStatus(latestJob.status || 'running')
-              checkJobStatus(latestJob.id)
-              showToast('بک تست در حال اجرا است. لطفاً منتظر بمانید...', { type: 'info' })
-              return
-            }
-          }
-        } catch (pollError) {
-          console.error('Error checking jobs:', pollError)
+          await ensureCsrfToken()
+        } catch (csrfError) {
+          console.warn('CSRF token check failed, proceeding anyway:', csrfError)
         }
         
-        // اگر job پیدا نشد، خطا را نمایش می‌دهیم
-        const finalErrorMessage = 'بک‌تست برای بازه زمانی انتخاب شده بیش از حد زمان نیاز داشت. لطفاً کمی صبر کنید یا بازه زمانی را کاهش دهید. اگر مشکل ادامه داشت، صفحه را رفرش کنید و دوباره تلاش کنید.'
-        showToast(finalErrorMessage, { type: 'warning' })
-        setError(finalErrorMessage)
-        return
+        // Precheck data availability for the selected strategy
+        const pre = await precheckBacktest(selectedStrategy)
+        const preStatus = pre.data?.status
+        const preMsg = pre.data?.message || 'پیش‌بررسی انجام شد'
+        if (preStatus === 'not_ready' || preStatus === 'error') {
+          showToast(preMsg, { type: 'error' })
+          setError(preMsg)
+          setIsProcessingBacktest(false)
+          return
+        }
+        if (preStatus === 'ready_with_fallback') {
+          showToast(preMsg, { type: 'warning' })
+        } else if (preStatus === 'ready') {
+          showToast(preMsg, { type: 'success' })
+        }
+
+        const response = await createJob({
+          strategy: selectedStrategy,
+          job_type: 'backtest',
+          timeframe_days: Number(timeframe),
+          symbol: symbol,
+          initial_capital: Number(initialCapital),
+          selected_indicators: selectedIndicators,
+          ai_provider: aiProvider || undefined
+        })
+        
+        setRunningJob(response.data.id)
+        setJobStatus(response.data.status || 'running')
+        checkJobStatus(response.data.id)
+        showToast('بک‌تست شروع شد! در حال پردازش...', { type: 'info' })
+        if (Number(timeframe) >= 365) {
+          showToast('بک‌تست برای بازه‌های زمانی طولانی ممکن است چند دقیقه طول بکشد. لطفاً منتظر بمانید.', {
+            type: 'warning'
+          })
+        }
+        setIsProcessingBacktest(false)
+        
+        // Redirect to results page after 3 seconds on success only (handled in status poll)
+      } catch (error: any) {
+        console.error('Error running backtest:', error)
+        setIsProcessingBacktest(false)
+        
+        // Check for rate limit error from backend
+        if (error?.response?.status === 429 || (error?.response?.data?.error && error.response.data.error.includes('rate limit'))) {
+          const rateLimitMsg = error?.response?.data?.message || 'شما می‌توانید فقط یک بار در دقیقه بک‌تست بگیرید. لطفاً صبر کنید'
+          showToast(rateLimitMsg, { type: 'error' })
+          setError(rateLimitMsg)
+          return
+        }
+        
+        if (error?.code === 'ECONNABORTED' || (typeof error?.message === 'string' && error.message.toLowerCase().includes('timeout'))) {
+          // اگر timeout رخ داد، ممکن است job ایجاد شده باشد اما response برنگشته باشد
+          // در این صورت، job را از طریق polling بررسی می‌کنیم
+          const timeoutMessage = 'درخواست بک تست زمان زیادی طول کشید. در حال بررسی وضعیت...'
+          showToast(timeoutMessage, { type: 'info' })
+          
+          // سعی می‌کنیم آخرین job کاربر را پیدا کنیم
+          try {
+            const jobsResponse = await getJobs()
+            if (jobsResponse.data && jobsResponse.data.length > 0) {
+              const latestJob = jobsResponse.data[0]
+              if (latestJob.status === 'pending' || latestJob.status === 'running') {
+                // Job ایجاد شده است، polling را شروع می‌کنیم
+                setRunningJob(latestJob.id)
+                setJobStatus(latestJob.status || 'running')
+                checkJobStatus(latestJob.id)
+                showToast('بک تست در حال اجرا است. لطفاً منتظر بمانید...', { type: 'info' })
+                return
+              }
+            }
+          } catch (pollError) {
+            console.error('Error checking jobs:', pollError)
+          }
+          
+          // اگر job پیدا نشد، خطا را نمایش می‌دهیم
+          const finalErrorMessage = 'بک‌تست برای بازه زمانی انتخاب شده بیش از حد زمان نیاز داشت. لطفاً کمی صبر کنید یا بازه زمانی را کاهش دهید. اگر مشکل ادامه داشت، صفحه را رفرش کنید و دوباره تلاش کنید.'
+          showToast(finalErrorMessage, { type: 'warning' })
+          setError(finalErrorMessage)
+          return
+        }
+        setError('خطا در شروع بک تست: ' + (error.message || 'خطای نامشخص'))
+        showToast('خطا در شروع بک تست: ' + (error.message || 'خطای نامشخص'), { type: 'error' })
       }
-      setError('خطا در شروع بک تست: ' + (error.message || 'خطای نامشخص'))
-    }
-  }
+    }, 0)
+  })
 
   const selectedStrategyData = strategies.find(s => s.id === selectedStrategy)
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-8 direction-rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
+      <Breadcrumbs />
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-white mb-2">تست استراتژی</h1>
         <p className="text-gray-400">برای تست استراتژی معامله‌گری و بهینه‌سازی، پارامترهای مورد نظر خود را انتخاب کنید.</p>
@@ -657,66 +747,63 @@ export default function StrategyTesting() {
               value={aiProvider}
               onChange={(e) => setAiProvider(e.target.value)}
               className="select-standard"
-              disabled={runningJob !== null}
+              disabled={runningJob !== null || loadingModels}
             >
-              <option value="auto">🤖 خودکار (پیش‌فرض) - سیستم بهترین مدل را انتخاب می‌کند</option>
-              <option value="gapgpt">🔮 GapGPT - مدل تخصصی تحلیل معاملات (هزینه: ~0.001 تومان/کلمه)</option>
-              <option value="gemini">💎 Gemini AI - مدل سریع و مقرون‌به‌صرفه گوگل (هزینه: رایگان تا ~0.0003 تومان/کلمه)</option>
-              <option value="openai">⚡ OpenAI GPT-4o-mini - مدل قدرتمند OpenAI (هزینه: ~0.0008 تومان/کلمه)</option>
-            </select>
-            <div className="mt-2 p-3 bg-gray-800 rounded-lg border border-gray-700">
-              {aiProvider === 'auto' && (
-                <div>
-                  <p className="text-sm text-gray-300 mb-2">
-                    <strong className="text-white">🤖 حالت خودکار:</strong> سیستم به طور خودکار بهترین مدل در دسترس را بر اساس تنظیمات شما انتخاب می‌کند.
-                  </p>
-                  <p className="text-xs text-gray-400">
-                    <strong>هزینه:</strong> بستگی به مدل انتخاب شده دارد (معمولاً Gemini یا OpenAI)
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    <strong>مناسب برای:</strong> کاربرانی که می‌خواهند سیستم بهینه‌ترین انتخاب را انجام دهد
-                  </p>
-                </div>
+              {loadingModels ? (
+                <option disabled>در حال بارگذاری مدل‌ها...</option>
+              ) : availableModels.length > 0 ? (
+                <>
+                  {availableModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name} {model.owned_by ? `(${model.owned_by})` : ''}
+                      {model.id.toLowerCase().includes('gpt-5.1') || model.id.toLowerCase().includes('gpt5.1') ? ' ⭐ (پیش‌فرض)' : ''}
+                    </option>
+                  ))}
+                </>
+              ) : (
+                <option disabled>هیچ مدلی یافت نشد - لطفاً کلید API GapGPT را در تنظیمات اضافه کنید</option>
               )}
-              {aiProvider === 'gapgpt' && (
+            </select>
+            {loadingModels && (
+              <p className="text-xs text-gray-400 mt-1">
+                در حال دریافت لیست مدل‌های موجود...
+              </p>
+            )}
+            {!loadingModels && availableModels.length > 0 && (
+              <p className="text-xs text-gray-400 mt-1">
+                {availableModels.length} مدل در دسترس
+              </p>
+            )}
+            <div className="mt-2 p-3 bg-gray-800 rounded-lg border border-gray-700">
+              {aiProvider && availableModels.find(m => m.id === aiProvider) && (
                 <div>
                   <p className="text-sm text-gray-300 mb-2">
-                    <strong className="text-white">🔮 GapGPT:</strong> مدل تخصصی طراحی شده برای تحلیل استراتژی‌های معاملاتی و نتایج بک تست. این مدل به طور خاص برای درک و تحلیل داده‌های مالی و معاملاتی بهینه شده است.
+                    <strong className="text-white">🔮 مدل انتخاب شده:</strong> {availableModels.find(m => m.id === aiProvider)?.name}
+                    {(aiProvider.toLowerCase().includes('gpt-5.1') || aiProvider.toLowerCase().includes('gpt5.1')) && (
+                      <span className="text-yellow-400 text-xs mr-2">⭐ (پیش‌فرض)</span>
+                    )}
                   </p>
                   <p className="text-xs text-gray-400">
-                    <strong>💰 هزینه:</strong> تقریباً 0.001 تومان به ازای هر کلمه (ورودی + خروجی)
+                    <strong>شناسه مدل:</strong> {aiProvider}
+                  </p>
+                  <p className="text-xs text-gray-400">
+                    <strong>ارائه‌دهنده:</strong> {availableModels.find(m => m.id === aiProvider)?.owned_by || 'نامشخص'}
                   </p>
                   <p className="text-xs text-gray-400 mt-1">
-                    <strong>✅ مناسب برای:</strong> تحلیل‌های تخصصی معاملات، بررسی دقیق نتایج بک تست، دریافت توصیه‌های حرفه‌ای برای بهینه‌سازی استراتژی
+                    <strong>💰 هزینه:</strong> تقریباً 0.001 تومان به ازای هر کلمه (ورودی + خروجی)
                   </p>
                   <p className="text-xs text-yellow-400 mt-2">
                     ⚠️ برای استفاده، ابتدا کلید API GapGPT را در تنظیمات اضافه کنید.
                   </p>
                 </div>
               )}
-              {aiProvider === 'gemini' && (
+              {!aiProvider && !loadingModels && (
                 <div>
-                  <p className="text-sm text-gray-300 mb-2">
-                    <strong className="text-white">💎 Gemini AI (Google):</strong> مدل سریع و کارآمد گوگل با قابلیت پردازش متن‌های طولانی. این مدل برای تحلیل‌های عمومی و سریع ایده‌آل است.
+                  <p className="text-sm text-yellow-300 mb-2">
+                    <strong>⚠️ هشدار:</strong> هیچ مدلی در دسترس نیست.
                   </p>
                   <p className="text-xs text-gray-400">
-                    <strong>💰 هزینه:</strong> رایگان در سطح محدود، یا تقریباً 0.0003 تومان به ازای هر کلمه در نسخه پرداختی
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    <strong>✅ مناسب برای:</strong> تحلیل‌های سریع و روزمره، کاربرانی که به دنبال تعادل بین کیفیت و هزینه هستند، تحلیل‌های با حجم متوسط
-                  </p>
-                </div>
-              )}
-              {aiProvider === 'openai' && (
-                <div>
-                  <p className="text-sm text-gray-300 mb-2">
-                    <strong className="text-white">⚡ OpenAI GPT-4o-mini:</strong> مدل قدرتمند و پیشرفته OpenAI با دقت بالا در تحلیل و تولید متن. این مدل برای تحلیل‌های پیچیده و دقیق مناسب است.
-                  </p>
-                  <p className="text-xs text-gray-400">
-                    <strong>💰 هزینه:</strong> تقریباً 0.0008 تومان به ازای هر کلمه (ورودی + خروجی)
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    <strong>✅ مناسب برای:</strong> تحلیل‌های دقیق و حرفه‌ای، تولید گزارش‌های جامع، تحلیل‌های پیچیده با جزئیات زیاد
+                    لطفاً کلید API GapGPT را در تنظیمات اضافه کنید تا لیست مدل‌ها نمایش داده شود.
                   </p>
                 </div>
               )}
@@ -734,9 +821,9 @@ export default function StrategyTesting() {
           <div className="flex gap-3">
             <button
               type="submit"
-              disabled={runningJob !== null || !selectedStrategy || !symbol || symbol.trim() === ''}
+              disabled={runningJob !== null || isProcessingBacktest || !selectedStrategy || !symbol || symbol.trim() === ''}
               className={`btn-success ${
-                runningJob !== null || !selectedStrategy || !symbol || symbol.trim() === ''
+                runningJob !== null || isProcessingBacktest || !selectedStrategy || !symbol || symbol.trim() === ''
                   ? 'opacity-50 cursor-not-allowed'
                   : ''
               }`}
@@ -745,6 +832,11 @@ export default function StrategyTesting() {
                 <span className="flex items-center justify-center">
                   <span className="animate-spin mr-2">⏳</span>
                   تست در حال انجام...
+                </span>
+              ) : isProcessingBacktest ? (
+                <span className="flex items-center justify-center">
+                  <span className="animate-spin mr-2">⏳</span>
+                  در حال شروع...
                 </span>
               ) : (
                 'شروع تست'

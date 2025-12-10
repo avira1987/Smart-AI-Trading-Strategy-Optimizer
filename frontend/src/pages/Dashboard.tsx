@@ -3,8 +3,9 @@ import { useSearchParams, Link } from 'react-router-dom'
 import Strategies from '../components/Strategies'
 import Jobs from '../components/Jobs'
 import { useToast } from '../components/ToastProvider'
-import { getStrategies, getJobs, getWalletBalance, getResults } from '../api/client'
+import { getStrategies, getJobs, getWalletBalance, getResults, ensureCsrfToken, addStrategy } from '../api/client'
 import { useFeatureFlags } from '../context/FeatureFlagsContext'
+import Breadcrumbs from '../components/Breadcrumbs'
 
 function normalizeArrayResponse<T = any>(data: any): T[] {
   if (!data) return []
@@ -154,7 +155,6 @@ export default function Dashboard() {
     try {
       // Ensure CSRF token is available before uploading
       try {
-        const { ensureCsrfToken } = await import('../api/client')
         await ensureCsrfToken()
       } catch (csrfError) {
         console.warn('CSRF token check failed, proceeding anyway:', csrfError)
@@ -166,7 +166,6 @@ export default function Dashboard() {
       formData.append('strategy_file', file)
 
       // Use client from api/client.ts instead of fetch for better CSRF handling
-      const { addStrategy } = await import('../api/client')
       const response = await addStrategy(formData)
 
       if (response.data) {
@@ -206,6 +205,7 @@ export default function Dashboard() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 direction-rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
+      <Breadcrumbs />
       {/* Welcome Section */}
       <div className="mb-8">
         <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
@@ -213,6 +213,36 @@ export default function Dashboard() {
         </h1>
         <p className="text-gray-400 text-lg">مدیریت استراتژی‌های معاملاتی و نظارت بر عملکرد</p>
       </div>
+
+      {/* Pinned Charge Account Message - Show when balance is 0 or very low */}
+      {!statsLoading && stats.walletBalance <= 0 && (
+        <div className="mb-6 bg-gradient-to-r from-orange-600 to-red-600 rounded-xl p-6 shadow-lg border-2 border-orange-400">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4 flex-1">
+              <div className="flex-shrink-0">
+                <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-white text-xl font-bold mb-1">موجودی حساب شما تمام شده است</h3>
+                <p className="text-orange-100 text-sm mb-3">
+                  برای ادامه استفاده از خدمات، لطفاً حساب خود را شارژ کنید.
+                </p>
+                <Link
+                  to="/profile"
+                  className="inline-flex items-center gap-2 bg-white text-orange-600 px-6 py-2.5 rounded-lg font-semibold hover:bg-orange-50 transition-colors shadow-md"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  شارژ حساب
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Quick Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

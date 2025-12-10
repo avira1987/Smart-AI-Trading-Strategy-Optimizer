@@ -6,6 +6,7 @@ import { useToast } from '../components/ToastProvider'
 import APIConfigurations from '../components/APIConfigurations'
 import APIUsageStats from '../components/APIUsageStats'
 import SymbolSelector from '../components/SymbolSelector'
+import Breadcrumbs from '../components/Breadcrumbs'
 import {
   getWalletBalance,
   chargeWallet,
@@ -604,6 +605,7 @@ export default function Profile() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 direction-rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
+      <Breadcrumbs />
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-white mb-2">پروفایل کاربر</h1>
         <p className="text-gray-400">مدیریت اطلاعات شخصی و تنظیمات API</p>

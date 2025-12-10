@@ -41,6 +41,20 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            // Separate vendor libraries
+            'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+            'chart-vendor': ['chart.js', 'react-chartjs-2'],
+            // Separate API client (large file)
+            'api-client': ['./src/api/client.ts'],
+          },
+        },
+      },
+      chunkSizeWarningLimit: 600, // Increase limit slightly to reduce warnings
+    },
     test: {
       globals: true,
       environment: 'jsdom',

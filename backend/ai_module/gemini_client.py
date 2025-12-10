@@ -871,6 +871,136 @@ def generate_strategy_questions(
     return result
 
 
+def analyze_converted_strategy_ambiguities(
+    converted_strategy: Dict[str, Any],
+    existing_answers: Dict[str, Any] = None,
+    user=None,
+) -> Dict[str, Any]:
+    """Analyze ambiguities in a converted strategy (from GapGPT) and generate questions."""
+    logger.info("Starting ambiguity analysis for converted strategy...")
+
+    existing_answers = existing_answers or {}
+
+    # Convert converted strategy to a readable format for analysis
+    strategy_summary = json.dumps(converted_strategy, ensure_ascii=False, indent=2)
+    
+    # Truncate if too long
+    strategy_summary = truncate_text(strategy_summary, max_tokens=MAX_INPUT_TOKENS // 2)
+
+    if existing_answers:
+        answers_text = f"\nجواب‌های قبلی کاربر:\n{json.dumps(existing_answers, ensure_ascii=False, indent=2)}"
+    else:
+        answers_text = ""
+
+    cache_key = f"converted_ambiguity_{hashlib.sha256(strategy_summary.encode()).hexdigest()}"
+
+    prompt = f"""
+    شما یک تحلیلگر حرفه‌ای استراتژی معاملاتی هستید. یک استراتژی تبدیل شده (JSON) دریافت کرده‌اید که از GapGPT آمده است.
+    وظیفه شما این است که ابهامات و نقاط ناقص این استراتژی را شناسایی کنید و سوالات هوشمندانه تولید کنید.
+    
+    استراتژی تبدیل شده (JSON):
+    {strategy_summary}
+    {answers_text}
+    
+    **قوانین مهم برای تولید سوالات:**
+    
+    1. استراتژی تبدیل شده را به دقت بررسی کنید و نقاط مبهم را شناسایی کنید:
+       - پارامترهای نامشخص یا ناقص (مثلاً دوره‌های اندیکاتورها، مقادیر حد ضرر/سود)
+       - شرایط ورود/خروج که به طور کامل تعریف نشده‌اند
+       - منطق معاملاتی که نیاز به توضیح بیشتر دارد
+       - تنظیمات مدیریت ریسک که ناقص هستند
+    
+    2. هدف شما: تولید 3 تا 7 سوال هوشمند که:
+       - نقاط مبهم و ناقص استراتژی تبدیل شده را شناسایی کنند
+       - به کاربر کمک کنند استراتژی را کامل‌تر و دقیق‌تر کنند
+       - پارامترهای مهم را مشخص کنند
+       - منطق معاملاتی را واضح‌تر کنند
+    
+    3. اگر استراتژی کامل و واضح است، سوالات کمتری تولید کنید (مثلاً 2-3 سوال)
+       اگر استراتژی مبهم یا ناقص است، سوالات بیشتری تولید کنید (مثلاً 5-7 سوال)
+    
+    4. سوالات باید متناسب با ساختار JSON استراتژی باشند:
+       - اگر entry_conditions وجود دارد، سوالات مربوط به شرایط ورود
+       - اگر exit_conditions وجود دارد، سوالات مربوط به شرایط خروج
+       - اگر indicators وجود دارد، سوالات مربوط به تنظیمات اندیکاتورها
+       - اگر risk_management وجود دارد، سوالات مربوط به مدیریت ریسک
+    
+    خروجی باید JSON با این ساختار باشد:
+    {{
+      "questions": [
+        {{
+          "question_text": "متن سوال به فارسی",
+          "question_type": "text|number|choice|multiple_choice|boolean",
+          "options": ["گزینه 1", "گزینه 2"],
+          "order": 1,
+          "context": {{
+            "section": "entry|exit|risk|indicator|general",
+            "related_text": "بخشی از استراتژی که مربوط به این سوال است"
+          }}
+        }}
+      ]
+    }}
+    
+    فقط JSON بازگردانید و از توضیحات اضافه خودداری کنید.
+    """
+
+    def _parse_response(raw_output: str) -> Dict[str, Any]:
+        if not raw_output:
+            return _build_base_response(
+                ai_status="error",
+                message=SERVICE_UNAVAILABLE_MESSAGE,
+                raw_output=raw_output,
+                extra={"questions": []}
+            )
+
+        try:
+            data: Dict[str, Any] = json.loads(raw_output)
+        except json.JSONDecodeError as exc:
+            logger.warning("Failed to parse ambiguity analysis JSON: %s", exc)
+            return _build_base_response(
+                ai_status="error",
+                message=SERVICE_UNAVAILABLE_MESSAGE,
+                raw_output=raw_output,
+                extra={"questions": [], "error": str(exc)}
+            )
+
+        questions = data.get("questions") or []
+        if not isinstance(questions, list):
+            logger.warning("Ambiguity analysis response missing list, got %s", type(questions))
+            return _build_base_response(
+                ai_status="error",
+                message=SERVICE_UNAVAILABLE_MESSAGE,
+                raw_output=raw_output,
+                extra={"questions": [], "error": "invalid_structure"}
+            )
+
+        return _build_base_response(
+            ai_status="ok",
+            message="AI ambiguity analysis successful.",
+            raw_output=raw_output,
+            extra={
+                "questions": questions,
+                "questions_count": len(questions)
+            }
+        )
+
+    result = _call_gemini(
+        prompt,
+        cache_namespace="converted_ambiguity",
+        cache_key=cache_key,
+        generation_config={
+            'temperature': 0.7,
+            'response_mime_type': 'application/json',
+            'provider_metadata': {'system_prompt': JSON_ONLY_SYSTEM_PROMPT},
+        },
+        response_parser=_parse_response,
+        user=user,
+    )
+
+    logger.info("Ambiguity analysis completed with status: %s", result.get("ai_status"))
+    return result
+
+
 def parse_strategy_with_answers(
     parsed_strategy: Dict[str, Any],
     raw_text: str,

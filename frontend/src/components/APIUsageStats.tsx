@@ -28,8 +28,6 @@ const PROVIDER_NAMES: Record<string, string> = {
   metalsapi: 'MetalsAPI',
   financialmodelingprep: 'Financial Modeling Prep',
   nerkh: 'Nerkh.io',
-  gemini: 'Gemini AI',
-  openai: 'OpenAI (ChatGPT)',
   kavenegar: 'Kavenegar',
   mt5: 'MetaTrader 5',
   zarinpal: 'Zarinpal',

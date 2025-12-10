@@ -25,14 +25,12 @@ export default function APIConfigurations() {
     { value: 'metalsapi', label: 'MetalsAPI' },
     { value: 'financialmodelingprep', label: 'Financial Modeling Prep' },
     { value: 'nerkh', label: 'Nerkh.io (قیمت طلا)' },
-    { value: 'gemini', label: 'Gemini AI (Google AI Studio)' },
-    { value: 'openai', label: 'OpenAI (ChatGPT)' },
     { value: 'cohere', label: 'Cohere AI' },
     { value: 'openrouter', label: 'OpenRouter' },
     { value: 'together_ai', label: 'Together AI' },
     { value: 'deepinfra', label: 'DeepInfra' },
     { value: 'groq', label: 'GroqCloud' },
-    { value: 'gapgpt', label: 'GapGPT' }
+    { value: 'gapgpt', label: 'GPT' }
   ]
   
   // API providers for backend/system (admin only)
@@ -498,7 +496,7 @@ export default function APIConfigurations() {
                           </div>
                         </div>
                         <div className="flex gap-2">
-                          {(['twelvedata','alphavantage','oanda','metalsapi','financialmodelingprep','gemini','openai','chatgpt','gpt','gpt4','gpt-4','cohere','openrouter','together_ai','deepinfra','groq','gapgpt'].includes(api.provider)) && (
+                          {(['twelvedata','alphavantage','oanda','metalsapi','financialmodelingprep','cohere','openrouter','together_ai','deepinfra','groq','gapgpt'].includes(api.provider)) && (
                             <button
                               onClick={() => handleTest(api.id)}
                               disabled={testing === api.id}
@@ -603,7 +601,6 @@ export default function APIConfigurations() {
                   onChange={(e) => setApiKey(e.target.value)}
                   className="input-standard"
                   placeholder={
-                    provider === 'gemini' ? 'کلید API Gemini خود را از aistudio.google.com دریافت کنید' :
                     provider === 'gapgpt' ? 'کلید API GapGPT خود را از gapgpt.app دریافت کنید' :
                     provider === 'kavenegar' ? 'کلید API Kavenegar خود را از panel.kavenegar.com دریافت کنید' :
                     provider === 'zarinpal' ? 'Merchant ID خود را از zarinpal.com دریافت کنید' :
@@ -612,45 +609,12 @@ export default function APIConfigurations() {
                   }
                   required
                 />
-                {provider === 'gemini' && (
-                  <div className="mt-2 p-3 bg-blue-900/30 rounded-lg border border-blue-700">
-                    <p className="text-blue-300 text-xs">
-                      <strong>💡 راهنمای دریافت کلید Gemini از Google AI Studio:</strong>
-                      <br />
-                      1. به <a href="https://aistudio.google.com" target="_blank" rel="noopener noreferrer" className="underline font-semibold">Google AI Studio</a> بروید
-                      <br />
-                      2. با حساب Google خود وارد شوید
-                      <br />
-                      3. در سمت راست صفحه، روی دکمه <strong>"Get API key"</strong> کلیک کنید
-                      <br />
-                      4. یا از منوی سمت راست، گزینه <strong>"Get API key"</strong> را انتخاب کنید
-                      <br />
-                      5. یک پروژه جدید بسازید یا پروژه موجود را انتخاب کنید
-                      <br />
-                      6. کلید API تولید شده را کپی کرده و اینجا وارد کنید
-                      <br />
-                      <span className="text-yellow-300 mt-1 block">⚠️ توجه: کلید API را در جای امن نگه دارید و به اشتراک نگذارید</span>
-                    </p>
-                    <div className="mt-3 text-blue-200 text-xs leading-6">
-                      <p>
-                        برای استفاده رایگان از قابلیت‌های هوش مصنوعی و دریافت داده‌های قیمتی، کافی است در سرویس‌های زیر ثبت‌نام کرده و کلیدهای رایگانشان را در این بخش اضافه کنید:
-                      </p>
-                      <ul className="list-disc list-inside mt-1 space-y-1">
-                        <li>Google AI Studio (برای کلید Gemini)</li>
-                        <li>TwelveData، FinancialModelingPrep، MetalsAPI، OANDA و سایر ارائه‌دهندگان داده</li>
-                      </ul>
-                      <p className="mt-2 text-yellow-200 font-semibold">
-                        اگر زمان یا دانش فنی برای انجام این مراحل ندارید، با شارژ حساب به مبلغ <span className="text-white">399,000 تومان</span> می‌توانید نسخه آمادهٔ تحلیل و تست استراتژی به همراه یک ماه پشتیبانی سریع (آنلاین و تلفنی) تهیه کنید تا در کوتاه‌ترین زمان به ساخت مدل‌های هوش مصنوعی اختصاصی برای استراتژی‌های معاملاتی خود برسید.
-                      </p>
-                    </div>
-                  </div>
-                )}
                 {provider === 'gapgpt' && (
                   <div className="mt-2 p-3 bg-purple-900/30 rounded-lg border border-purple-700">
                     <p className="text-purple-300 text-xs">
-                      <strong>🔮 راهنمای دریافت کلید GapGPT:</strong>
+                      <strong>🔮 راهنمای دریافت کلید GPT:</strong>
                       <br />
-                      1. به <a href="https://gapgpt.app" target="_blank" rel="noopener noreferrer" className="underline font-semibold">GapGPT Platform</a> بروید
+                      1. به <a href="https://gapgpt.app" target="_blank" rel="noopener noreferrer" className="underline font-semibold">GPT Platform</a> بروید
                       <br />
                       2. ثبت نام کرده و وارد حساب کاربری خود شوید
                       <br />
@@ -662,7 +626,7 @@ export default function APIConfigurations() {
                     </p>
                     <div className="mt-3 text-purple-200 text-xs leading-6">
                       <p>
-                        با GapGPT می‌توانید استراتژی‌های معاملاتی خود را با مدل‌های مختلف هوش مصنوعی تبدیل کرده و بهترین نتیجه را پیدا کنید.
+                        با GPT می‌توانید استراتژی‌های معاملاتی خود را با مدل‌های مختلف هوش مصنوعی تبدیل کرده و بهترین نتیجه را پیدا کنید.
                       </p>
                     </div>
                   </div>

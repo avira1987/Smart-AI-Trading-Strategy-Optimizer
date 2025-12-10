@@ -9,7 +9,10 @@ import {
   type SystemSettingsResponse,
   getGapGPTModels,
   type GapGPTModel,
+  checkGapGPTBalance,
+  type GapGPTBalanceResponse,
 } from '../api/client'
+import Breadcrumbs from '../components/Breadcrumbs'
 
 export default function SystemSettings() {
   const { isAdmin } = useAuth()
@@ -21,17 +24,21 @@ export default function SystemSettings() {
   const [clearingCache, setClearingCache] = useState(false)
   const [models, setModels] = useState<GapGPTModel[]>([])
   const [loadingModels, setLoadingModels] = useState(false)
+  const [gapgptBalance, setGapgptBalance] = useState<GapGPTBalanceResponse['data'] | null>(null)
+  const [loadingBalance, setLoadingBalance] = useState(false)
 
   useEffect(() => {
     if (isAdmin) {
       loadSystemSettings()
       loadModels()
+      loadGapGPTBalance()
     }
   }, [isAdmin])
 
   if (!isAdmin) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <Breadcrumbs />
         <div className="bg-gray-800 rounded-lg p-6">
           <div className="text-red-400 text-center">
             ⚠️ فقط ادمین می‌تواند به این بخش دسترسی داشته باشد
@@ -65,6 +72,25 @@ export default function SystemSettings() {
       console.error('Error loading models:', error)
     } finally {
       setLoadingModels(false)
+    }
+  }
+
+  const loadGapGPTBalance = async () => {
+    try {
+      setLoadingBalance(true)
+      const response = await checkGapGPTBalance()
+      if (response.data.status === 'success' && response.data.data) {
+        setGapgptBalance(response.data.data)
+      } else if (response.data.data) {
+        setGapgptBalance(response.data.data)
+      }
+    } catch (error: any) {
+      console.error('Error loading GapGPT balance:', error)
+      if (error.response?.data?.data) {
+        setGapgptBalance(error.response.data.data)
+      }
+    } finally {
+      setLoadingBalance(false)
     }
   }
 
@@ -164,6 +190,7 @@ export default function SystemSettings() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <Breadcrumbs />
       <div className="bg-gray-800 rounded-lg p-6 space-y-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
@@ -177,6 +204,100 @@ export default function SystemSettings() {
           >
             {settingsLoading ? 'در حال بارگذاری...' : 'بارگذاری مجدد'}
           </button>
+        </div>
+
+        {/* GapGPT Account Balance */}
+        <div className="bg-gray-900 rounded-lg p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-white">موجودی حساب GapGPT</h3>
+            <button
+              onClick={loadGapGPTBalance}
+              disabled={loadingBalance}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed text-sm"
+            >
+              {loadingBalance ? 'در حال بررسی...' : 'بررسی مجدد'}
+            </button>
+          </div>
+          
+          {loadingBalance && !gapgptBalance ? (
+            <div className="text-center py-4">
+              <div className="inline-block animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-blue-500"></div>
+              <p className="text-gray-400 text-sm mt-2">در حال بررسی موجودی...</p>
+            </div>
+          ) : gapgptBalance ? (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between p-4 bg-gray-800 rounded-lg">
+                <div>
+                  <p className="text-sm text-gray-400">موجودی حساب</p>
+                  <p className={`text-2xl font-bold mt-1 ${
+                    gapgptBalance.is_low_balance 
+                      ? 'text-red-400' 
+                      : typeof gapgptBalance.balance === 'string' && gapgptBalance.balance === 'کافی'
+                      ? 'text-green-400'
+                      : 'text-white'
+                  }`}>
+                    {gapgptBalance.balance_formatted}
+                  </p>
+                </div>
+                {gapgptBalance.is_low_balance && (
+                  <div className="text-right">
+                    <span className="inline-block px-3 py-1 bg-red-900 text-red-300 rounded-full text-xs font-semibold">
+                      موجودی کم
+                    </span>
+                  </div>
+                )}
+              </div>
+              
+              {gapgptBalance.required && (
+                <div className="p-4 bg-gray-800 rounded-lg">
+                  <p className="text-sm text-gray-400">مورد نیاز</p>
+                  <p className="text-lg font-semibold text-yellow-400 mt-1">
+                    {gapgptBalance.required_formatted || `${gapgptBalance.currency}${gapgptBalance.required}`}
+                  </p>
+                </div>
+              )}
+              
+              {gapgptBalance.message && (
+                <div className={`p-3 rounded-lg text-sm ${
+                  gapgptBalance.is_low_balance 
+                    ? 'bg-red-900/30 text-red-300' 
+                    : 'bg-blue-900/30 text-blue-300'
+                }`}>
+                  {gapgptBalance.message}
+                </div>
+              )}
+              
+              <div className="flex items-center justify-between text-xs text-gray-500 pt-2 border-t border-gray-700">
+                <span>
+                  آخرین بررسی: {gapgptBalance.last_checked ? new Date(gapgptBalance.last_checked).toLocaleString('fa-IR') : 'نامشخص'}
+                </span>
+                {gapgptBalance.latency_ms && (
+                  <span>زمان پاسخ: {gapgptBalance.latency_ms.toFixed(0)}ms</span>
+                )}
+              </div>
+              
+              {gapgptBalance.is_low_balance && (
+                <div className="mt-3 p-3 bg-yellow-900/30 border border-yellow-700 rounded-lg">
+                  <p className="text-yellow-300 text-sm">
+                    ⚠️ موجودی حساب GapGPT کم است. لطفاً حساب را در{' '}
+                    <a 
+                      href="https://gapgpt.app" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="underline hover:text-yellow-200"
+                    >
+                      gapgpt.app
+                    </a>
+                    {' '}شارژ کنید.
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-4 text-gray-400 text-sm">
+              اطلاعات موجودی در دسترس نیست
+            </div>
+          )}
         </div>
 
         {settingsLoading && !systemSettings ? (
@@ -408,7 +529,7 @@ export default function SystemSettings() {
                     <div className="text-gray-400 text-center py-4">در حال بارگذاری مدل‌ها...</div>
                   ) : models.length === 0 ? (
                     <div className="text-yellow-400 text-center py-4 text-sm">
-                      هیچ مدلی یافت نشد. لطفاً کلید API GapGPT را در تنظیمات اضافه کنید.
+                      هیچ مدلی یافت نشد. لطفاً کلید API GPT را در تنظیمات اضافه کنید.
                     </div>
                   ) : (
                     <div className="space-y-3 max-h-[400px] overflow-y-auto">

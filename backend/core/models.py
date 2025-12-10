@@ -16,13 +16,6 @@ class APIConfiguration(models.Model):
         ('metalsapi', 'MetalsAPI'),
         ('financialmodelingprep', 'Financial Modeling Prep'),
         ('nerkh', 'Nerkh.io (قیمت طلا)'),
-        ('gemini', 'Gemini AI (Google AI Studio)'),
-        ('openai', 'OpenAI (ChatGPT)'),
-        # Explicit aliases for OpenAI so users can pick the label they expect in the dashboard
-        ('chatgpt', 'ChatGPT (alias of OpenAI)'),
-        ('gpt', 'GPT (alias of OpenAI)'),
-        ('gpt4', 'GPT-4 (alias of OpenAI)'),
-        ('gpt-4', 'GPT-4 (alias of OpenAI)'),
         ('cohere', 'Cohere AI'),
         ('openrouter', 'OpenRouter'),
         ('together_ai', 'Together AI'),
@@ -51,6 +44,7 @@ class APIConfiguration(models.Model):
     class Meta:
         verbose_name = "API Configuration"
         verbose_name_plural = "API Configurations"
+        ordering = ['-created_at']  # اضافه کردن این خط برای رفع هشدار pagination
         # Remove unique constraint to allow multiple API keys per provider
         # unique_together = ['provider']
         indexes = [
@@ -423,6 +417,7 @@ class Result(models.Model):
     losing_trades = models.IntegerField(default=0)
     win_rate = models.FloatField(default=0.0)
     max_drawdown = models.FloatField(default=0.0)
+    profit_factor = models.FloatField(default=0.0, help_text="نسبت سود به ضرر (Profit Factor)")
     equity_curve_data = models.JSONField(default=list, blank=True)
     description = models.TextField(blank=True)
     trades_details = models.JSONField(default=list, blank=True)
@@ -985,6 +980,9 @@ class Wallet(models.Model):
             amount = Decimal(str(amount))
         elif not isinstance(amount, Decimal):
             amount = Decimal(str(amount))
+        # Ensure balance is Decimal (it should be, but sometimes Django returns float)
+        if not isinstance(self.balance, Decimal):
+            self.balance = Decimal(str(self.balance))
         self.balance += amount
         self.save(update_fields=['balance', 'updated_at'])
     
@@ -995,6 +993,9 @@ class Wallet(models.Model):
             amount = Decimal(str(amount))
         elif not isinstance(amount, Decimal):
             amount = Decimal(str(amount))
+        # Ensure balance is Decimal (it should be, but sometimes Django returns float)
+        if not isinstance(self.balance, Decimal):
+            self.balance = Decimal(str(self.balance))
         if self.balance >= amount:
             self.balance -= amount
             self.save(update_fields=['balance', 'updated_at'])
@@ -1264,7 +1265,7 @@ class SystemSettings(models.Model):
     registration_bonus = models.DecimalField(
         max_digits=12,
         decimal_places=2,
-        default=399.0,
+        default=45000.0,
         help_text="مبلغ هدیه ثبت‌نام به تومان"
     )
     

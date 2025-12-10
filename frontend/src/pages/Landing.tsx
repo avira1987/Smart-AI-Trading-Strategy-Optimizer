@@ -1,12 +1,47 @@
 import { Link } from 'react-router-dom'
+import { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useFeatureFlags } from '../context/FeatureFlagsContext'
+import SEO from '../components/SEO'
+import FAQSchema from '../components/FAQSchema'
 
 export default function Landing() {
   const { isAuthenticated } = useAuth()
   const { liveTradingEnabled } = useFeatureFlags()
+  const [shouldLoadVideo, setShouldLoadVideo] = useState(false)
+  const videoRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            setShouldLoadVideo(true)
+            observer.disconnect()
+          }
+        })
+      },
+      { rootMargin: '100px' } // شروع لود 100px قبل از رسیدن به ویدیو
+    )
+
+    if (videoRef.current) {
+      observer.observe(videoRef.current)
+    }
+
+    return () => observer.disconnect()
+  }, [])
 
   return (
+    <>
+      <SEO
+        title="ترید با هوش مصنوعی | ترید به کمک هوش مصنوعی | سامانه معاملات هوشمند AI"
+        description="ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی - سامانه پیشرفته معاملات هوشمند با AI. بهینه‌سازی استراتژی‌های معاملاتی با هوش مصنوعی، بک‌تست خودکار و معاملات هوشمند فارکس"
+        keywords="ترید با هوش مصنوعی, ترید به کمک هوش مصنوعی, معاملات هوشمند, AI Trading, ترید هوشمند, معاملات با AI"
+        canonical="https://myaibaz.ir/"
+        ogTitle="ترید با هوش مصنوعی | ترید به کمک هوش مصنوعی"
+        ogDescription="ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی - سامانه پیشرفته معاملات هوشمند"
+        ogUrl="https://myaibaz.ir/"
+      />
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 direction-rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
       {/* Hero Section */}
       <section className="relative overflow-hidden py-20 px-4 sm:px-6 lg:px-8">
@@ -16,8 +51,36 @@ export default function Landing() {
               ترید با هوش مصنوعی | ترید به کمک هوش مصنوعی
             </h1>
             <p className="text-xl md:text-2xl text-gray-300 mb-8 max-w-3xl mx-auto">
-              سامانه پیشرفته ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی. با استفاده از هوش مصنوعی، استراتژی‌های معاملاتی خود را بهینه کنید و معاملات هوشمند خودکار انجام دهید
+              سامانه پیشرفته ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی. با استفاده از هوش مصنوعی، استراتژی‌های معاملاتی خود را بهینه کنید و معاملات هوشمند خودکار انجام دهید. برای یادگیری بیشتر، <Link to="/blog" className="text-blue-400 hover:text-blue-300 underline">مقالات بلاگ</Link> ما را مطالعه کنید.
             </p>
+            
+            {/* Video Section - Optimized with Lazy Loading */}
+            <div ref={videoRef} className="mb-8 max-w-4xl mx-auto">
+              {shouldLoadVideo ? (
+                <div className="relative rounded-2xl overflow-hidden shadow-2xl border border-blue-500/30 bg-gray-900/50 backdrop-blur-sm">
+                  <video
+                    className="w-full h-auto"
+                    controls
+                    preload="metadata"
+                    playsInline
+                  >
+                    <source src="/pro_vid.mp4" type="video/mp4" />
+                    مرورگر شما از پخش ویدیو پشتیبانی نمی‌کند.
+                  </video>
+                </div>
+              ) : (
+                <div className="relative rounded-2xl overflow-hidden shadow-2xl border border-blue-500/30 bg-gray-900/50 backdrop-blur-sm aspect-video flex items-center justify-center">
+                  <div className="text-gray-400 text-lg animate-pulse">
+                    <svg className="w-16 h-16 mx-auto mb-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p>در حال بارگذاری ویدیو...</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
             {!isAuthenticated && (
               <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
                 <Link
@@ -231,7 +294,7 @@ export default function Landing() {
               </div>
               <h3 className="text-xl font-semibold text-white mb-3">تحلیل هوشمند با AI برای ترید</h3>
               <p className="text-gray-400 leading-relaxed">
-                ترید با هوش مصنوعی: استراتژی‌های معاملاتی خود را با استفاده از هوش مصنوعی Gemini تجزیه و تحلیل کنید و به کد تبدیل کنید. سیستم به صورت خودکار بهترین استراتژی‌ها را شناسایی می‌کند.
+                ترید با هوش مصنوعی: استراتژی‌های معاملاتی خود را با استفاده از GapGPT تجزیه و تحلیل کنید و به کد تبدیل کنید. سیستم به صورت خودکار بهترین استراتژی‌ها را شناسایی می‌کند.
               </p>
             </button>
 
@@ -383,6 +446,61 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* FAQ Section */}
+      <section className="py-16 px-4 sm:px-6 lg:px-8 bg-gray-800/50">
+        <div className="max-w-4xl mx-auto">
+          <h2 className="text-3xl md:text-4xl font-bold text-white text-center mb-12">
+            سوالات متداول درباره ترید با هوش مصنوعی
+          </h2>
+          <div className="space-y-4">
+            <div className="bg-gray-800 rounded-lg p-6">
+              <h3 className="text-xl font-semibold text-blue-400 mb-3">ترید با هوش مصنوعی چیست؟</h3>
+              <p className="text-gray-300 leading-relaxed">
+                ترید با هوش مصنوعی به معنای استفاده از الگوریتم‌های هوش مصنوعی و یادگیری ماشین برای تحلیل بازار و انجام معاملات است. سیستم ما با استفاده از هوش مصنوعی، الگوهای معاملاتی را شناسایی کرده و بهترین استراتژی‌ها را برای شما پیشنهاد می‌دهد.
+              </p>
+            </div>
+            <div className="bg-gray-800 rounded-lg p-6">
+              <h3 className="text-xl font-semibold text-blue-400 mb-3">ترید به کمک هوش مصنوعی چگونه کار می‌کند؟</h3>
+              <p className="text-gray-300 leading-relaxed">
+                ترید به کمک هوش مصنوعی به این صورت است که هوش مصنوعی به عنوان دستیار معاملاتی شما عمل می‌کند. استراتژی‌های شما را تجزیه و تحلیل کرده، بر روی داده‌های تاریخی تست می‌کند و پیشنهادات بهینه برای بهبود عملکرد ارائه می‌دهد.
+              </p>
+            </div>
+            <div className="bg-gray-800 rounded-lg p-6">
+              <h3 className="text-xl font-semibold text-blue-400 mb-3">آیا ترید با هوش مصنوعی امن است؟</h3>
+              <p className="text-gray-300 leading-relaxed">
+                بله، سیستم ما با استفاده از آخرین استانداردهای امنیتی طراحی شده است. تمام اطلاعات شما رمزگذاری شده و محافظت می‌شود. همچنین قبل از انجام معاملات واقعی، می‌توانید استراتژی خود را بر روی داده‌های تاریخی تست کنید.
+              </p>
+            </div>
+            <div className="bg-gray-800 rounded-lg p-6">
+              <h3 className="text-xl font-semibold text-blue-400 mb-3">چگونه می‌توانم شروع کنم؟</h3>
+              <p className="text-gray-300 leading-relaxed">
+                برای شروع، ابتدا ثبت‌نام کنید و سپس استراتژی معاملاتی خود را به صورت فایل آپلود کنید. سیستم به صورت خودکار استراتژی را با هوش مصنوعی تجزیه می‌کند و می‌توانید آن را بر روی داده‌های تاریخی تست کنید.
+              </p>
+            </div>
+          </div>
+        </div>
+        <FAQSchema
+          faqs={[
+            {
+              question: 'ترید با هوش مصنوعی چیست؟',
+              answer: 'ترید با هوش مصنوعی به معنای استفاده از الگوریتم‌های هوش مصنوعی و یادگیری ماشین برای تحلیل بازار و انجام معاملات است. سیستم ما با استفاده از هوش مصنوعی، الگوهای معاملاتی را شناسایی کرده و بهترین استراتژی‌ها را برای شما پیشنهاد می‌دهد.'
+            },
+            {
+              question: 'ترید به کمک هوش مصنوعی چگونه کار می‌کند؟',
+              answer: 'ترید به کمک هوش مصنوعی به این صورت است که هوش مصنوعی به عنوان دستیار معاملاتی شما عمل می‌کند. استراتژی‌های شما را تجزیه و تحلیل کرده، بر روی داده‌های تاریخی تست می‌کند و پیشنهادات بهینه برای بهبود عملکرد ارائه می‌دهد.'
+            },
+            {
+              question: 'آیا ترید با هوش مصنوعی امن است؟',
+              answer: 'بله، سیستم ما با استفاده از آخرین استانداردهای امنیتی طراحی شده است. تمام اطلاعات شما رمزگذاری شده و محافظت می‌شود. همچنین قبل از انجام معاملات واقعی، می‌توانید استراتژی خود را بر روی داده‌های تاریخی تست کنید.'
+            },
+            {
+              question: 'چگونه می‌توانم شروع کنم؟',
+              answer: 'برای شروع، ابتدا ثبت‌نام کنید و سپس استراتژی معاملاتی خود را به صورت فایل آپلود کنید. سیستم به صورت خودکار استراتژی را با هوش مصنوعی تجزیه می‌کند و می‌توانید آن را بر روی داده‌های تاریخی تست کنید.'
+            }
+          ]}
+        />
+      </section>
+
       {/* CTA Section */}
       {!isAuthenticated && (
         <section className="py-16 px-4 sm:px-6 lg:px-8">
@@ -410,6 +528,7 @@ export default function Landing() {
         </div>
       </footer>
     </div>
+    </>
   )
 }
 

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
-import { getGapGPTModels, convertStrategyWithGapGPT, compareModelsWithGapGPT, GapGPTModel, saveGapGPTConversion, getSystemSettings } from '../api/client'
+import { getGapGPTModels, convertStrategyWithGapGPT, compareModelsWithGapGPT, GapGPTModel, saveGapGPTConversion, getSystemSettings, analyzeConvertedStrategyAmbiguities } from '../api/client'
 import { useToast } from './ToastProvider'
+import StrategyQuestions from './StrategyQuestions'
 
 interface GapGPTConverterProps {
   strategyText?: string
@@ -21,26 +22,26 @@ const getModelInfo = (model: GapGPTModel, costPerWord: number = 0.001) => {
   if (ownedByLower.includes('openai') || nameLower.includes('gpt')) {
     if (nameLower.includes('gpt-5') || nameLower.includes('gpt5')) {
       return {
-        description: 'مدل پیشرفته و قدرتمند OpenAI با قابلیت‌های استدلال پیشرفته',
+        description: 'مدل پیشرفته و قدرتمند GPT-5 از طریق GapGPT با قابلیت‌های استدلال پیشرفته',
         cost: costDisplay,
         suitableFor: 'تحلیل‌های پیچیده، استدلال پیشرفته، کدنویسی و ریاضیات'
       }
     } else if (nameLower.includes('gpt-4.5') || nameLower.includes('gpt4.5')) {
       return {
-        description: 'مدل خلاقانه و پیشرفته OpenAI برای وظایف پیچیده',
+        description: 'مدل خلاقانه و پیشرفته GPT-4.5 از طریق GapGPT برای وظایف پیچیده',
         cost: costDisplay,
         suitableFor: 'تولید محتوای خلاقانه، برنامه‌ریزی پیچیده، تحلیل‌های حرفه‌ای'
       }
     } else if (nameLower.includes('gpt-4o') || nameLower.includes('gpt4o') || nameLower.includes('gpt-40')) {
       if (nameLower.includes('mini')) {
         return {
-          description: 'مدل سریع و مقرون‌به‌صرفه OpenAI با عملکرد عالی',
+          description: 'مدل سریع و مقرون‌به‌صرفه GPT-4o-mini از طریق GapGPT با عملکرد عالی',
           cost: costDisplay,
           suitableFor: 'تحلیل‌های روزمره، تبدیل استراتژی‌ها، کارهای سریع'
         }
       } else {
         return {
-          description: 'مدل قدرتمند و همه‌کاره OpenAI با دقت بالا',
+          description: 'مدل قدرتمند و همه‌کاره GPT-4o از طریق GapGPT با دقت بالا',
           cost: costDisplay,
           suitableFor: 'تحلیل‌های دقیق، تبدیل استراتژی‌های پیچیده، تولید محتوای باکیفیت'
         }
@@ -66,9 +67,9 @@ const getModelInfo = (model: GapGPTModel, costPerWord: number = 0.001) => {
         suitableFor: 'مکالمات تعاملی، تحلیل‌های سریع، تبدیل استراتژی‌ها'
       }
     }
-    // پیش‌فرض برای مدل‌های OpenAI دیگر
+    // پیش‌فرض برای مدل‌های OpenAI دیگر از طریق GapGPT
     return {
-      description: 'مدل OpenAI با عملکرد متعادل',
+      description: 'مدل OpenAI از طریق GapGPT با عملکرد متعادل',
       cost: costDisplay,
       suitableFor: 'تحلیل و تبدیل استراتژی‌های معاملاتی'
     }
@@ -125,6 +126,8 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
   const [saving, setSaving] = useState(false)
   const [modelCosts, setModelCosts] = useState<{ [key: string]: number }>({})
   const defaultCost = 0.001
+  const [showQuestions, setShowQuestions] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
   const { showToast } = useToast()
 
   useEffect(() => {
@@ -333,7 +336,7 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
       {loadingModels ? (
         <div className="text-gray-400 text-center py-4">در حال بارگذاری مدل‌ها...</div>
       ) : models.length === 0 ? (
-        <div className="text-yellow-400 text-center py-4">هیچ مدلی یافت نشد. لطفاً کلید API GapGPT را در تنظیمات اضافه کنید.</div>
+        <div className="text-yellow-400 text-center py-4">هیچ مدلی یافت نشد. لطفاً کلید API GPT را در تنظیمات اضافه کنید.</div>
       ) : (
         <>
           {mode === 'single' ? (
@@ -586,46 +589,101 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
           <pre className="bg-black text-green-400 p-4 rounded overflow-auto max-h-[400px] text-xs border border-gray-800 mb-4">
             {JSON.stringify(result.converted_strategy, null, 2)}
           </pre>
-          {strategyId && (
-            <button
-              onClick={async () => {
-                if (!strategyId) return
-                try {
-                  setSaving(true)
-                  await saveGapGPTConversion(strategyId, {
-                    converted_strategy: result.converted_strategy,
-                    model_used: result.model_used,
-                    tokens_used: result.tokens_used
-                  })
-                  showToast('استراتژی تبدیل شده با موفقیت ذخیره شد!', { type: 'success' })
+          <div className="flex gap-2">
+            {strategyId && (
+              <>
+                <button
+                  onClick={async () => {
+                    if (!strategyId) return
+                    try {
+                      setSaving(true)
+                      await saveGapGPTConversion(strategyId, {
+                        converted_strategy: result.converted_strategy,
+                        model_used: result.model_used,
+                        tokens_used: result.tokens_used
+                      })
+                      showToast('استراتژی تبدیل شده با موفقیت ذخیره شد!', { type: 'success' })
+                      if (onSave) {
+                        onSave()
+                      }
+                    } catch (error: any) {
+                      console.error('Error saving GapGPT conversion:', error)
+                      showToast(error.response?.data?.message || 'خطا در ذخیره استراتژی', { type: 'error' })
+                    } finally {
+                      setSaving(false)
+                    }
+                  }}
+                  disabled={saving}
+                  className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded font-semibold transition-colors flex items-center justify-center gap-2"
+                >
+                  {saving ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      در حال ذخیره...
+                    </>
+                  ) : (
+                    <>
+                      <span>💾</span>
+                      <span>ذخیره استراتژی تبدیل شده</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!strategyId) return
+                    try {
+                      setAnalyzing(true)
+                      await saveGapGPTConversion(strategyId, {
+                        converted_strategy: result.converted_strategy,
+                        model_used: result.model_used,
+                        tokens_used: result.tokens_used
+                      })
+                      await analyzeConvertedStrategyAmbiguities(strategyId)
+                      setShowQuestions(true)
+                      showToast('تحلیل ابهامات با موفقیت انجام شد!', { type: 'success' })
+                    } catch (error: any) {
+                      console.error('Error analyzing ambiguities:', error)
+                      showToast(error.response?.data?.message || 'خطا در تحلیل ابهامات', { type: 'error' })
+                    } finally {
+                      setAnalyzing(false)
+                    }
+                  }}
+                  disabled={analyzing || saving}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded font-semibold transition-colors flex items-center justify-center gap-2"
+                >
+                  {analyzing ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      در حال تحلیل...
+                    </>
+                  ) : (
+                    <>
+                      <span>🔍</span>
+                      <span>تحلیل ابهامات با AI</span>
+                    </>
+                  )}
+                </button>
+              </>
+            )}
+          </div>
+          {showQuestions && strategyId && (
+            <div className="mt-6 border-t border-gray-700 pt-6">
+              <StrategyQuestions 
+                strategyId={strategyId} 
+                onComplete={() => {
+                  showToast('استراتژی با موفقیت بهبود یافت!', { type: 'success' })
                   if (onSave) {
                     onSave()
                   }
-                } catch (error: any) {
-                  console.error('Error saving GapGPT conversion:', error)
-                  showToast(error.response?.data?.message || 'خطا در ذخیره استراتژی', { type: 'error' })
-                } finally {
-                  setSaving(false)
-                }
-              }}
-              disabled={saving}
-              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded font-semibold transition-colors flex items-center justify-center gap-2"
-            >
-              {saving ? (
-                <>
-                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  در حال ذخیره...
-                </>
-              ) : (
-                <>
-                  <span>💾</span>
-                  <span>ذخیره استراتژی تبدیل شده</span>
-                </>
-              )}
-            </button>
+                }}
+              />
+            </div>
           )}
         </div>
       )}
@@ -670,45 +728,98 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
                 {JSON.stringify(compareResults.best_result.result.converted_strategy, null, 2)}
               </pre>
               {strategyId && (
-                <button
-                  onClick={async () => {
-                    if (!strategyId || !compareResults.best_result) return
-                    try {
-                      setSaving(true)
-                      await saveGapGPTConversion(strategyId, {
-                        converted_strategy: compareResults.best_result.result.converted_strategy,
-                        model_used: compareResults.best_result.model_id,
-                        tokens_used: compareResults.best_result.result.tokens_used || 0
-                      })
-                      showToast('استراتژی تبدیل شده با موفقیت ذخیره شد!', { type: 'success' })
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!strategyId || !compareResults.best_result) return
+                      try {
+                        setSaving(true)
+                        await saveGapGPTConversion(strategyId, {
+                          converted_strategy: compareResults.best_result.result.converted_strategy,
+                          model_used: compareResults.best_result.model_id,
+                          tokens_used: compareResults.best_result.result.tokens_used || 0
+                        })
+                        showToast('استراتژی تبدیل شده با موفقیت ذخیره شد!', { type: 'success' })
+                        if (onSave) {
+                          onSave()
+                        }
+                      } catch (error: any) {
+                        console.error('Error saving GapGPT conversion:', error)
+                        showToast(error.response?.data?.message || 'خطا در ذخیره استراتژی', { type: 'error' })
+                      } finally {
+                        setSaving(false)
+                      }
+                    }}
+                    disabled={saving}
+                    className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded font-semibold transition-colors flex items-center justify-center gap-2"
+                  >
+                    {saving ? (
+                      <>
+                        <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        در حال ذخیره...
+                      </>
+                    ) : (
+                      <>
+                        <span>💾</span>
+                        <span>ذخیره بهترین استراتژی</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!strategyId || !compareResults.best_result) return
+                      try {
+                        setAnalyzing(true)
+                        await saveGapGPTConversion(strategyId, {
+                          converted_strategy: compareResults.best_result.result.converted_strategy,
+                          model_used: compareResults.best_result.model_id,
+                          tokens_used: compareResults.best_result.result.tokens_used || 0
+                        })
+                        await analyzeConvertedStrategyAmbiguities(strategyId)
+                        setShowQuestions(true)
+                        showToast('تحلیل ابهامات با موفقیت انجام شد!', { type: 'success' })
+                      } catch (error: any) {
+                        console.error('Error analyzing ambiguities:', error)
+                        showToast(error.response?.data?.message || 'خطا در تحلیل ابهامات', { type: 'error' })
+                      } finally {
+                        setAnalyzing(false)
+                      }
+                    }}
+                    disabled={analyzing || saving}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded font-semibold transition-colors flex items-center justify-center gap-2"
+                  >
+                    {analyzing ? (
+                      <>
+                        <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        در حال تحلیل...
+                      </>
+                    ) : (
+                      <>
+                        <span>🔍</span>
+                        <span>تحلیل ابهامات با AI</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+              {showQuestions && strategyId && (
+                <div className="mt-6 border-t border-gray-700 pt-6">
+                  <StrategyQuestions 
+                    strategyId={strategyId} 
+                    onComplete={() => {
+                      showToast('استراتژی با موفقیت بهبود یافت!', { type: 'success' })
                       if (onSave) {
                         onSave()
                       }
-                    } catch (error: any) {
-                      console.error('Error saving GapGPT conversion:', error)
-                      showToast(error.response?.data?.message || 'خطا در ذخیره استراتژی', { type: 'error' })
-                    } finally {
-                      setSaving(false)
-                    }
-                  }}
-                  disabled={saving}
-                  className="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded font-semibold transition-colors flex items-center justify-center gap-2"
-                >
-                  {saving ? (
-                    <>
-                      <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                      </svg>
-                      در حال ذخیره...
-                    </>
-                  ) : (
-                    <>
-                      <span>💾</span>
-                      <span>ذخیره بهترین استراتژی</span>
-                    </>
-                  )}
-                </button>
+                    }}
+                  />
+                </div>
               )}
             </div>
           )}

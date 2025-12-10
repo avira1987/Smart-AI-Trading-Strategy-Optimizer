@@ -227,9 +227,20 @@ sudo tail -f /var/log/nginx/error.log
 
 ## 📚 منابع بیشتر
 
-- [مستندات Let's Encrypt](https://letsencrypt.org/docs/)
-- [مستندات Certbot](https://certbot.eff.org/)
+### منابع انگلیسی:
+- [مستندات رسمی Let's Encrypt](https://letsencrypt.org/docs/)
+- [مستندات رسمی Certbot](https://certbot.eff.org/docs/)
+- [مستندات کامل Certbot (Read the Docs)](https://eff-certbot.readthedocs.io/en/stable/)
 - [راهنمای Nginx SSL](https://nginx.org/en/docs/http/configuring_https_servers.html)
+
+### منابع اضافی:
+- [گیت‌هاب Certbot](https://github.com/certbot/certbot) - برای مشاهده کد منبع، Issues و راهنماها
+- [مستندات Certbot در GitHub](https://github.com/certbot/certbot/tree/main/docs)
+
+**نکته:** اگر به برخی از این لینک‌ها دسترسی ندارید:
+- از VPN استفاده کنید
+- یا مستقیماً در گیت‌هاب Certbot جستجو کنید: `https://github.com/certbot/certbot`
+- یا از مستندات محلی در پوشه `docs/` پروژه استفاده کنید
 
 ## 🆘 پشتیبانی
 

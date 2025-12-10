@@ -239,16 +239,14 @@ class TradingStrategySerializer(serializers.ModelSerializer):
             return {}
         
         method_names = {
-            'gemini_ai': 'هوش مصنوعی Gemini',
-            'openai_ai': 'هوش مصنوعی OpenAI (ChatGPT)',
+            'gapgpt_ai': 'هوش مصنوعی GapGPT',
             'basic_analysis': 'تحلیل پایه',
             'failed': 'ناموفق',
             None: 'نامشخص'
         }
         
         ai_model_names = {
-            'gemini': 'Google Gemini AI',
-            'openai': 'OpenAI (ChatGPT)',
+            'gapgpt': 'GapGPT',
             None: 'هیچکدام'
         }
         
@@ -259,8 +257,7 @@ class TradingStrategySerializer(serializers.ModelSerializer):
             'oanda': 'OANDA',
             'metalsapi': 'MetalsAPI',
             'mt5': 'MetaTrader 5',
-            'openai': 'OpenAI (ChatGPT)',
-            'gemini': 'Google Gemini AI',
+            'gapgpt': 'GapGPT',
             'unknown': 'نامشخص'
         }
         
@@ -645,7 +642,7 @@ class ResultSerializer(serializers.ModelSerializer):
     class Meta:
         model = Result
         fields = ['id', 'job', 'strategy_name', 'total_return', 'total_trades', 'winning_trades', 
-                  'losing_trades', 'win_rate', 'max_drawdown', 'equity_curve_data',
+                  'losing_trades', 'win_rate', 'max_drawdown', 'profit_factor', 'equity_curve_data',
                   'description', 'trades_details', 'data_sources', 'data_sources_display', 'created_at']
         read_only_fields = ['created_at', 'data_sources', 'data_sources_display', 'strategy_name']
     
@@ -691,7 +688,7 @@ class JobSerializer(serializers.ModelSerializer):
 
 
 class JobCreateSerializer(serializers.Serializer):
-    ai_provider = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text="AI provider for backtest analysis (gapgpt, gemini, openai, or auto)")
+    ai_provider = serializers.CharField(required=False, allow_blank=True, allow_null=True, help_text="AI provider for backtest analysis (gapgpt or auto)")
     strategy = serializers.IntegerField()
     job_type = serializers.ChoiceField(choices=['backtest', 'demo_trade'])
     timeframe_days = serializers.IntegerField(required=False, min_value=1, default=365)

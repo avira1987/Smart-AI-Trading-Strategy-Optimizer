@@ -5,7 +5,7 @@ from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.views import APIView
 from rest_framework.serializers import ValidationError
 from django.shortcuts import get_object_or_404
-from django.http import Http404, FileResponse
+from django.http import Http404, FileResponse, HttpResponse
 import os
 import mimetypes
 from urllib.parse import quote
@@ -385,202 +385,23 @@ class APIConfigurationViewSet(viewsets.ModelViewSet):
         
         logger.info("API test initiated for provider %s (config id=%s)", api_config.provider, api_config.id)
 
-        # Special handling for Gemini AI API
+        # Gemini API removed - only GapGPT is supported now
         if api_config.provider == 'gemini':
-            try:
-                # Check if google-generativeai is installed
-                try:
-                    import google.generativeai as genai
-                except ImportError as import_err:
-                    logger.error(f"Gemini import failed: {import_err}")
-                    return Response({
-                        'status': 'error',
-                        'message': 'Google Generative AI library not installed. Please install it: pip install google-generativeai',
-                        'provider': 'gemini'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                
-                if genai is None:
-                    return Response({
-                        'status': 'error',
-                        'message': 'Google Generative AI library not available',
-                        'provider': 'gemini'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                
-                # Test Gemini API with the key from this config
-                if not api_config.api_key or not api_config.api_key.strip():
-                    return Response({
-                        'status': 'error',
-                        'message': 'API key is empty',
-                        'provider': 'gemini'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                
-                try:
-                    # Configure genai with the test key
-                    genai.configure(api_key=api_config.api_key.strip())
-                    model_name = getattr(settings, 'GEMINI_MODEL', 'gemini-1.5-flash')
-                    
-                    # First, try to get list of available models
-                    available_models = []
-                    try:
-                        logger.info("Fetching list of available Gemini models...")
-                        for model in genai.list_models():
-                            if 'generateContent' in model.supported_generation_methods:
-                                model_display_name = model.display_name or model.name
-                                model_name_short = model.name.split('/')[-1] if '/' in model.name else model.name
-                                available_models.append({
-                                    'full_name': model.name,
-                                    'short_name': model_name_short,
-                                    'display_name': model_display_name
-                                })
-                                logger.info(f"Found available model: {model.name}")
-                    except Exception as list_error:
-                        logger.warning(f"Could not list models: {str(list_error)}")
-                        # Continue with default models if listing fails
-                    
-                    # Build list of models to try
-                    model_names_to_try = []
-                    
-                    # Add configured model first
-                    if model_name:
-                        model_names_to_try.append(model_name)
-                    
-                    # Add models from available_models list
-                    if available_models:
-                        for model_info in available_models:
-                            # Try both full name and short name
-                            if model_info['full_name'] not in model_names_to_try:
-                                model_names_to_try.append(model_info['full_name'])
-                            if model_info['short_name'] not in model_names_to_try and model_info['short_name'] != model_info['full_name']:
-                                model_names_to_try.append(model_info['short_name'])
-                    
-                    # Add fallback models if no models found from API
-                    if not model_names_to_try:
-                        model_names_to_try = [
-                            'gemini-2.0-flash',
-                            'gemini-2.5-flash',
-                            'gemini-2.0-flash-001',
-                            'gemini-2.5-pro',
-                            'gemini-pro-latest',
-                            'models/gemini-2.0-flash',
-                            'models/gemini-2.5-flash',
-                            'models/gemini-pro-latest',
-                        ]
-                    
-                    # Remove duplicates while preserving order
-                    seen = set()
-                    model_names_to_try = [x for x in model_names_to_try if not (x in seen or seen.add(x))]
-                    
-                    logger.info(f"Models to try: {model_names_to_try}")
-                    
-                    last_error = None
-                    successful_model = None
-                    
-                    for try_model_name in model_names_to_try:
-                        try:
-                            logger.info(f"Trying Gemini model: {try_model_name}")
-                            model = genai.GenerativeModel(try_model_name)
-                            
-                            # Try a simple test call to verify the API key works
-                            test_response = model.generate_content(
-                                "Say 'test'",
-                                generation_config={'max_output_tokens': 10}
-                            )
-                            
-                            # Check if response is valid
-                            if hasattr(test_response, 'text') or hasattr(test_response, 'candidates'):
-                                successful_model = try_model_name
-                                success_msg = f'Gemini API connection successful using model: {try_model_name}'
-                                if try_model_name != model_name:
-                                    success_msg += f' (configured model "{model_name}" was not available, used "{try_model_name}" instead)'
-                                
-                                return Response({
-                                    'status': 'success',
-                                    'message': success_msg,
-                                    'provider': 'gemini',
-                                    'data_points': 0
-                                })
-                        except Exception as model_error:
-                            last_error = model_error
-                            logger.warning(f"Model {try_model_name} failed: {str(model_error)}")
-                            continue
-                    
-                    # If all models failed, return detailed error
-                    if last_error:
-                        error_msg = str(last_error)
-                        logger.error(f"Gemini API test error with all models: {error_msg}")
-                        
-                        # Build detailed error message
-                        if available_models:
-                            available_model_names = [m['short_name'] for m in available_models[:5]]
-                            error_details = f'\n\nAvailable models found: {", ".join(available_model_names)}'
-                            if len(available_models) > 5:
-                                error_details += f' (and {len(available_models) - 5} more)'
-                        else:
-                            available_model_names = []
-                            error_details = '\n\nCould not fetch list of available models from API.'
-                        
-                        # Provide user-friendly error messages
-                        if 'API_KEY_INVALID' in error_msg or 'Invalid API key' in error_msg or 'INVALID_API_KEY' in error_msg:
-                            error_msg = f'Invalid API key. Please check your Gemini API key from Google AI Studio.{error_details}'
-                        elif 'PERMISSION_DENIED' in error_msg or 'Permission denied' in error_msg:
-                            error_msg = f'Permission denied. Please check your API key permissions in Google AI Studio.{error_details}'
-                        elif 'quota' in error_msg.lower() or 'limit' in error_msg.lower() or 'QUOTA_EXCEEDED' in error_msg:
-                            error_msg = f'API quota exceeded. Please check your usage limits in Google AI Studio.{error_details}'
-                        elif '404' in error_msg or 'NOT_FOUND' in error_msg or 'Model not found' in error_msg or 'is not found for API version' in error_msg:
-                            error_msg = f'Models not found for API version. This usually means:\n1. The API version changed or models were renamed\n2. Your API key does not have access to these models\n3. You need to update the model names\n\nFull error: {error_msg}{error_details}\n\nTried models: {", ".join(model_names_to_try[:5])}'
-                        elif '401' in error_msg or 'UNAUTHENTICATED' in error_msg:
-                            error_msg = f'Authentication failed. Please verify your API key.{error_details}'
-                        elif '429' in error_msg:
-                            error_msg = f'Rate limit exceeded. Please try again later.{error_details}'
-                        else:
-                            # Include full error message for debugging
-                            error_msg = f'{error_msg}{error_details}\n\nTried models: {", ".join(model_names_to_try[:5])}'
-                        
-                        return Response({
-                            'status': 'error',
-                            'message': f'Gemini API test failed: {error_msg}',
-                            'provider': 'gemini'
-                        }, status=status.HTTP_400_BAD_REQUEST)
-                    
-                    # This should not happen, but just in case
-                    return Response({
-                        'status': 'error',
-                        'message': 'Gemini API test failed: No models were attempted.',
-                        'provider': 'gemini'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                    
-                except Exception as api_error:
-                    error_msg = str(api_error)
-                    logger.exception(f"Gemini API test unexpected error: {error_msg}")
-                    
-                    # Provide user-friendly error messages
-                    if 'API_KEY_INVALID' in error_msg or 'Invalid API key' in error_msg or 'INVALID_API_KEY' in error_msg:
-                        error_msg = 'Invalid API key. Please check your Gemini API key from Google AI Studio.'
-                    elif 'PERMISSION_DENIED' in error_msg or 'Permission denied' in error_msg:
-                        error_msg = 'Permission denied. Please check your API key permissions in Google AI Studio.'
-                    elif 'quota' in error_msg.lower() or 'limit' in error_msg.lower() or 'QUOTA_EXCEEDED' in error_msg:
-                        error_msg = 'API quota exceeded. Please check your usage limits in Google AI Studio.'
-                    elif '404' in error_msg or 'NOT_FOUND' in error_msg:
-                        error_msg = 'Model not found. Please check GEMINI_MODEL setting.'
-                    elif '401' in error_msg or 'UNAUTHENTICATED' in error_msg:
-                        error_msg = 'Authentication failed. Please verify your API key.'
-                    elif '429' in error_msg:
-                        error_msg = 'Rate limit exceeded. Please try again later.'
-                    
-                    return Response({
-                        'status': 'error',
-                        'message': f'Gemini API test failed: {error_msg}',
-                        'provider': 'gemini'
-                    }, status=status.HTTP_400_BAD_REQUEST)
-                    
-            except Exception as e:
-                logger.exception(f"Gemini API test failed with exception: {e}")
-                user_message = get_user_friendly_api_error_message(str(e))
-                return Response({
-                    'status': 'error',
-                    'message': user_message,
-                    'provider': 'gemini'
-                }, status=status.HTTP_400_BAD_REQUEST)
+            return Response({
+                'status': 'error',
+                'message': 'Gemini API is no longer supported. Please use GapGPT instead.',
+                'provider': 'gemini'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # OpenAI API removed - only GapGPT is supported now
+        if api_config.provider in ['openai', 'chatgpt', 'gpt', 'gpt4', 'gpt-4']:
+            return Response({
+                'status': 'error',
+                'message': 'OpenAI API is no longer supported. Please use GapGPT instead.',
+                'provider': api_config.provider
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Old Gemini/OpenAI code removed - only GapGPT is supported now
         
         elif api_config.provider == 'gapgpt':
             # Special handling for GapGPT API
@@ -1073,6 +894,67 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(user=self.request.user, is_active=True)
     
+    def destroy(self, request, *args, **kwargs):
+        """Override destroy to handle strategy deletion properly"""
+        import logging
+        import os
+        from django.db import transaction
+        from django.core.files.storage import default_storage
+        
+        logger = logging.getLogger(__name__)
+        strategy = self.get_object()
+        strategy_id = strategy.id
+        strategy_name = strategy.name
+        
+        # Check permissions
+        user = request.user
+        if not (user.is_staff or user.is_superuser or strategy.user == user):
+            return Response(
+                {'error': 'مجوز حذف این استراتژی را ندارید.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        try:
+            with transaction.atomic():
+                # Store file information before deletion
+                strategy_file_path = None
+                strategy_file_name = None
+                if strategy.strategy_file:
+                    strategy_file_path = strategy.strategy_file.path
+                    strategy_file_name = strategy.strategy_file.name
+                
+                # If this is a primary strategy, we need to handle the constraint
+                # by setting is_primary to False first
+                if strategy.is_primary:
+                    strategy.is_primary = False
+                    strategy.save(update_fields=['is_primary'])
+                
+                # Delete the strategy (this will cascade delete related objects)
+                strategy.delete()
+                
+                # Delete the file if it exists
+                if strategy_file_name:
+                    try:
+                        if default_storage.exists(strategy_file_name):
+                            default_storage.delete(strategy_file_name)
+                            logger.info(f"Deleted strategy file: {strategy_file_name}")
+                    except Exception as file_error:
+                        logger.warning(f"Could not delete strategy file {strategy_file_name}: {file_error}")
+                
+                logger.info(f"Strategy {strategy_id} ({strategy_name}) deleted successfully by user {user.username}")
+                
+                return Response(
+                    {'message': 'استراتژی با موفقیت حذف شد'},
+                    status=status.HTTP_200_OK
+                )
+                
+        except Exception as e:
+            logger.error(f"Error deleting strategy {strategy_id}: {e}", exc_info=True)
+            return Response(
+                {'error': f'خطا در حذف استراتژی: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
     @action(detail=True, methods=['post'])
     def toggle_active(self, request, pk=None):
         """Toggle strategy active status"""
@@ -1194,6 +1076,133 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             return Response({
                 'status': 'error',
                 'message': f'خطا در ذخیره استراتژی: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=True, methods=['post'], url_path='analyze-converted-strategy-ambiguities')
+    def analyze_converted_strategy_ambiguities(self, request, pk=None):
+        """تحلیل ابهامات استراتژی تبدیل شده و تولید سوالات"""
+        from ai_module.gemini_client import analyze_converted_strategy_ambiguities
+        from core.models import StrategyQuestion
+        from ai_module.provider_manager import get_provider_manager
+        
+        strategy = self.get_object()
+        
+        # بررسی دسترسی
+        if not (request.user.is_staff or request.user.is_superuser or strategy.user == request.user):
+            return Response({
+                'status': 'error',
+                'message': 'شما دسترسی به این استراتژی ندارید'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # بررسی وجود استراتژی تبدیل شده
+        if not strategy.parsed_strategy_data:
+            return Response({
+                'status': 'error',
+                'message': 'استراتژی تبدیل شده یافت نشد. لطفاً ابتدا استراتژی را تبدیل کنید.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # بررسی اینکه استراتژی از GapGPT تبدیل شده است
+        converted_strategy = strategy.parsed_strategy_data
+        if converted_strategy.get('conversion_source') != 'gapgpt':
+            return Response({
+                'status': 'error',
+                'message': 'این استراتژی از طریق GapGPT تبدیل نشده است.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        manager = get_provider_manager(user=request.user)
+        available_providers = [
+            name for name, provider in manager.providers.items() if provider.is_available()
+        ]
+        if not available_providers:
+            logger.error("No AI providers configured for ambiguity analysis")
+            return Response({
+                'status': 'error',
+                'message': 'هیچ کلید معتبری برای ارائه‌دهندگان هوش مصنوعی ثبت نشده است. لطفاً در بخش تنظیمات API یکی از سرویس‌های Cohere، OpenRouter، Together AI، DeepInfra، GroqCloud یا Gemini را فعال کنید.'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        try:
+            # Get existing answers
+            existing_questions = StrategyQuestion.objects.filter(strategy=strategy, status='answered')
+            existing_answers = {
+                q.question_text: q.answer for q in existing_questions if q.answer
+            }
+            
+            logger.info(f"Analyzing converted strategy ambiguities for strategy {strategy.id}")
+            
+            # Analyze ambiguities using AI
+            analysis_result = analyze_converted_strategy_ambiguities(
+                converted_strategy,
+                existing_answers,
+                user=request.user
+            )
+            
+            if analysis_result.get('ai_status') != 'ok':
+                message = analysis_result.get(
+                    'message',
+                    "AI analysis unavailable. لطفاً کلید یکی از ارائه‌دهندگان هوش مصنوعی را در تنظیمات وارد و فعال کنید."
+                )
+                logger.warning(
+                    "AI ambiguity analysis unavailable for strategy %s: %s",
+                    strategy.id,
+                    message
+                )
+                return Response({
+                    'status': 'error',
+                    'message': message
+                }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            
+            questions = analysis_result.get('extra', {}).get('questions', [])
+            if not isinstance(questions, list) or len(questions) == 0:
+                logger.warning(f"analyze_converted_strategy_ambiguities returned empty list for strategy {strategy.id}")
+                return Response({
+                    'status': 'error',
+                    'message': 'هیچ سوالی تولید نشد. استراتژی به نظر کامل است یا نیاز به بررسی بیشتر دارد.'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            # Delete old pending questions
+            StrategyQuestion.objects.filter(strategy=strategy, status='pending').delete()
+            
+            # Create new questions
+            created_questions = []
+            for q_data in questions:
+                try:
+                    question = StrategyQuestion.objects.create(
+                        strategy=strategy,
+                        question_text=q_data.get('question_text', ''),
+                        question_type=q_data.get('question_type', 'text'),
+                        options=q_data.get('options'),
+                        order=q_data.get('order', 0),
+                        context=q_data.get('context', {})
+                    )
+                    created_questions.append(question)
+                except Exception as create_error:
+                    logger.error(f"Error creating question: {str(create_error)}, data: {q_data}")
+                    continue
+            
+            if len(created_questions) == 0:
+                return Response({
+                    'status': 'error',
+                    'message': 'خطا در ایجاد سوالات در پایگاه داده.'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            from api.serializers import StrategyQuestionSerializer
+            serializer = StrategyQuestionSerializer(created_questions, many=True)
+            
+            logger.info(f"Successfully generated {len(created_questions)} questions for converted strategy {strategy.id}")
+            
+            return Response({
+                'status': 'success',
+                'message': f'{len(created_questions)} سوال با موفقیت تولید شد.',
+                'questions': serializer.data
+            })
+            
+        except Exception as e:
+            import traceback
+            error_trace = traceback.format_exc()
+            logger.error(f"Error analyzing converted strategy ambiguities for strategy {strategy.id}: {str(e)}\n{error_trace}")
+            return Response({
+                'status': 'error',
+                'message': f'خطا در تحلیل ابهامات: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     @action(detail=True, methods=['get'], url_path='file-content')
@@ -2109,6 +2118,17 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             enhanced_strategy_for_save = dict(enhanced_strategy)
             enhanced_strategy_for_save.pop('_token_info', None)
             
+            # حفظ metadata استراتژی تبدیل شده (اگر وجود دارد)
+            if parsed_data.get('conversion_source'):
+                enhanced_strategy_for_save['conversion_source'] = parsed_data.get('conversion_source')
+            if parsed_data.get('converted_at'):
+                enhanced_strategy_for_save['converted_at'] = parsed_data.get('converted_at')
+            if parsed_data.get('model_used'):
+                enhanced_strategy_for_save['model_used'] = parsed_data.get('model_used')
+            # اضافه کردن اطلاعات بهبود
+            enhanced_strategy_for_save['improved_with_answers'] = True
+            enhanced_strategy_for_save['improved_at'] = timezone.now().isoformat()
+            
             # Update strategy
             strategy.parsed_strategy_data = enhanced_strategy_for_save
             strategy.processing_status = 'processed'
@@ -2138,7 +2158,9 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['get'], url_path='download')
     def download(self, request, pk=None):
-        """دانلود فایل استراتژی - همان فایل آپلود شده"""
+        """دانلود فایل استراتژی - همان فایل آپلود شده + سوالات و پاسخ‌ها"""
+        from core.models import StrategyQuestion
+        
         strategy = self.get_object()
         
         # بررسی دسترسی
@@ -2165,13 +2187,40 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             
             # دریافت نام فایل اصلی (همان نام آپلود شده) با حفظ پسوند کامل
             original_filename = os.path.basename(strategy.strategy_file.name)
+            file_ext = os.path.splitext(original_filename)[1].lower()
+            
+            # خواندن محتوای فایل اصلی
+            from ai_module.nlp_parser import extract_text_from_file
+            original_content = extract_text_from_file(file_path)
+            
+            # دریافت سوالات و پاسخ‌های پاسخ داده شده
+            answered_questions = StrategyQuestion.objects.filter(
+                strategy=strategy,
+                status='answered'
+            ).order_by('order', 'created_at')
+            
+            # اگر سوال و پاسخی وجود دارد، به انتهای فایل اضافه کن
+            if answered_questions.exists():
+                questions_section = "\n\n" + "=" * 50 + "\n"
+                questions_section += "سوالات و پاسخ‌های تکمیلی\n"
+                questions_section += "=" * 50 + "\n\n"
+                
+                for idx, question in enumerate(answered_questions, 1):
+                    questions_section += f"سوال {idx}:\n"
+                    questions_section += f"{question.question_text}\n\n"
+                    questions_section += f"پاسخ:\n"
+                    questions_section += f"{question.answer}\n\n"
+                    if question.context and question.context.get('related_text'):
+                        questions_section += f"متن مرتبط: {question.context.get('related_text')}\n\n"
+                    questions_section += "-" * 50 + "\n\n"
+                
+                # اضافه کردن بخش سوالات به انتهای محتوا
+                original_content += questions_section
             
             # تعیین Content-Type بر اساس پسوند فایل
-            # برای فایل‌های Word (.docx) باید content type درست باشد
             content_type, _ = mimetypes.guess_type(original_filename)
             if not content_type:
                 # Fallback برای انواع فایل‌های رایج
-                file_ext = os.path.splitext(original_filename)[1].lower()
                 content_type_map = {
                     '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
                     '.doc': 'application/msword',
@@ -2181,17 +2230,23 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                 }
                 content_type = content_type_map.get(file_ext, 'application/octet-stream')
             
-            # باز کردن فایل و ارسال آن (همان فایل آپلود شده - باینری)
-            file = open(file_path, 'rb')
-            response = FileResponse(file, content_type=content_type, as_attachment=True)
-            
-            # Encode کردن نام فایل برای پشتیبانی از کاراکترهای فارسی و خاص
-            # استفاده از RFC 2231 برای پشتیبانی بهتر از کاراکترهای غیر ASCII
-            encoded_filename = quote(original_filename, safe='')
-            # استفاده از هر دو فرمت برای سازگاری بیشتر با مرورگرها
-            response['Content-Disposition'] = f'attachment; filename="{original_filename}"; filename*=UTF-8\'\'{encoded_filename}'
-            
-            return response
+            # اگر فایل متنی است (txt, md) یا سوالات اضافه شده، محتوای متنی را برگردان
+            if file_ext in ['.txt', '.md'] or answered_questions.exists():
+                # برای فایل‌های متنی یا زمانی که سوالات اضافه شده، محتوای متنی را برگردان
+                response = HttpResponse(original_content, content_type='text/plain; charset=utf-8')
+                response['Content-Disposition'] = f'attachment; filename="{original_filename}"'
+                return response
+            else:
+                # برای سایر فایل‌ها (docx, pdf, etc.) فایل اصلی را برگردان (بدون سوالات)
+                # چون نمی‌توانیم به فایل‌های باینری سوالات اضافه کنیم
+                file = open(file_path, 'rb')
+                response = FileResponse(file, content_type=content_type, as_attachment=True)
+                
+                # Encode کردن نام فایل برای پشتیبانی از کاراکترهای فارسی و خاص
+                encoded_filename = quote(original_filename, safe='')
+                response['Content-Disposition'] = f'attachment; filename="{original_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+                
+                return response
         except Exception as e:
             logger.error(f"Error downloading strategy file {strategy.id}: {str(e)}")
             return Response({
@@ -2656,6 +2711,23 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
             return Response({'error': 'برای استراتژی‌های مارکت‌پلیس تنها امکان اجرای بک‌تست وجود دارد.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if job_type == 'backtest':
+            # Rate limiting: Check if user has created a backtest in the last minute
+            one_minute_ago = timezone.now() - timedelta(minutes=1)
+            recent_backtest = Job.objects.filter(
+                user=user,
+                job_type='backtest',
+                created_at__gte=one_minute_ago
+            ).exists()
+            
+            if recent_backtest:
+                return Response(
+                    {
+                        'error': 'rate_limit_exceeded',
+                        'message': 'شما می‌توانید فقط یک بار در دقیقه بک‌تست بگیرید. لطفاً صبر کنید.'
+                    },
+                    status=status.HTTP_429_TOO_MANY_REQUESTS
+                )
+            
             # فقط برای استراتژی‌های کاربر (نه مارکت‌پلیس) بررسی می‌کنیم که آیا حداقل یک استراتژی وجود دارد
             # اما اجازه می‌دهیم هر استراتژی کاربر برای بک‌تست استفاده شود، نه فقط استراتژی اصلی
             if not marketplace_access:
@@ -2692,7 +2764,9 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
             # Run task asynchronously using Celery
             try:
                 if job_type == 'backtest':
-                    logger.info(f"Starting async backtest task for job {job.id}, strategy {strategy_id}, timeframe {timeframe_days} days, ai_provider={ai_provider}")
+                    # نمایش پرووایدر واقعی که استفاده خواهد شد
+                    actual_provider = ai_provider if ai_provider else 'gapgpt (default)'
+                    logger.info(f"Starting async backtest task for job {job.id}, strategy {strategy_id}, timeframe {timeframe_days} days, ai_provider={actual_provider}")
                     run_backtest_task.delay(
                         job.id,
                         timeframe_days=timeframe_days,
@@ -4436,11 +4510,32 @@ class GapGPTViewSet(viewsets.ViewSet):
                     'data': result
                 })
             else:
+                # بررسی نوع خطا برای برگرداندن کد وضعیت مناسب
+                error_status = status.HTTP_400_BAD_REQUEST
+                error_message = result.get('error', 'خطای نامشخص')
+                
+                # اگر خطای quota باشد، کد وضعیت 503 (Service Unavailable) برمی‌گردانیم
+                if result.get('is_quota_error', False):
+                    error_status = status.HTTP_503_SERVICE_UNAVAILABLE
+                    logger.warning(
+                        f"GapGPT quota error for user {user.username if user and user.is_authenticated else 'anonymous'}: "
+                        f"remaining={result.get('quota_remaining', 'unknown')}, "
+                        f"required={result.get('quota_required', 'unknown')}"
+                    )
+                # اگر خطای 403 باشد (اما quota error نباشد)
+                elif result.get('status_code') == 403:
+                    error_status = status.HTTP_403_FORBIDDEN
+                # اگر خطای 429 (rate limit) باشد
+                elif result.get('status_code') == 429:
+                    error_status = status.HTTP_429_TOO_MANY_REQUESTS
+                
                 return Response({
                     'status': 'error',
-                    'message': result.get('error', 'خطای نامشخص'),
+                    'message': error_message,
+                    'error': result.get('error', 'خطای نامشخص'),
+                    'error_code': 'quota_exhausted' if result.get('is_quota_error', False) else 'api_error',
                     'data': result
-                }, status=status.HTTP_400_BAD_REQUEST)
+                }, status=error_status)
                 
         except ValueError as e:
             return Response({
@@ -4613,11 +4708,194 @@ class GapGPTViewSet(viewsets.ViewSet):
                 'status': 'error',
                 'message': f'خطا در مقایسه مدل‌ها: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['get'], url_path='balance', permission_classes=[IsAdminOrStaff])
+    def check_balance(self, request):
+        """
+        بررسی موجودی حساب GapGPT (فقط برای ادمین‌ها)
+        
+        Returns:
+            اطلاعات موجودی حساب GapGPT
+        """
+        try:
+            from ai_module.gapgpt_client import check_gapgpt_account_balance
+            
+            user = request.user if request.user.is_authenticated else None
+            result = check_gapgpt_account_balance(user=user)
+            
+            if result.get('success'):
+                return Response({
+                    'status': 'success',
+                    'data': {
+                        'balance': result.get('balance'),
+                        'balance_formatted': result.get('balance_formatted', 'نامشخص'),
+                        'currency': result.get('currency', '¥'),
+                        'required': result.get('required'),
+                        'required_formatted': result.get('required_formatted'),
+                        'message': result.get('message', ''),
+                        'is_low_balance': result.get('is_low_balance', False),
+                        'last_checked': result.get('last_checked'),
+                        'latency_ms': result.get('latency_ms')
+                    }
+                })
+            else:
+                return Response({
+                    'status': 'error',
+                    'message': result.get('message', 'خطا در بررسی موجودی'),
+                    'error': result.get('error'),
+                    'data': {
+                        'balance': result.get('balance'),
+                        'balance_formatted': result.get('balance_formatted', 'نامشخص'),
+                        'currency': result.get('currency', '¥'),
+                        'last_checked': result.get('last_checked'),
+                        'latency_ms': result.get('latency_ms')
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+        except Exception as e:
+            logger.error(f"Error checking GapGPT account balance: {e}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f'خطا در بررسی موجودی حساب GapGPT: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class AdminUserManagementView(APIView):
     """View for admin to manage user credits"""
     permission_classes = [IsAdminOrStaff]
+    
+    def put(self, request):
+        """Create a new user"""
+        from core.models import UserProfile, Wallet, SystemSettings, Transaction
+        from django.contrib.auth.models import User
+        from decimal import Decimal
+        from django.utils import timezone
+        
+        phone_number = request.data.get('phone_number', '').strip()
+        email = request.data.get('email', '').strip()
+        first_name = request.data.get('first_name', '').strip()
+        last_name = request.data.get('last_name', '').strip()
+        nickname = request.data.get('nickname', '').strip()
+        send_otp = request.data.get('send_otp', True)  # Default to True
+        
+        # Validate phone number
+        if not phone_number:
+            return Response(
+                {'error': 'شماره موبایل الزامی است'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not phone_number.startswith('09') or len(phone_number) != 11 or not phone_number.isdigit():
+            return Response(
+                {'error': 'شماره موبایل باید 11 رقم و با 09 شروع شود'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if user already exists
+        if User.objects.filter(username=phone_number).exists():
+            return Response(
+                {'error': 'کاربری با این شماره موبایل قبلا ثبت شده است'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Check if phone number is already used in profile
+        if UserProfile.objects.filter(phone_number=phone_number).exists():
+            return Response(
+                {'error': 'این شماره موبایل قبلا استفاده شده است'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        try:
+            with transaction.atomic():
+                # Create user with phone_number as username
+                user = User.objects.create_user(
+                    username=phone_number,
+                    email=email or f'{phone_number}@example.com',
+                    first_name=first_name,
+                    last_name=last_name,
+                    password=None  # No password, user will login via OTP
+                )
+                
+                # Create user profile
+                profile = UserProfile.objects.create(
+                    user=user,
+                    phone_number=phone_number,
+                    nickname=nickname if nickname else None
+                )
+                
+                # Create wallet
+                wallet, _ = Wallet.objects.get_or_create(
+                    user=user,
+                    defaults={'balance': Decimal('0.00')}
+                )
+                
+                # Give registration bonus to new users
+                settings = SystemSettings.load()
+                bonus_amount = settings.registration_bonus  # Already Decimal from DecimalField
+                
+                if bonus_amount > 0:
+                    wallet.charge(bonus_amount)  # bonus_amount is already Decimal
+                    # Create transaction record
+                    Transaction.objects.create(
+                        wallet=wallet,
+                        transaction_type='charge',
+                        amount=bonus_amount,
+                        status='completed',
+                        description=f'هدیه ثبت‌نام ({bonus_amount:,.0f} تومان)',
+                        completed_at=timezone.now()
+                    )
+                    logger.info(f"✅ Registration bonus of {bonus_amount:,.0f} Toman given to new user {user.username}")
+                
+                # Send OTP code if requested
+                otp_code = None
+                if send_otp:
+                    try:
+                        from core.models import OTPCode
+                        from api.sms_service import send_otp_sms, get_kavenegar_api_key
+                        
+                        otp = OTPCode.create_otp(phone_number)
+                        otp_code = otp.code
+                        
+                        # Try to send SMS
+                        from django.conf import settings as django_settings
+                        api_key = get_kavenegar_api_key()
+                        if api_key and not django_settings.DEBUG:
+                            sms_result = send_otp_sms(phone_number, otp.code)
+                            if not sms_result['success']:
+                                logger.warning(f"Failed to send OTP SMS to {phone_number}: {sms_result['message']}")
+                        else:
+                            logger.info(f"OTP code {otp.code} generated for {phone_number} (SMS not sent - DEBUG mode or API key not configured)")
+                    except Exception as e:
+                        logger.error(f"Error sending OTP to new user: {e}")
+                        # Don't fail user creation if OTP sending fails
+                
+                logger.info(f"✅ New user created by admin: {user.username} (ID: {user.id})")
+                
+                from django.conf import settings as django_settings
+                return Response({
+                    'success': True,
+                    'message': f'کاربر جدید با موفقیت ایجاد شد' + (f' و کد ورود ارسال شد' if send_otp and otp_code else ''),
+                    'user': {
+                        'id': user.id,
+                        'username': user.username,
+                        'email': user.email,
+                        'phone_number': profile.phone_number,
+                        'first_name': user.first_name,
+                        'last_name': user.last_name,
+                        'nickname': profile.nickname,
+                        'balance': float(wallet.balance),
+                        'balance_formatted': f"{wallet.balance:,.0f} تومان",
+                        'date_joined': user.date_joined,
+                    },
+                    'otp_code': otp_code if (django_settings.DEBUG and otp_code) else None  # Only return in DEBUG mode
+                }, status=status.HTTP_201_CREATED)
+                
+        except Exception as e:
+            logger.error(f"Error creating user: {e}")
+            return Response(
+                {'error': f'خطا در ایجاد کاربر: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
     
     def get(self, request):
         """Get list of users with their wallet balances"""

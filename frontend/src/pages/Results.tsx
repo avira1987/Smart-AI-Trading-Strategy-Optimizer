@@ -3,6 +3,7 @@ import { getResults, deleteResult, clearResults, getJobs, type Job, type Result 
 import { Line } from 'react-chartjs-2'
 import AIAnalysisDisplay from '../components/AIAnalysisDisplay'
 import GamificationScore from '../components/GamificationScore'
+import Breadcrumbs from '../components/Breadcrumbs'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -211,6 +212,7 @@ export default function Results() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 direction-rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
+      <Breadcrumbs />
       <div className="mb-6 flex items-center justify-between text-right">
         <div>
           <h1 className="text-3xl font-bold text-white mb-2">نتایج تست‌ها</h1>
@@ -345,7 +347,19 @@ export default function Results() {
                           <div className="text-lg font-semibold text-blue-400">
                             {selectedResult.data_sources.strategy_timeframe}
                           </div>
-                          {selectedResult.data_sources.provider === 'mt5' && (
+                          {selectedResult.data_sources.timeframe_type === 'custom' && (
+                            <div className="text-green-400 text-xs mt-1 flex items-center gap-1">
+                              <span>🔄</span>
+                              <span>تایم‌فریم غیرمتداول - از کندل‌های M1 تجمیع شده</span>
+                            </div>
+                          )}
+                          {selectedResult.data_sources.timeframe_type === 'standard' && (
+                            <div className="text-green-400 text-xs mt-1 flex items-center gap-1">
+                              <span>✅</span>
+                              <span>تایم‌فریم استاندارد MT5 - استفاده مستقیم</span>
+                            </div>
+                          )}
+                          {selectedResult.data_sources.provider === 'mt5' && !selectedResult.data_sources.timeframe_type && (
                             <div className="text-gray-400 text-xs mt-1">
                               (تجمیع شده از کندل‌های M1)
                             </div>

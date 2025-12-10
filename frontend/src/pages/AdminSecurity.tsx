@@ -7,11 +7,14 @@ import {
   clearRateLimitHistory,
   unblockAllIPs,
   getSecurityLogs,
+  checkGapGPTBalance,
   type SecurityManagementData,
   type BlockedIP,
   type RateLimitStat,
   type SecurityLog,
+  type GapGPTBalanceResponse,
 } from '../api/client'
+import Breadcrumbs from '../components/Breadcrumbs'
 
 const AUTO_REFRESH_INTERVAL_MS = 60000
 
@@ -23,41 +26,8 @@ export default function AdminSecurity() {
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'overview' | 'blocked' | 'stats' | 'logs'>('overview')
   const [actionLoading, setActionLoading] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!isAdmin) {
-      return
-    }
-    loadData()
-    const interval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.hidden) {
-        return
-      }
-      loadData()
-      if (activeTab === 'logs') {
-        loadLogs()
-      }
-    }, AUTO_REFRESH_INTERVAL_MS)
-    return () => clearInterval(interval)
-  }, [isAdmin, activeTab])
-
-  useEffect(() => {
-    if (isAdmin && activeTab === 'logs') {
-      loadLogs()
-    }
-  }, [isAdmin, activeTab])
-
-  if (!isAdmin) {
-    return (
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="bg-gray-800 rounded-lg p-6">
-          <div className="text-red-400 text-center">
-            ⚠️ فقط ادمین می‌تواند به این بخش دسترسی داشته باشد
-          </div>
-        </div>
-      </div>
-    )
-  }
+  const [gapgptBalance, setGapgptBalance] = useState<GapGPTBalanceResponse['data'] | null>(null)
+  const [loadingBalance, setLoadingBalance] = useState(false)
 
   const loadData = async () => {
     try {
@@ -79,6 +49,63 @@ export default function AdminSecurity() {
     } catch (error: any) {
       console.error('Error loading security logs:', error)
     }
+  }
+
+  const loadGapGPTBalance = async () => {
+    try {
+      setLoadingBalance(true)
+      const response = await checkGapGPTBalance()
+      if (response.data.status === 'success' && response.data.data) {
+        setGapgptBalance(response.data.data)
+      } else if (response.data.data) {
+        setGapgptBalance(response.data.data)
+      }
+    } catch (error: any) {
+      console.error('Error loading GapGPT balance:', error)
+      if (error.response?.data?.data) {
+        setGapgptBalance(error.response.data.data)
+      }
+    } finally {
+      setLoadingBalance(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!isAdmin) {
+      return
+    }
+    loadData()
+    loadGapGPTBalance()
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        return
+      }
+      loadData()
+      loadGapGPTBalance()
+      if (activeTab === 'logs') {
+        loadLogs()
+      }
+    }, AUTO_REFRESH_INTERVAL_MS)
+    return () => clearInterval(interval)
+  }, [isAdmin, activeTab])
+
+  useEffect(() => {
+    if (isAdmin && activeTab === 'logs') {
+      loadLogs()
+    }
+  }, [isAdmin, activeTab])
+
+  if (!isAdmin) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <Breadcrumbs />
+        <div className="bg-gray-800 rounded-lg p-6">
+          <div className="text-red-400 text-center">
+            ⚠️ فقط ادمین می‌تواند به این بخش دسترسی داشته باشد
+          </div>
+        </div>
+      </div>
+    )
   }
 
   const handleUnblockIP = async (ip: string) => {
@@ -166,6 +193,7 @@ export default function AdminSecurity() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 direction-rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
+      <Breadcrumbs />
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl md:text-4xl font-bold text-white mb-2">
@@ -216,7 +244,7 @@ export default function AdminSecurity() {
           {activeTab === 'overview' && data && (
             <div className="space-y-6">
               {/* Stats Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-gradient-to-br from-red-600 to-red-700 rounded-xl p-6 shadow-lg">
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-gray-200 text-sm font-medium">IP های مسدود شده</h3>
@@ -245,6 +273,48 @@ export default function AdminSecurity() {
                     </svg>
                   </div>
                   <p className="text-white text-3xl font-bold">{data.rate_limit_config.protected_paths.length}</p>
+                </div>
+
+                {/* GapGPT Balance Card */}
+                <div className={`rounded-xl p-6 shadow-lg ${
+                  gapgptBalance?.is_low_balance 
+                    ? 'bg-gradient-to-br from-orange-600 to-red-700' 
+                    : typeof gapgptBalance?.balance === 'string' && gapgptBalance.balance === 'کافی'
+                    ? 'bg-gradient-to-br from-purple-600 to-purple-700'
+                    : 'bg-gradient-to-br from-purple-600 to-purple-700'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-gray-200 text-sm font-medium">موجودی GapGPT</h3>
+                    <button
+                      onClick={loadGapGPTBalance}
+                      disabled={loadingBalance}
+                      className="p-1 hover:bg-white/20 rounded transition disabled:opacity-50"
+                      title="بررسی مجدد"
+                    >
+                      <svg className="w-5 h-5 text-purple-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    </button>
+                  </div>
+                  {loadingBalance ? (
+                    <div className="flex items-center gap-2">
+                      <div className="inline-block animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
+                      <p className="text-white text-sm">در حال بررسی...</p>
+                    </div>
+                  ) : gapgptBalance ? (
+                    <div>
+                      <p className={`text-2xl font-bold ${
+                        gapgptBalance.is_low_balance ? 'text-red-100' : 'text-white'
+                      }`}>
+                        {gapgptBalance.balance_formatted}
+                      </p>
+                      {gapgptBalance.is_low_balance && (
+                        <p className="text-red-200 text-xs mt-1">⚠️ موجودی کم</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-white text-sm">نامشخص</p>
+                  )}
                 </div>
               </div>
 

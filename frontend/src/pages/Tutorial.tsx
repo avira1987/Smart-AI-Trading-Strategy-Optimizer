@@ -1,6 +1,28 @@
+import SEO from '../components/SEO'
+import Breadcrumbs from '../components/Breadcrumbs'
+import ArticleSchema from '../components/ArticleSchema'
+
 export default function Tutorial() {
   return (
+    <>
+      <SEO
+        title="آموزش ترید با هوش مصنوعی | راهنمای استفاده از سیستم معاملات هوشمند"
+        description="آموزش کامل استفاده از سامانه ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی. راهنمای آپلود استراتژی، بک‌تست و معاملات هوشمند"
+        keywords="آموزش ترید با هوش مصنوعی, آموزش ترید به کمک هوش مصنوعی, راهنمای معاملات هوشمند, آموزش بک‌تست, آموزش استراتژی معاملاتی"
+        canonical="https://myaibaz.ir/tutorial"
+        ogTitle="آموزش ترید با هوش مصنوعی"
+        ogDescription="آموزش کامل استفاده از سامانه ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی"
+        ogUrl="https://myaibaz.ir/tutorial"
+      />
+      <ArticleSchema
+        title="آموزش استفاده از سیستم ترید با هوش مصنوعی"
+        description="آموزش کامل استفاده از سامانه ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی. راهنمای آپلود استراتژی، بک‌تست و معاملات هوشمند"
+        url="https://myaibaz.ir/tutorial"
+        datePublished="2024-12-20"
+        dateModified="2024-12-20"
+      />
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 direction-rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
+      <Breadcrumbs />
       <div className="bg-gray-800 rounded-lg p-6 mb-6">
         <h1 className="text-3xl font-bold text-white mb-6">آموزش استفاده از سیستم ترید با هوش مصنوعی</h1>
         
@@ -111,8 +133,9 @@ export default function Tutorial() {
                     <figure className="bg-gray-900 rounded-lg overflow-hidden">
                       <img
                         src="https://dummyimage.com/600x340/1f2937/ffffff&text=نمونه+چارت+استراتژی"
-                        alt="نمونه چارت استراتژی اصلی"
+                        alt="نمونه چارت استراتژی اصلی برای ترید با هوش مصنوعی - نقاط ورود و خروج در معاملات هوشمند"
                         className="w-full h-40 object-cover"
+                        loading="lazy"
                       />
                       <figcaption className="p-2 text-xs text-gray-400">
                         نمونه چارت قیمت همراه با نقاط ورود/خروج پیشنهادی
@@ -121,8 +144,9 @@ export default function Tutorial() {
                     <figure className="bg-gray-900 rounded-lg overflow-hidden">
                       <img
                         src="https://dummyimage.com/600x340/111827/ffffff&text=نمونه+گزارش+بک+تست"
-                        alt="نمونه گزارش بک‌تست"
+                        alt="نمونه گزارش بک‌تست استراتژی معاملاتی با هوش مصنوعی - نتایج تست ترید به کمک هوش مصنوعی"
                         className="w-full h-40 object-cover"
+                        loading="lazy"
                       />
                       <figcaption className="p-2 text-xs text-gray-400">
                         الگوی پیشنهاد‌شده برای ارائه گزارش نتایج بک‌تست
@@ -193,6 +217,7 @@ export default function Tutorial() {
         </div>
       </div>
     </div>
+    </>
   )
 }
 

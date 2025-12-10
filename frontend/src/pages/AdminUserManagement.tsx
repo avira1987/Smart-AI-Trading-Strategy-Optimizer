@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../components/ToastProvider'
 import { getAdminUsers, allocateUserCredit, deleteUser, updateUser, type AdminUser } from '../api/client'
+import Breadcrumbs from '../components/Breadcrumbs'
 
 const AUTO_REFRESH_INTERVAL_MS = 60000
 
@@ -46,6 +47,7 @@ export default function AdminUserManagement() {
   if (!isAdmin) {
     return (
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <Breadcrumbs />
         <div className="bg-gray-800 rounded-lg p-6">
           <div className="text-red-400 text-center">
             ⚠️ فقط ادمین می‌تواند به این بخش دسترسی داشته باشد
@@ -191,6 +193,7 @@ export default function AdminUserManagement() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6" dir="rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
+      <Breadcrumbs />
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-white mb-2">مدیریت کاربران</h1>
         <p className="text-gray-400">مدیریت اعتبار و موجودی کاربران</p>

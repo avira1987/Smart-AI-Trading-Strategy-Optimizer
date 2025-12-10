@@ -72,6 +72,22 @@ export default function SEO({
       updateMetaTag('og:url', ogUrl, 'property')
     }
 
+    // Set default OG tags if not already set
+    const defaultOgType = document.querySelector('meta[property="og:type"]')
+    if (!defaultOgType) {
+      updateMetaTag('og:type', 'website', 'property')
+    }
+
+    const defaultOgLocale = document.querySelector('meta[property="og:locale"]')
+    if (!defaultOgLocale) {
+      updateMetaTag('og:locale', 'fa_IR', 'property')
+    }
+
+    const defaultOgSiteName = document.querySelector('meta[property="og:site_name"]')
+    if (!defaultOgSiteName) {
+      updateMetaTag('og:site_name', 'MyAibaz', 'property')
+    }
+
     // Update Twitter Card tags
     if (twitterTitle) {
       updateMetaTag('twitter:title', twitterTitle)
@@ -83,6 +99,12 @@ export default function SEO({
 
     if (twitterImage) {
       updateMetaTag('twitter:image', twitterImage)
+    }
+
+    // Set default Twitter Card type if not already set
+    const defaultTwitterCard = document.querySelector('meta[name="twitter:card"]')
+    if (!defaultTwitterCard) {
+      updateMetaTag('twitter:card', 'summary_large_image')
     }
 
     // Update canonical link

@@ -15,6 +15,9 @@ import AdminSecurity from './pages/AdminSecurity'
 import AdminUserManagement from './pages/AdminUserManagement'
 import SystemSettings from './pages/SystemSettings'
 import FreeGoldAPIGuide from './pages/FreeGoldAPIGuide'
+import NotFound from './pages/NotFound'
+import Blog from './pages/Blog'
+import BlogPost from './pages/BlogPost'
 import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
 import NavigationSetup from './components/NavigationSetup'
@@ -23,6 +26,7 @@ import { ToastProvider } from './components/ToastProvider'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { FeatureFlagsProvider } from './context/FeatureFlagsContext'
 import { ProfileCompletionProvider } from './context/ProfileCompletionContext'
+import GoogleAnalytics from './components/GoogleAnalytics'
 
 // Component to conditionally show Landing or Dashboard
 function Home() {
@@ -45,6 +49,7 @@ function Home() {
 function App() {
   return (
     <Router>
+      <GoogleAnalytics />
       <NavigationSetup />
       <AuthProvider>
         <ProfileCompletionProvider>
@@ -132,7 +137,10 @@ function App() {
                     <Route path="/about" element={<About />} />
                     <Route path="/tutorial" element={<Tutorial />} />
                     <Route path="/terms" element={<Terms />} />
+                    <Route path="/blog" element={<Blog />} />
+                    <Route path="/blog/:slug" element={<BlogPost />} />
                     <Route path="/guides/free-gold-api" element={<FreeGoldAPIGuide />} />
+                    <Route path="*" element={<NotFound />} />
                   </Routes>
                 </div>
               </SymbolProvider>

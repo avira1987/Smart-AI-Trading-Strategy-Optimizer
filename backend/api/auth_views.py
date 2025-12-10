@@ -11,6 +11,7 @@ from django.contrib.auth.models import User
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.middleware.csrf import get_token
+from django.db import IntegrityError
 from core.models import UserProfile, OTPCode, Device, SystemSettings, UserActivityLog
 from .serializers import PhoneNumberSerializer, OTPVerificationSerializer, UserSerializer
 from .sms_service import send_otp_sms, get_kavenegar_api_key
@@ -278,46 +279,166 @@ class VerifyOTPView(APIView):
             otp.mark_as_used()
             logger.info(f"✅ OTP code {otp_code} verified successfully for phone {phone_display}")
             
-            # Get or create user
-            user, created = User.objects.get_or_create(
-                username=phone_number,
-                defaults={
-                    'email': f'{phone_number}@example.com',
-                    'first_name': '',
-                    'last_name': ''
-                }
-            )
+            # Clean up any orphaned UserProfile records with this phone_number
+            # This can happen if a user was deleted but the profile wasn't properly cleaned up
+            orphaned_profiles = UserProfile.objects.filter(phone_number=phone_number)
+            for orphaned_profile in orphaned_profiles:
+                try:
+                    # Check if the user still exists
+                    user_exists = User.objects.filter(id=orphaned_profile.user_id).exists()
+                    if not user_exists:
+                        logger.warning(f"Found orphaned UserProfile for phone {phone_display}, deleting it")
+                        orphaned_profile.delete()
+                    else:
+                        # Don't delete profile if user exists - this is a valid profile
+                        # The user might have been created by admin with different username
+                        pass
+                except Exception as e:
+                    logger.error(f"Error cleaning up orphaned profile: {e}")
+            
+            # First, try to find user by phone_number in UserProfile
+            # This handles the case where admin created a user with different username
+            user = None
+            created = False
+            profile = None
+            
+            try:
+                # Try to find existing user by phone_number
+                existing_profile = UserProfile.objects.select_related('user').filter(phone_number=phone_number).first()
+                if existing_profile:
+                    user = existing_profile.user
+                    profile = existing_profile
+                    created = False  # User already exists
+                    logger.info(f"✅ Found existing user {user.username} by phone number {phone_display}")
+                    
+                    # If username doesn't match phone_number, update it to match
+                    # This ensures consistency for OTP login
+                    if user.username != phone_number:
+                        logger.warning(f"⚠️ User {user.username} has phone {phone_display} but username doesn't match. Updating username to match phone number.")
+                        # Check if phone_number as username is already taken by another user
+                        if User.objects.filter(username=phone_number).exclude(id=user.id).exists():
+                            logger.error(f"❌ Cannot update username: {phone_number} is already taken by another user")
+                            return Response(
+                                {
+                                    'success': False,
+                                    'message': 'خطا: شماره موبایل شما با کاربر دیگری تداخل دارد. لطفا با پشتیبانی تماس بگیرید.'
+                                },
+                                status=status.HTTP_400_BAD_REQUEST
+                            )
+                        user.username = phone_number
+                        user.save()
+                        logger.info(f"✅ Updated username to {phone_number} for user ID {user.id}")
+                else:
+                    # No existing user found, create new one
+                    # Get or create user with username=phone_number
+                    user, created = User.objects.get_or_create(
+                        username=phone_number,
+                        defaults={
+                            'email': f'{phone_number}@example.com',
+                            'first_name': '',
+                            'last_name': ''
+                        }
+                    )
+                    logger.info(f"{'✅ Created new user' if created else '✅ Found existing user'} {user.username}")
+            except Exception as e:
+                logger.error(f"Error finding/creating user: {e}")
+                return Response(
+                    {
+                        'success': False,
+                        'message': 'خطا در پیدا کردن یا ایجاد کاربر. لطفا دوباره تلاش کنید.',
+                        'error': str(e)
+                    },
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
             
             # Get or create user profile
-            profile, profile_created = UserProfile.objects.get_or_create(
-                user=user,
-                defaults={'phone_number': phone_number}
-            )
-            
-            if profile_created or profile.phone_number != phone_number:
-                profile.phone_number = phone_number
-                profile.save()
+            # If we already found profile above, use it; otherwise create/get it
+            profile_created = False
+            if not profile:
+                try:
+                    profile = UserProfile.objects.get(user=user)
+                    profile_created = False
+                    # Update phone number if it's different
+                    if profile.phone_number != phone_number:
+                        try:
+                            profile.phone_number = phone_number
+                            profile.save()
+                        except IntegrityError:
+                            # If unique constraint fails, there's another profile with this phone_number
+                            # Delete it and try again
+                            logger.warning(f"IntegrityError when updating phone number, cleaning up conflicting profile")
+                            conflicting_profile = UserProfile.objects.filter(phone_number=phone_number).exclude(user=user).first()
+                            if conflicting_profile:
+                                conflicting_profile.delete()
+                            profile.phone_number = phone_number
+                            profile.save()
+                except UserProfile.DoesNotExist:
+                    # Profile doesn't exist, create it
+                    # Check if there's any profile with this phone_number (shouldn't happen after cleanup, but just in case)
+                    existing_profile = UserProfile.objects.filter(phone_number=phone_number).first()
+                    if existing_profile:
+                        # If profile exists but user doesn't match, delete it and create new one
+                        logger.warning(f"Found UserProfile with phone {phone_display} but different user, deleting and recreating")
+                        existing_profile.delete()
+                    
+                    try:
+                        profile = UserProfile.objects.create(
+                            user=user,
+                            phone_number=phone_number
+                        )
+                        profile_created = True
+                    except IntegrityError:
+                        # If still fails, try one more cleanup and create
+                        logger.warning(f"IntegrityError when creating profile, doing final cleanup")
+                        UserProfile.objects.filter(phone_number=phone_number).exclude(user=user).delete()
+                        profile = UserProfile.objects.create(
+                            user=user,
+                            phone_number=phone_number
+                        )
+                        profile_created = True
             
             # Give registration bonus to new users
             if created:
                 from core.models import Wallet, SystemSettings, Transaction
                 from decimal import Decimal
+                # For new users, create wallet and give registration bonus
                 wallet, wallet_created = Wallet.objects.get_or_create(user=user)
-                if wallet_created:
+                
+                # Check if registration bonus was already given (to prevent double bonus)
+                registration_bonus_given = Transaction.objects.filter(
+                    wallet=wallet,
+                    transaction_type='charge',
+                    description__icontains='هدیه ثبت‌نام'
+                ).exists()
+                
+                # Give bonus if:
+                # 1. Wallet is new (normal case for new users)
+                # 2. OR wallet exists but balance is 0 and bonus hasn't been given (edge case)
+                should_give_bonus = (wallet_created or (wallet.balance == 0)) and not registration_bonus_given
+                
+                if should_give_bonus:
                     # Get registration bonus from system settings
-                    settings = SystemSettings.load()
-                    bonus_amount = Decimal(str(settings.registration_bonus))
-                    wallet.charge(float(bonus_amount))
-                    # Create transaction record
-                    Transaction.objects.create(
-                        wallet=wallet,
-                        transaction_type='charge',
-                        amount=bonus_amount,
-                        status='completed',
-                        description=f'هدیه ثبت‌نام ({bonus_amount:,.0f} تومان)',
-                        completed_at=timezone.now()
-                    )
-                    logger.info(f"Registration bonus of {bonus_amount} Toman given to new user {user.username}")
+                    system_settings = SystemSettings.load()
+                    bonus_amount = system_settings.registration_bonus  # Already Decimal from DecimalField
+                    
+                    if bonus_amount > 0:
+                        wallet.charge(bonus_amount)  # bonus_amount is already Decimal
+                        # Create transaction record
+                        Transaction.objects.create(
+                            wallet=wallet,
+                            transaction_type='charge',
+                            amount=bonus_amount,
+                            status='completed',
+                            description=f'هدیه ثبت‌نام ({bonus_amount:,.0f} تومان)',
+                            completed_at=timezone.now()
+                        )
+                        logger.info(f"✅ Registration bonus of {bonus_amount:,.0f} Toman given to new user {user.username}")
+                    else:
+                        logger.warning(f"⚠️ Registration bonus is set to 0 in system settings for new user {user.username}")
+                elif registration_bonus_given:
+                    logger.info(f"ℹ️ Registration bonus already given to user {user.username}, skipping")
+                else:
+                    logger.warning(f"⚠️ Could not give registration bonus to new user {user.username} (wallet exists with balance: {wallet.balance})")
             
             # Generate device ID
             device_id = Device.generate_device_id(request)
@@ -356,7 +477,11 @@ class VerifyOTPView(APIView):
             }, status=status.HTTP_200_OK)
             
         except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
             logger.error(f"Error verifying OTP: {e}")
+            logger.error(f"Error traceback: {error_traceback}")
+            logger.error(f"Phone number: {phone_display}, OTP code: {otp_code}")
             return Response(
                 {
                     'success': False,

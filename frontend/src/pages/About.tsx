@@ -1,13 +1,26 @@
 import { useFeatureFlags } from '../context/FeatureFlagsContext'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
+import SEO from '../components/SEO'
+import Breadcrumbs from '../components/Breadcrumbs'
 
 export default function About() {
   const { liveTradingEnabled } = useFeatureFlags()
   const { isAuthenticated } = useAuth()
 
   return (
+    <>
+      <SEO
+        title="درباره ما | ترید با هوش مصنوعی | سامانه معاملات هوشمند"
+        description="درباره سامانه ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی - شرکت تک ایده پویان. اطلاعات تماس، آدرس و راهنمای استفاده از سیستم معاملات هوشمند"
+        keywords="درباره ترید با هوش مصنوعی, درباره ترید به کمک هوش مصنوعی, شرکت تک ایده پویان, تماس با ما, پشتیبانی معاملات هوشمند"
+        canonical="https://myaibaz.ir/about"
+        ogTitle="درباره سامانه ترید با هوش مصنوعی"
+        ogDescription="درباره سامانه ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی - شرکت تک ایده پویان"
+        ogUrl="https://myaibaz.ir/about"
+      />
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 direction-rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
+      <Breadcrumbs />
       <div className="bg-gray-800 rounded-lg p-6 mb-6">
         <h1 className="text-3xl font-bold text-white mb-6">درباره سامانه ترید با هوش مصنوعی</h1>
         
@@ -19,7 +32,7 @@ export default function About() {
               شرکت <strong className="text-blue-400">تک ایده پویان</strong> یک شرکت پیشرو در زمینه توسعه نرم‌افزارهای هوشمند و راه‌حل‌های نوآورانه در حوزه فناوری اطلاعات است. ما با بهره‌گیری از تکنولوژی‌های روز دنیا و تیمی متخصص، در تلاش هستیم تا محصولات و خدمات با کیفیتی را به مشتریان خود ارائه دهیم.
             </p>
             <p className="text-gray-300 leading-relaxed">
-              این وب‌سایت یک سامانه پیشرفته <strong className="text-blue-400">ترید با هوش مصنوعی</strong> و <strong className="text-blue-400">ترید به کمک هوش مصنوعی</strong> است که به کاربران امکان می‌دهد استراتژی‌های معاملاتی خود را به صورت فایل متنی آپلود کرده، با استفاده از هوش مصنوعی تجزیه و تحلیل شوند، بر روی داده‌های تاریخی تست شوند و در صورت تمایل، معاملات زنده را انجام دهند. این سامانه با استفاده از آخرین تکنولوژی‌های وب و هوش مصنوعی طراحی شده است تا تجربه کاربری بهینه و نتایج دقیقی را برای <strong className="text-green-400">ترید هوشمند</strong> ارائه دهد.
+              این وب‌سایت یک سامانه پیشرفته <strong className="text-blue-400">ترید با هوش مصنوعی</strong> و <strong className="text-blue-400">ترید به کمک هوش مصنوعی</strong> است که به کاربران امکان می‌دهد استراتژی‌های معاملاتی خود را به صورت فایل متنی آپلود کرده، با استفاده از هوش مصنوعی تجزیه و تحلیل شوند، بر روی داده‌های تاریخی تست شوند و در صورت تمایل، معاملات زنده را انجام دهند. این سامانه با استفاده از آخرین تکنولوژی‌های وب و هوش مصنوعی طراحی شده است تا تجربه کاربری بهینه و نتایج دقیقی را برای <strong className="text-green-400">ترید هوشمند</strong> ارائه دهد. برای یادگیری نحوه استفاده از سیستم، می‌توانید به صفحه <Link to="/tutorial" className="text-blue-400 hover:text-blue-300 underline">آموزش</Link> مراجعه کنید. همچنین می‌توانید <Link to="/blog" className="text-blue-400 hover:text-blue-300 underline">مقالات بلاگ</Link> ما را برای اطلاعات بیشتر مطالعه کنید.
             </p>
             <div className="bg-blue-900/30 border-r-4 border-blue-500 p-4 mt-4 rounded">
               <h3 className="text-lg font-semibold text-blue-300 mb-2">چرا ترید با هوش مصنوعی؟</h3>
@@ -419,6 +432,7 @@ export default function About() {
         </div>
       </div>
     </div>
+    </>
   )
 }
 

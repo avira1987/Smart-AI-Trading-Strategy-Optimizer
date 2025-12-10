@@ -35,44 +35,25 @@ if (-not $port80Check.TcpTestSucceeded) {
     exit 1
 }
 
-# 3. Check if Frontend is built
-Write-Host "`n3. Checking Frontend build..." -ForegroundColor Yellow
-$frontendDist = "frontend\dist"
-if (Test-Path $frontendDist) {
-    $distFiles = Get-ChildItem $frontendDist -File
-    if ($distFiles.Count -gt 0) {
-        Write-Host "   Frontend is built ($($distFiles.Count) files)" -ForegroundColor Green
-    } else {
-        Write-Host "   Frontend dist folder is empty. Building..." -ForegroundColor Yellow
-        Set-Location frontend
-        npm run build
-        Set-Location ..
-    }
-} else {
-    Write-Host "   Frontend not built. Building..." -ForegroundColor Yellow
-    Set-Location frontend
-    npm run build
-    Set-Location ..
-}
-
-# 4. Create startup script for Frontend on port 80
-Write-Host "`n4. Creating startup script..." -ForegroundColor Yellow
+# 3. Create startup script for Frontend on port 80 (Development Mode)
+Write-Host "`n3. Creating startup script..." -ForegroundColor Yellow
 $startScript = @"
-# Start Frontend on Port 80
+# Start Frontend Dev Server on Port 80 (No build needed)
 `$env:VITE_FRONTEND_PORT = "80"
 `$env:VITE_BACKEND_URL = "http://127.0.0.1:8000"
 
-Write-Host "Starting Frontend on port 80..." -ForegroundColor Green
+Write-Host "Starting Frontend Dev Server on port 80..." -ForegroundColor Green
 Write-Host "Backend URL: `$env:VITE_BACKEND_URL" -ForegroundColor Cyan
+Write-Host "Mode: Development (No build required)" -ForegroundColor Yellow
 
 Set-Location frontend
-npm run preview -- --port 80 --host 0.0.0.0
+npm run dev -- --port 80 --host 0.0.0.0
 "@
 
 Set-Content -Path "start_frontend_port80.ps1" -Value $startScript -Encoding UTF8
 Write-Host "   Script created: start_frontend_port80.ps1" -ForegroundColor Green
 
-# 5. Create test script
+# 4. Create test script
 Write-Host "`n5. Creating test script..." -ForegroundColor Yellow
 $testScript = @"
 # Test Frontend on Port 80
@@ -136,6 +117,7 @@ Set-Content -Path "test_port80.ps1" -Value $testScript -Encoding UTF8
 Write-Host "   Test script created: test_port80.ps1" -ForegroundColor Green
 
 Write-Host "`n=== Setup Complete ===" -ForegroundColor Cyan
+Write-Host "Note: Frontend will run in development mode (no build required)" -ForegroundColor Yellow
 Write-Host "`nNext steps:" -ForegroundColor Yellow
 Write-Host "   1. Run: .\start_frontend_port80.ps1" -ForegroundColor White
 Write-Host "   2. In another terminal, run: .\test_port80.ps1" -ForegroundColor White

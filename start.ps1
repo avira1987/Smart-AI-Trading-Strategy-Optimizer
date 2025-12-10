@@ -198,13 +198,33 @@ if (Test-Path $venvPython) {
 }
 
 Set-Location $backendPath
-Write-Host "  Running migrations..." -ForegroundColor Gray
-& $pythonExe manage.py migrate 2>&1 | Out-Null
 
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "  ✓ Migrations completed successfully" -ForegroundColor Green
+# Step 5.1: Run makemigrations
+Write-Host "  Creating migration files (makemigrations)..." -ForegroundColor Gray
+$makemigrationsOutput = & $pythonExe manage.py makemigrations 2>&1
+$makemigrationsSuccess = $LASTEXITCODE -eq 0
+
+if ($makemigrationsSuccess) {
+    Write-Host "  ✓ Migration files created successfully" -ForegroundColor Green
+    # Show output if there were new migrations
+    if ($makemigrationsOutput -match "No changes detected" -or $makemigrationsOutput -match "Migrations for") {
+        $makemigrationsOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
+    }
+} else {
+    Write-Host "  ⚠ makemigrations completed with warnings" -ForegroundColor Yellow
+    $makemigrationsOutput | Select-Object -Last 5 | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
+}
+
+# Step 5.2: Run migrate
+Write-Host "  Applying migrations (migrate)..." -ForegroundColor Gray
+$migrateOutput = & $pythonExe manage.py migrate 2>&1
+$migrateSuccess = $LASTEXITCODE -eq 0
+
+if ($migrateSuccess) {
+    Write-Host "  ✓ Migrations applied successfully" -ForegroundColor Green
 } else {
     Write-Host "  ⚠ Migration completed with warnings" -ForegroundColor Yellow
+    $migrateOutput | Select-Object -Last 5 | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
 }
 
 Set-Location $scriptPath
@@ -411,13 +431,14 @@ cd '$frontendPath'
 `$env:VITE_FRONTEND_PORT='80'
 `$env:VITE_BACKEND_URL='http://127.0.0.1:8000'
 Write-Host '========================================' -ForegroundColor Cyan
-Write-Host '  Frontend React Server (Direct)' -ForegroundColor Cyan
+Write-Host '  Frontend React Dev Server (Direct)' -ForegroundColor Cyan
 Write-Host '  Port: 80' -ForegroundColor Cyan
 Write-Host '  Backend URL: http://127.0.0.1:8000' -ForegroundColor Cyan
+Write-Host '  Mode: Development (No build required)' -ForegroundColor Yellow
 Write-Host '  ⚠ Note: Nginx recommended for production' -ForegroundColor Yellow
 Write-Host '========================================' -ForegroundColor Cyan
 Write-Host ''
-npm run preview -- --port 80 --host 0.0.0.0
+npm run dev -- --port 80 --host 0.0.0.0
 "@
     Start-Process powershell -ArgumentList "-NoExit", "-Command", $frontendCommand
     Start-Sleep -Seconds 8
@@ -462,6 +483,17 @@ npm run preview -- --port 80 --host 0.0.0.0
         Write-Host "  ✓ Frontend files copied to: $nginxHtmlDir" -ForegroundColor Green
     } else {
         Write-Host "  ⚠ Frontend dist folder not found: $distPath" -ForegroundColor Yellow
+    }
+    
+    # Copy custom error pages (403.html and 404.html)
+    $publicDir = Join-Path $scriptPath "frontend\public"
+    $errorPages = @("403.html", "404.html")
+    foreach ($errorPage in $errorPages) {
+        $sourcePage = Join-Path $publicDir $errorPage
+        if (Test-Path $sourcePage) {
+            Copy-Item -Path $sourcePage -Destination $nginxHtmlDir -Force -ErrorAction SilentlyContinue
+            Write-Host "  ✓ Error page $errorPage copied" -ForegroundColor Green
+        }
     }
     
     # Copy nginx config

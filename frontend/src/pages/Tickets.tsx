@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { getTickets, createTicket, addTicketMessage, closeTicket, getTicket, Ticket } from '../api/tickets'
 import { useToast } from '../components/ToastProvider'
+import Breadcrumbs from '../components/Breadcrumbs'
 
 const categoryLabels: Record<string, string> = {
   technical: 'مسئله فنی',
@@ -213,6 +214,7 @@ export default function Tickets() {
   return (
     <div className="min-h-screen bg-gray-900 py-8" dir="rtl" style={{ direction: 'rtl' }}>
       <div className="container mx-auto px-4 max-w-7xl">
+        <Breadcrumbs />
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold text-white">سیستم تیکت</h1>
           <button

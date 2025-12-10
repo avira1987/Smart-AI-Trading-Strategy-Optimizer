@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import Breadcrumbs from '../components/Breadcrumbs'
 
 const providers = [
   {
@@ -36,6 +37,7 @@ const providers = [
 export default function FreeGoldAPIGuide() {
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 direction-rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
+      <Breadcrumbs />
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-white mb-3">راهنمای دریافت API رایگان برای قیمت طلا</h1>
         <p className="text-gray-300 text-sm leading-7">

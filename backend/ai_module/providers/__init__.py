@@ -681,6 +681,13 @@ class ChatCompletionProvider(BaseProvider):
                 raw_text = response.text
                 error_message = None
                 error_type = None
+                
+                # اصلاح encoding برای خواندن صحیح کاراکترهای چینی
+                try:
+                    response.encoding = 'utf-8'
+                except:
+                    pass
+                
                 if isinstance(data, dict):
                     error = data.get("error")
                     if isinstance(error, dict):
@@ -689,9 +696,108 @@ class ChatCompletionProvider(BaseProvider):
                     elif isinstance(error, str):
                         error_message = error
                 
+                # ترجمه خطاهای چینی مربوط به اعتبار GapGPT
+                is_quota_error = False
+                remaining = 'نامشخص'
+                required = 'نامشخص'
+                
+                # بررسی خطاهای quota (چینی و انگلیسی) - فقط در صورت وجود شواهد مشخص
+                import re
+                if error_message and self.name == "gapgpt":
+                    error_lower = error_message.lower()
+                    # بررسی برای پیام‌های چینی - باید هم 剩余额度 یا 需要 باشد
+                    has_chinese_quota_indicators = any(char in error_message for char in ['预扣费', '剩余额度', '需要额度'])
+                    # بررسی برای پیام‌های انگلیسی - باید هم quota و هم remain/need باشد
+                    has_english_quota_indicators = (
+                        ('quota' in error_lower) and 
+                        (('remain' in error_lower) or ('remaining' in error_lower) or ('need' in error_lower) or ('insufficient' in error_lower))
+                    )
+                    
+                    # استخراج مقادیر از پیام چینی
+                    if has_chinese_quota_indicators:
+                        remaining_match = re.search(r'剩余额度[：:]\s*\$?([\d.]+)', error_message)
+                        required_match = re.search(r'需要[^：:]*[：:]\s*\$?([\d.]+)', error_message)
+                        
+                        if remaining_match:
+                            remaining = remaining_match.group(1)
+                        if required_match:
+                            required = required_match.group(1)
+                        
+                        # فقط در صورت استخراج موفق مقادیر، آن را quota error در نظر بگیریم
+                        if remaining != 'نامشخص' or required != 'نامشخص':
+                            is_quota_error = True
+                        else:
+                            # اگر کلمات کلیدی چینی وجود دارد اما مقادیر استخراج نشد، لاگ کنیم
+                            self.logger.warning(f"[GapGPT] Chinese quota keywords found but values not extracted: {error_message[:200]}")
+                    
+                    # استخراج مقادیر از پیام انگلیسی
+                    elif has_english_quota_indicators:
+                        remaining_match = re.search(r'(?:remain|remaining)[\s_]?quota[：:\s]*\$?\??([\d.]+)', error_message, re.IGNORECASE)
+                        required_match = re.search(r'need[\s_]?quota[：:\s]*\$?\??([\d.]+)', error_message, re.IGNORECASE)
+                        
+                        if remaining_match:
+                            remaining = remaining_match.group(1)
+                        if required_match:
+                            required = required_match.group(1)
+                        
+                        # فقط در صورت استخراج موفق مقادیر، آن را quota error در نظر بگیریم
+                        if remaining != 'نامشخص' or required != 'نامشخص':
+                            is_quota_error = True
+                        else:
+                            # اگر کلمات کلیدی انگلیسی وجود دارد اما مقادیر استخراج نشد، لاگ کنیم
+                            self.logger.warning(f"[GapGPT] English quota keywords found but values not extracted: {error_message[:200]}")
+                
+                # ارسال پیامک به ادمین در صورت اتمام اعتبار
+                if is_quota_error and self.name == "gapgpt":
+                    try:
+                        from ai_module.gapgpt_client import _notify_admin_gapgpt_quota_exhausted
+                        _notify_admin_gapgpt_quota_exhausted(remaining, required)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to notify admin about GapGPT quota: {e}")
+                
                 # Provide more detailed error messages for common OpenAI errors
                 if status_code == 401:
                     error_message = error_message or "Invalid API key. Please check your OpenAI API key."
+                elif status_code == 403:
+                    if self.name == "gapgpt":
+                        # Log the actual error for debugging
+                        self.logger.warning(
+                            f"GapGPT 403 error: is_quota_error={is_quota_error}, "
+                            f"error_message='{error_message}', error_type='{error_type}', "
+                            f"raw_text='{raw_text[:200] if raw_text else None}'"
+                        )
+                        
+                        # Only show quota message if it's actually a quota error with extracted values
+                        if is_quota_error:
+                            if remaining != 'نامشخص' and required != 'نامشخص':
+                                error_message = f"اعتبار سرویس GapGPT کافی نیست. موجودی: ¥{remaining}، مورد نیاز: ¥{required}. لطفاً با پشتیبانی تماس بگیرید."
+                            elif remaining != 'نامشخص' or required != 'نامشخص':
+                                error_message = f"اعتبار سرویس GapGPT کافی نیست. موجودی: ¥{remaining if remaining != 'نامشخص' else required}. لطفاً با پشتیبانی تماس بگیرید."
+                            else:
+                                # اگر هیچ مقداری استخراج نشد، نباید به عنوان quota error نمایش داده شود
+                                self.logger.warning(f"[GapGPT] Quota error detected but no values extracted. Original error: {error_message[:200]}")
+                                is_quota_error = False  # Reset to avoid showing incorrect quota message
+                                error_message = "دسترسی رد شد. لطفاً کلید API و وضعیت حساب را بررسی کنید."
+                        elif error_message:
+                            # Try to translate common error messages
+                            error_lower = error_message.lower()
+                            if 'model' in error_lower and ('not found' in error_lower or 'unavailable' in error_lower):
+                                error_message = "مدل انتخابی در دسترس نیست. لطفاً مدل دیگری انتخاب کنید."
+                            elif 'permission' in error_lower or 'forbidden' in error_lower:
+                                error_message = "دسترسی رد شد. لطفاً کلید API و وضعیت حساب را بررسی کنید."
+                            elif 'group' in error_lower or '分组' in error_message:
+                                error_message = "مدل در گروه فعلی در دسترس نیست. لطفاً مدل دیگری امتحان کنید."
+                            elif 'rate limit' in error_lower or '429' in error_message:
+                                error_message = "محدودیت نرخ استفاده رسیده است. لطفاً چند لحظه صبر کنید."
+                            else:
+                                # Show a user-friendly message, but log the actual error
+                                self.logger.debug(f"GapGPT 403 error details: {error_message}")
+                                error_message = "دسترسی رد شد. لطفاً کلید API و وضعیت حساب را بررسی کنید."
+                        else:
+                            # Fallback if no error message from API
+                            error_message = "دسترسی رد شد (403). لطفاً کلید API و وضعیت حساب را بررسی کنید."
+                    else:
+                        error_message = error_message or "Access forbidden. Please check your API key and account status."
                 elif status_code == 429:
                     error_message = error_message or "Rate limit exceeded. Please try again later."
                 elif status_code == 400:
@@ -902,12 +1008,106 @@ class OpenAIProvider(ChatCompletionProvider):
         return payload
 
 
+class GapGPTProvider(ChatCompletionProvider):
+    """
+    GapGPT Provider - OpenAI-compatible API for trading strategy analysis
+    Uses GapGPT API endpoint: https://api.gapgpt.app
+    """
+    name = "gapgpt"
+    env_key = "GAPGPT_API_KEY"
+    default_model = "gpt-4o"  # Default model for GapGPT
+    endpoint = "https://api.gapgpt.app/v1/chat/completions"
+
+    def get_api_key(self) -> str:
+        """Get API key from database or environment, with user context support"""
+        # Use the base method which handles user context
+        api_key = super().get_api_key()
+        if api_key:
+            return api_key
+        
+        # Fallback to gapgpt_client function for compatibility
+        try:
+            from ai_module.gapgpt_client import get_gapgpt_api_key
+            gapgpt_key = get_gapgpt_api_key(user=self._user_context)
+            if gapgpt_key:
+                return gapgpt_key
+        except Exception as e:
+            self.logger.debug(f"Error getting GapGPT key from gapgpt_client: {e}")
+        
+        return ""
+
+    def is_available(self) -> bool:
+        """Check if GapGPT is available (has valid API key)"""
+        api_key = self.get_api_key()
+        if not api_key or not api_key.strip():
+            return False
+        
+        # Validate that the key looks like a valid GapGPT key (starts with sk-)
+        api_key_lower = api_key.lower().strip()
+        
+        # Common placeholder patterns to reject
+        placeholder_patterns = [
+            'your-',
+            'your_',
+            'placeholder',
+            'dummy',
+            'test-',
+            'test_',
+            'example',
+            'xxxxx',
+            '*****',
+            'sk-test',
+            'sk-dummy',
+            'api-key-here',
+            'enter-your',
+            'paste-your',
+        ]
+        
+        # Check if key looks like a placeholder
+        for pattern in placeholder_patterns:
+            if pattern in api_key_lower:
+                self.logger.warning(
+                    f"API key for {self.name} looks like a placeholder (contains '{pattern}')"
+                )
+                return False
+        
+        # GapGPT keys should start with 'sk-' and have reasonable length
+        if not api_key.startswith('sk-'):
+            self.logger.warning(
+                f"GapGPT API key doesn't start with 'sk-': {api_key[:10]}..."
+            )
+            return False
+        if len(api_key) < 20:  # GapGPT keys are typically 50+ characters
+            self.logger.warning(
+                f"GapGPT API key seems too short (length: {len(api_key)})"
+            )
+            return False
+        
+        return True
+
+    def _prepare_payload(
+        self,
+        prompt: str,
+        generation_config: Dict[str, Any],
+        metadata: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        payload = super()._prepare_payload(prompt, generation_config, metadata)
+        if metadata and isinstance(metadata, dict):
+            if metadata.get("use_json_response_format"):
+                payload["response_format"] = {"type": "json_object"}
+            if metadata.get("stream"):
+                payload["stream"] = True
+        return payload
+
+
 def get_registered_providers() -> Dict[str, BaseProvider]:
     openai_provider = OpenAIProvider()
+    gapgpt_provider = GapGPTProvider()
     providers: List[BaseProvider] = [
         GeminiProvider(),
         CohereProvider(),
         openai_provider,
+        gapgpt_provider,
         OpenRouterProvider(),
         TogetherAIProvider(),
         DeepInfraProvider(),

@@ -26,7 +26,7 @@ export default function GamificationScore() {
 
   const loadScore = async (mounted: boolean) => {
     try {
-      const response = await get('/api/gamification/scores/me/')
+      const response = await get('/gamification/scores/me/')
       if (mounted && response && response.data) {
         setScore(response.data)
       }

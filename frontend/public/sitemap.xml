@@ -5,7 +5,7 @@
   <!-- Homepage / Landing Page - ترید با هوش مصنوعی -->
   <url>
     <loc>https://myaibaz.ir/</loc>
-    <lastmod>2024-12-20</lastmod>
+    <lastmod>2024-12-21</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
     <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/" />
@@ -15,7 +15,7 @@
   <!-- About Page - درباره ترید با هوش مصنوعی -->
   <url>
     <loc>https://myaibaz.ir/about</loc>
-    <lastmod>2024-12-20</lastmod>
+    <lastmod>2024-12-21</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
     <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/about" />
@@ -24,7 +24,7 @@
   <!-- Tutorial Page - آموزش ترید به کمک هوش مصنوعی -->
   <url>
     <loc>https://myaibaz.ir/tutorial</loc>
-    <lastmod>2024-12-20</lastmod>
+    <lastmod>2024-12-21</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
     <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/tutorial" />
@@ -33,7 +33,7 @@
   <!-- Login Page -->
   <url>
     <loc>https://myaibaz.ir/login</loc>
-    <lastmod>2024-12-20</lastmod>
+    <lastmod>2024-12-21</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
     <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/login" />
@@ -42,7 +42,7 @@
   <!-- Terms Page -->
   <url>
     <loc>https://myaibaz.ir/terms</loc>
-    <lastmod>2024-12-20</lastmod>
+    <lastmod>2024-12-21</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
     <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/terms" />
@@ -51,10 +51,49 @@
   <!-- Free Gold API Guide -->
   <url>
     <loc>https://myaibaz.ir/guides/free-gold-api</loc>
-    <lastmod>2024-12-20</lastmod>
+    <lastmod>2024-12-21</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
     <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/guides/free-gold-api" />
+  </url>
+  
+  <!-- Blog Page -->
+  <url>
+    <loc>https://myaibaz.ir/blog</loc>
+    <lastmod>2024-12-21</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.9</priority>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/blog" />
+  </url>
+  
+  <!-- Blog Posts -->
+  <url>
+    <loc>https://myaibaz.ir/blog/guide-ai-trading-beginners</loc>
+    <lastmod>2024-12-15</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/blog/guide-ai-trading-beginners" />
+  </url>
+  <url>
+    <loc>https://myaibaz.ir/blog/how-to-use-ai-trading</loc>
+    <lastmod>2024-12-10</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/blog/how-to-use-ai-trading" />
+  </url>
+  <url>
+    <loc>https://myaibaz.ir/blog/best-ai-trading-strategies</loc>
+    <lastmod>2024-12-05</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/blog/best-ai-trading-strategies" />
+  </url>
+  <url>
+    <loc>https://myaibaz.ir/blog/pros-cons-smart-trading</loc>
+    <lastmod>2024-12-01</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/blog/pros-cons-smart-trading" />
   </url>
   
 </urlset>

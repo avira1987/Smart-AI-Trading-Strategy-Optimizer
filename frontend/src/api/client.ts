@@ -256,8 +256,22 @@ client.interceptors.response.use(
       const requestUrl = error.config?.url || ''
       const isAuthCheckEndpoint = requestUrl.includes('/auth/check/')
       
+      // Don't redirect if this is a strategy processing endpoint
+      // This prevents interruption during strategy processing
+      const isStrategyProcessingEndpoint = requestUrl.includes('/strategies/') && (
+        requestUrl.includes('/process/') || 
+        requestUrl.includes('/process') ||
+        requestUrl.includes('/progress/')
+      )
+      
+      // Don't redirect if this is a backtest/job endpoint
+      // This prevents interruption during backtest execution
+      const isBacktestEndpoint = requestUrl.includes('/jobs/') || 
+                                 requestUrl.includes('/precheck/backtest/') ||
+                                 requestUrl.includes('/backtest/')
+      
       // Try to get CSRF token if missing (might be a CSRF issue)
-      if (!getCsrfToken() && !isAuthCheckEndpoint) {
+      if (!getCsrfToken() && !isAuthCheckEndpoint && !isStrategyProcessingEndpoint && !isBacktestEndpoint) {
         // Use Promise to handle async operation in non-async function
         ensureCsrfToken().then(() => {
           console.log('CSRF token refreshed, you may retry the request')
@@ -266,8 +280,8 @@ client.interceptors.response.use(
         })
       }
       
-      // Only redirect for user-initiated requests, not background checks
-      if (!isAuthCheckEndpoint && !isRedirectingToLogin && window.location.pathname !== '/login') {
+      // Only redirect for user-initiated requests, not background checks, strategy processing, or backtest operations
+      if (!isAuthCheckEndpoint && !isStrategyProcessingEndpoint && !isBacktestEndpoint && !isRedirectingToLogin && window.location.pathname !== '/login') {
         isRedirectingToLogin = true
         
         // Log error message for debugging
@@ -404,6 +418,8 @@ export interface Result {
     timeframe_days?: number
     strategy_timeframe?: string
     normalized_timeframe?: string
+    timeframe_type?: 'standard' | 'custom' | 'default'
+    timeframe_aggregation_method?: 'direct' | 'm1_aggregation' | 'default'
     execution_details?: {
       backtest_duration_seconds?: number
       total_duration_seconds?: number
@@ -586,6 +602,8 @@ export const getStrategyFileContent = (id: number) =>
   client.get<{status: string, content: string, file_name: string, file_size: number}>(`/strategies/${id}/file-content/`)
 export const saveGapGPTConversion = (id: number, data: { converted_strategy: any, model_used?: string, tokens_used?: number }) => 
   client.post(`/strategies/${id}/save-gapgpt-conversion/`, data)
+export const analyzeConvertedStrategyAmbiguities = (strategyId: number) => 
+  client.post(`/strategies/${strategyId}/analyze-converted-strategy-ambiguities/`)
 
 // Jobs
 export const getJobs = () => client.get('/jobs/')
@@ -1141,4 +1159,25 @@ export const convertStrategyWithGapGPT = (data: GapGPTConvertRequest) =>
 
 export const compareModelsWithGapGPT = (data: { strategy_text: string, models?: string[], temperature?: number, max_tokens?: number }) => 
   gapGPTClient.post<GapGPTCompareResponse>('/gapgpt/compare-models/', data)
+
+// GapGPT Account Balance (Admin Only)
+export interface GapGPTBalanceResponse {
+  status: string
+  message?: string
+  error?: string
+  data: {
+    balance: number | string | null
+    balance_formatted: string
+    currency: string
+    required?: number
+    required_formatted?: string
+    message?: string
+    is_low_balance?: boolean
+    last_checked: string
+    latency_ms?: number
+  }
+}
+
+export const checkGapGPTBalance = () => 
+  gapGPTClient.get<GapGPTBalanceResponse>('/gapgpt/balance/')
 

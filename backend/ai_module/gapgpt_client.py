@@ -8,11 +8,64 @@ GapGPT API Client for strategy conversion and analysis
 import json
 import logging
 import time
+from datetime import datetime
 from typing import Dict, Any, Optional, List
 import requests
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+# Cooldown برای ارسال پیامک به ادمین (1 ساعت)
+_GAPGPT_QUOTA_ALERT_COOLDOWN_SECONDS = 3600
+_last_gapgpt_quota_alert_time = 0
+
+
+def _notify_admin_gapgpt_quota_exhausted(remaining: str = 'نامشخص', required: str = 'نامشخص') -> None:
+    """
+    ارسال پیامک به ادمین در صورت اتمام اعتبار GapGPT
+    """
+    global _last_gapgpt_quota_alert_time
+    
+    admin_phones = getattr(settings, 'ADMIN_NOTIFICATION_PHONES', [])
+    if not admin_phones:
+        logger.debug("No admin phone numbers configured for GapGPT quota notifications.")
+        return
+    
+    # بررسی cooldown (فقط یک بار در ساعت)
+    now = time.time()
+    if now - _last_gapgpt_quota_alert_time < _GAPGPT_QUOTA_ALERT_COOLDOWN_SECONDS:
+        logger.debug("GapGPT quota alert cooldown active, skipping SMS notification.")
+        return
+    
+    _last_gapgpt_quota_alert_time = now
+    
+    alert_message = (
+        f"⚠️ هشدار: اعتبار GapGPT تمام شده است!\n"
+        f"موجودی باقیمانده: ${remaining}\n"
+        f"اعتبار موردنیاز: ${required}\n"
+        f"لطفاً حساب GapGPT را در https://gapgpt.app شارژ کنید."
+    )
+    
+    try:
+        from api.sms_service import send_sms
+    except ImportError:
+        logger.warning("SMS service not available for GapGPT quota notification.")
+        send_sms = None
+    
+    if send_sms:
+        for phone in admin_phones:
+            try:
+                result = send_sms(phone, alert_message)
+                if result.get('success', False):
+                    logger.info(f"✅ GapGPT quota alert SMS sent to admin: {phone}")
+                else:
+                    logger.error(
+                        f"Failed to send GapGPT quota alert SMS to {phone}: {result.get('message', 'unknown error')}"
+                    )
+            except Exception as sms_error:
+                logger.exception(f"Unexpected error while sending GapGPT quota alert SMS to {phone}: {sms_error}")
+    else:
+        logger.warning("SMS service unavailable for GapGPT quota notification.")
 
 # GapGPT API Configuration
 GAPGPT_API_BASE_URL = "https://api.gapgpt.app"
@@ -103,14 +156,22 @@ def test_gapgpt_api_key(api_key: str, user=None) -> Dict[str, Any]:
     # Test 1: Try to get available models
     try:
         endpoint = f"{GAPGPT_API_BASE_URL}/v1/models"
-        response = requests.get(
-            endpoint,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            },
-            timeout=10
-        )
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        }
+        logger.debug(f"[GapGPT] Testing API key, endpoint: {endpoint}")
+        try:
+            response = requests.get(
+                endpoint,
+                headers=headers,
+                timeout=10
+            )
+            logger.debug(f"[GapGPT] Test response status: {response.status_code}")
+        except requests.exceptions.RequestException as req_error:
+            logger.error(f"[GapGPT] Test request exception: {req_error}")
+            raise
         
         if response.status_code == 200:
             data = response.json()
@@ -190,16 +251,23 @@ def test_gapgpt_api_key(api_key: str, user=None) -> Dict[str, Any]:
         
         headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Accept": "application/json"
         }
         
+        logger.debug(f"[GapGPT] Test conversion, endpoint: {endpoint}")
         start_time = time.time()
-        response = requests.post(
-            endpoint,
-            headers=headers,
-            json=payload,
-            timeout=15
-        )
+        try:
+            response = requests.post(
+                endpoint,
+                headers=headers,
+                json=payload,
+                timeout=15
+            )
+            logger.debug(f"[GapGPT] Test conversion response status: {response.status_code}")
+        except requests.exceptions.RequestException as req_error:
+            logger.error(f"[GapGPT] Test conversion request exception: {req_error}")
+            raise
         latency_ms = (time.time() - start_time) * 1000
         
         if response.status_code == 200:
@@ -537,19 +605,28 @@ def convert_strategy_with_gapgpt(
         # آماده‌سازی headers
         headers = {
             "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Accept": "application/json"
         }
         
         logger.info(f"[GapGPT] Calling API with model: {model}, prompt_length: {len(prompt)}")
+        logger.debug(f"[GapGPT] Request URL: {endpoint}")
+        logger.debug(f"[GapGPT] Request headers: {dict(headers)}")
         start_time = time.time()
         
         # ارسال درخواست
-        response = requests.post(
-            endpoint,
-            headers=headers,
-            json=payload,
-            timeout=timeout
-        )
+        try:
+            response = requests.post(
+                endpoint,
+                headers=headers,
+                json=payload,
+                timeout=timeout
+            )
+            logger.debug(f"[GapGPT] Response status: {response.status_code}")
+            logger.debug(f"[GapGPT] Response headers: {dict(response.headers)}")
+        except requests.exceptions.RequestException as req_error:
+            logger.error(f"[GapGPT] Request exception: {req_error}")
+            raise
         
         latency_ms = (time.time() - start_time) * 1000
         
@@ -620,6 +697,8 @@ def convert_strategy_with_gapgpt(
             # خطای HTTP
             error_msg = f"HTTP {response.status_code}"
             try:
+                # اصلاح encoding برای خواندن صحیح کاراکترهای چینی
+                response.encoding = 'utf-8'
                 error_data = response.json()
                 error_detail = error_data.get('error', {})
                 if isinstance(error_detail, dict):
@@ -634,13 +713,109 @@ def convert_strategy_with_gapgpt(
                 elif isinstance(error_detail, str):
                     error_msg = error_detail
             except:
-                error_msg = response.text[:200] if response.text else error_msg
+                # اگر JSON نبود، متن خام را با encoding صحیح بخوانیم
+                try:
+                    response.encoding = 'utf-8'
+                    error_msg = response.text[:200] if response.text else error_msg
+                except:
+                    error_msg = response.text[:200] if response.text else error_msg
             
             logger.error(f"[GapGPT] API error: {response.status_code} - {error_msg}")
             
             # ترجمه خطاهای رایج
             if response.status_code == 401:
                 error_msg = "کلید API GapGPT نامعتبر است. لطفاً کلید صحیح را وارد کنید."
+            elif response.status_code == 403:
+                # خطای 403 ممکن است مربوط به کمبود اعتبار، مدل نامعتبر، یا مشکل دیگری باشد
+                # بررسی و ترجمه خطاهای چینی مربوط به اعتبار
+                import re
+                is_quota_error = False
+                remaining = 'نامشخص'
+                required = 'نامشخص'
+                
+                # Log the actual error for debugging
+                logger.warning(
+                    f"[GapGPT] 403 error received: error_msg='{error_msg}', "
+                    f"raw_response='{response.text[:500] if response.text else None}', "
+                    f"response_headers='{dict(response.headers)}'"
+                )
+                
+                # بررسی خطاهای quota (چینی و انگلیسی) - فقط در صورت وجود شواهد مشخص
+                # بررسی دقیق‌تر: باید هم quota/额度 و هم remain/remaining/需要 در پیام باشد
+                if error_msg:
+                    error_lower = error_msg.lower()
+                    # بررسی برای پیام‌های چینی - باید شامل کلمات کلیدی quota باشد
+                    has_chinese_quota_indicators = any(char in error_msg for char in ['预扣费', '剩余额度', '需要额度'])
+                    # بررسی برای پیام‌های انگلیسی - باید هم quota و هم remain/need باشد
+                    has_english_quota_indicators = (
+                        ('quota' in error_lower) and 
+                        (('remain' in error_lower) or ('remaining' in error_lower) or ('need' in error_lower) or ('insufficient' in error_lower))
+                    )
+                    
+                    # استخراج مقادیر از پیام چینی
+                    if has_chinese_quota_indicators:
+                        remaining_match = re.search(r'剩余额度[：:]\s*\$?([\d.]+)', error_msg)
+                        required_match = re.search(r'需要[^：:]*[：:]\s*\$?([\d.]+)', error_msg)
+                        
+                        if remaining_match:
+                            remaining = remaining_match.group(1)
+                        if required_match:
+                            required = required_match.group(1)
+                        
+                        # فقط در صورت استخراج موفق مقادیر، آن را quota error در نظر بگیریم
+                        if remaining != 'نامشخص' or required != 'نامشخص':
+                            is_quota_error = True
+                        else:
+                            # اگر کلمات کلیدی چینی وجود دارد اما مقادیر استخراج نشد، لاگ کنیم
+                            logger.warning(f"[GapGPT] Chinese quota keywords found but values not extracted: {error_msg[:200]}")
+                    
+                    # استخراج مقادیر از پیام انگلیسی
+                    elif has_english_quota_indicators:
+                        # Pattern: "token remain quota: ?0.019876, need quota: ?0.022694"
+                        remaining_match = re.search(r'(?:remain|remaining)[\s_]?quota[：:\s]*\$?\??([\d.]+)', error_msg, re.IGNORECASE)
+                        required_match = re.search(r'need[\s_]?quota[：:\s]*\$?\??([\d.]+)', error_msg, re.IGNORECASE)
+                        
+                        if remaining_match:
+                            remaining = remaining_match.group(1)
+                        if required_match:
+                            required = required_match.group(1)
+                        
+                        # فقط در صورت استخراج موفق مقادیر، آن را quota error در نظر بگیریم
+                        if remaining != 'نامشخص' or required != 'نامشخص':
+                            is_quota_error = True
+                        else:
+                            # اگر کلمات کلیدی انگلیسی وجود دارد اما مقادیر استخراج نشد، لاگ کنیم
+                            logger.warning(f"[GapGPT] English quota keywords found but values not extracted: {error_msg[:200]}")
+                
+                # ارسال پیامک به ادمین در صورت اتمام اعتبار - فقط اگر واقعاً quota error باشد
+                if is_quota_error:
+                    _notify_admin_gapgpt_quota_exhausted(remaining, required)
+                    # پیام quota فقط در صورت واقعی بودن quota error
+                    if remaining != 'نامشخص' and required != 'نامشخص':
+                        error_msg = f"اعتبار سرویس GapGPT کافی نیست. موجودی: ¥{remaining}، مورد نیاز: ¥{required}. لطفاً با پشتیبانی تماس بگیرید."
+                    elif remaining != 'نامشخص' or required != 'نامشخص':
+                        # اگر فقط یکی از مقادیر استخراج شد
+                        error_msg = f"اعتبار سرویس GapGPT کافی نیست. موجودی: ¥{remaining if remaining != 'نامشخص' else required}. لطفاً با پشتیبانی تماس بگیرید."
+                    else:
+                        # اگر هیچ مقداری استخراج نشد، نباید به عنوان quota error نمایش داده شود
+                        logger.warning(f"[GapGPT] Quota error detected but no values extracted. Original error: {error_msg[:200]}")
+                        is_quota_error = False  # Reset to avoid showing incorrect quota message
+                elif error_msg:
+                    # برای سایر خطاهای 403، پیام دقیق‌تر نمایش دهید
+                    error_lower = error_msg.lower()
+                    if 'model' in error_lower and ('not found' in error_lower or 'unavailable' in error_lower or '分组' in error_msg):
+                        error_msg = f"مدل '{model}' در دسترس نیست. لطفاً مدل دیگری انتخاب کنید."
+                    elif 'permission' in error_lower or 'forbidden' in error_lower:
+                        error_msg = "دسترسی رد شد. لطفاً کلید API و وضعیت حساب را بررسی کنید."
+                    elif 'rate limit' in error_lower or '429' in error_msg:
+                        error_msg = "محدودیت نرخ استفاده رسیده است. لطفاً چند لحظه صبر کنید."
+                    else:
+                        # Log the actual error for debugging, but show user-friendly message
+                        logger.debug(f"GapGPT 403 error details: {error_msg}")
+                        error_msg = "دسترسی رد شد. لطفاً کلید API و وضعیت حساب را بررسی کنید."
+                else:
+                    # Fallback if no error message
+                    error_msg = "دسترسی رد شد (403). لطفاً کلید API و وضعیت حساب را بررسی کنید."
             elif response.status_code == 429:
                 error_msg = "محدودیت نرخ استفاده از GapGPT رسیده است. لطفاً چند لحظه صبر کنید."
             elif response.status_code == 503:
@@ -649,7 +824,7 @@ def convert_strategy_with_gapgpt(
                 else:
                     error_msg = "سرویس GapGPT موقتاً در دسترس نیست. لطفاً دوباره تلاش کنید."
             
-            return {
+            result = {
                 'success': False,
                 'error': error_msg,
                 'converted_strategy': None,
@@ -658,6 +833,16 @@ def convert_strategy_with_gapgpt(
                 'latency_ms': latency_ms,
                 'status_code': response.status_code
             }
+            
+            # اضافه کردن اطلاعات quota error در صورت وجود
+            if response.status_code == 403 and is_quota_error:
+                result['is_quota_error'] = True
+                result['quota_remaining'] = remaining
+                result['quota_required'] = required
+            elif response.status_code == 403:
+                result['is_quota_error'] = False
+            
+            return result
             
     except requests.exceptions.Timeout:
         logger.error(f"[GapGPT] Request timeout after {timeout}s")
@@ -1026,4 +1211,322 @@ def analyze_backtest_trades_with_gapgpt(
             'analysis_text': '',
             'raw_output': ''
         }
+
+
+def check_gapgpt_account_balance(user=None) -> Dict[str, Any]:
+    """
+    بررسی موجودی حساب GapGPT
+    
+    این تابع با ارسال یک درخواست تستی کوچک به API GapGPT، موجودی حساب را بررسی می‌کند.
+    در صورت وجود خطای quota، اطلاعات موجودی از پیام خطا استخراج می‌شود.
+    
+    Args:
+        user: کاربر فعلی (برای دریافت API key)
+    
+    Returns:
+        Dict شامل:
+        - success: bool - آیا بررسی موفق بود؟
+        - balance: float یا str - موجودی حساب (در صورت موفقیت)
+        - balance_formatted: str - موجودی فرمت شده
+        - currency: str - واحد پول (¥ یا $)
+        - message: str - پیام توضیحی
+        - error: str - پیام خطا در صورت وجود
+        - last_checked: str - زمان آخرین بررسی
+    """
+    import re
+    
+    api_key = get_gapgpt_api_key(user)
+    if not api_key:
+        return {
+            'success': False,
+            'error': 'کلید API GapGPT تنظیم نشده است. لطفاً در تنظیمات > پیکربندی API، کلید GapGPT را اضافه کنید.',
+            'balance': None,
+            'balance_formatted': 'نامشخص',
+            'currency': '¥',
+            'message': '',
+            'last_checked': datetime.now().isoformat()
+        }
+    
+    # ارسال یک درخواست تستی کوچک برای بررسی موجودی
+    # استفاده از یک درخواست ساده با حداقل توکن
+    endpoint = f"{GAPGPT_API_BASE_URL}/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+    }
+    
+    # درخواست تستی با حداقل توکن
+    payload = {
+        "model": GAPGPT_DEFAULT_MODEL,
+        "messages": [
+            {"role": "user", "content": "test"}
+        ],
+        "max_tokens": 5,
+        "temperature": 0.1
+    }
+    
+    try:
+        start_time = time.time()
+        response = requests.post(
+            endpoint,
+            headers=headers,
+            json=payload,
+            timeout=15
+        )
+        latency_ms = (time.time() - start_time) * 1000
+        
+        if response.status_code == 200:
+            # اگر درخواست موفق بود، موجودی کافی است
+            return {
+                'success': True,
+                'balance': 'کافی',
+                'balance_formatted': 'موجودی کافی است',
+                'currency': '¥',
+                'message': 'موجودی حساب GapGPT کافی است و سرویس در دسترس می‌باشد.',
+                'error': None,
+                'last_checked': datetime.now().isoformat(),
+                'latency_ms': latency_ms
+            }
+        
+        elif response.status_code == 403:
+            # خطای 403 ممکن است مربوط به کمبود اعتبار باشد
+            error_msg = ''
+            try:
+                error_data = response.json()
+                error_detail = error_data.get('error', {})
+                if isinstance(error_detail, dict):
+                    error_msg = error_detail.get('message', '')
+                elif isinstance(error_detail, str):
+                    error_msg = error_detail
+            except:
+                error_msg = response.text[:500] if response.text else ''
+            
+            # استخراج موجودی از پیام خطا
+            balance = None
+            required = None
+            currency = '¥'
+            
+            if error_msg:
+                error_lower = error_msg.lower()
+                # بررسی برای پیام‌های چینی
+                has_chinese_quota = any(char in error_msg for char in ['剩余额度', '需要额度', '预扣费'])
+                # بررسی برای پیام‌های انگلیسی
+                has_english_quota = (
+                    ('quota' in error_lower) and 
+                    (('remain' in error_lower) or ('remaining' in error_lower) or ('need' in error_lower) or ('insufficient' in error_lower))
+                )
+                
+                if has_chinese_quota:
+                    # استخراج از پیام چینی
+                    remaining_match = re.search(r'剩余额度[：:]\s*\$?([\d.]+)', error_msg)
+                    required_match = re.search(r'需要[^：:]*[：:]\s*\$?([\d.]+)', error_msg)
+                    
+                    if remaining_match:
+                        balance = float(remaining_match.group(1))
+                        currency = '¥' if '¥' in error_msg or '¥' not in error_msg else '$'
+                    if required_match:
+                        required = float(required_match.group(1))
+                        
+                elif has_english_quota:
+                    # استخراج از پیام انگلیسی
+                    remaining_match = re.search(r'(?:remain|remaining)[\s_]?quota[：:\s]*\$?\??([\d.]+)', error_msg, re.IGNORECASE)
+                    required_match = re.search(r'need[\s_]?quota[：:\s]*\$?\??([\d.]+)', error_msg, re.IGNORECASE)
+                    
+                    if remaining_match:
+                        balance = float(remaining_match.group(1))
+                        currency = '$' if '$' in error_msg else '¥'
+                    if required_match:
+                        required = float(required_match.group(1))
+            
+            if balance is not None:
+                return {
+                    'success': True,
+                    'balance': balance,
+                    'balance_formatted': f'{currency}{balance:.6f}',
+                    'currency': currency,
+                    'required': required,
+                    'required_formatted': f'{currency}{required:.6f}' if required else None,
+                    'message': f'موجودی حساب: {currency}{balance:.6f}' + (f'، مورد نیاز: {currency}{required:.6f}' if required else ''),
+                    'error': None,
+                    'last_checked': datetime.now().isoformat(),
+                    'is_low_balance': balance < (required or 0) if required else balance < 0.01,
+                    'latency_ms': latency_ms
+                }
+            else:
+                # خطای 403 اما نتوانستیم موجودی را استخراج کنیم
+                return {
+                    'success': False,
+                    'balance': None,
+                    'balance_formatted': 'نامشخص',
+                    'currency': '¥',
+                    'message': 'خطای دسترسی (403). ممکن است موجودی کافی نباشد یا مشکل دیگری وجود داشته باشد.',
+                    'error': error_msg[:200] if error_msg else 'خطای دسترسی (403)',
+                    'last_checked': datetime.now().isoformat(),
+                    'latency_ms': latency_ms
+                }
+        
+        elif response.status_code == 401:
+            return {
+                'success': False,
+                'balance': None,
+                'balance_formatted': 'نامشخص',
+                'currency': '¥',
+                'message': 'کلید API GapGPT نامعتبر است.',
+                'error': 'Invalid API key (401)',
+                'last_checked': datetime.now().isoformat(),
+                'latency_ms': latency_ms
+            }
+        
+        else:
+            error_msg = ''
+            try:
+                error_data = response.json()
+                error_detail = error_data.get('error', {})
+                if isinstance(error_detail, dict):
+                    error_msg = error_detail.get('message', '')
+                elif isinstance(error_detail, str):
+                    error_msg = error_detail
+            except:
+                error_msg = response.text[:200] if response.text else ''
+            
+            return {
+                'success': False,
+                'balance': None,
+                'balance_formatted': 'نامشخص',
+                'currency': '¥',
+                'message': f'خطا در بررسی موجودی (کد: {response.status_code})',
+                'error': error_msg or f'HTTP {response.status_code}',
+                'last_checked': datetime.now().isoformat(),
+                'latency_ms': latency_ms
+            }
+    
+    except requests.exceptions.Timeout:
+        return {
+            'success': False,
+            'balance': None,
+            'balance_formatted': 'نامشخص',
+            'currency': '¥',
+            'message': 'زمان اتصال به GapGPT API تمام شد.',
+            'error': 'Connection timeout',
+            'last_checked': datetime.now().isoformat()
+        }
+    
+    except requests.exceptions.ConnectionError as e:
+        return {
+            'success': False,
+            'balance': None,
+            'balance_formatted': 'نامشخص',
+            'currency': '¥',
+            'message': 'خطا در اتصال به GapGPT API.',
+            'error': f'Connection error: {str(e)}',
+            'last_checked': datetime.now().isoformat()
+        }
+    
+    except Exception as e:
+        logger.exception(f"[GapGPT] Unexpected error checking account balance: {e}")
+        return {
+            'success': False,
+            'balance': None,
+            'balance_formatted': 'نامشخص',
+            'currency': '¥',
+            'message': f'خطای غیرمنتظره در بررسی موجودی: {str(e)}',
+            'error': str(e),
+            'last_checked': datetime.now().isoformat()
+        }
+
+
+def generate_basic_backtest_analysis(
+    backtest_results: Dict[str, Any], 
+    strategy: Dict[str, Any], 
+    symbol: str,
+    data_provider: str = None,
+    data_points: int = 0,
+    date_range: str = None
+) -> str:
+    """Generate a basic backtest analysis without AI - fallback when GapGPT is not available"""
+    total_trades = backtest_results.get('total_trades', 0)
+    winning_trades = backtest_results.get('winning_trades', 0)
+    losing_trades = backtest_results.get('losing_trades', 0)
+    total_return = backtest_results.get('total_return', 0.0)
+    win_rate = backtest_results.get('win_rate', 0.0)
+    max_drawdown = backtest_results.get('max_drawdown', 0.0)
+    
+    entry_conditions = strategy.get('entry_conditions', [])
+    exit_conditions = strategy.get('exit_conditions', [])
+    
+    analysis = f"📊 تحلیل نتایج بک‌تست برای {symbol}\n\n"
+    
+    # Add data source information at the beginning
+    if data_provider or data_points > 0 or date_range:
+        analysis += "📊 منابع داده استفاده شده:\n"
+        if data_provider:
+            analysis += f"• ارائه‌دهنده داده: {data_provider}\n"
+        if date_range:
+            analysis += f"• بازه زمانی: {date_range}\n"
+        if data_points > 0:
+            analysis += f"• تعداد نقاط داده: {data_points:,}\n"
+        analysis += "\n"
+    
+    analysis += "=" * 80 + "\n\n"
+    
+    if total_trades > 0:
+        analysis += f"📈 آمار کلی:\n"
+        analysis += f"- تعداد کل معاملات: {total_trades}\n"
+        analysis += f"- معاملات برنده: {winning_trades}\n"
+        analysis += f"- معاملات بازنده: {losing_trades}\n"
+        analysis += f"- نرخ برد: {win_rate:.2f}%\n\n"
+        
+        if winning_trades > losing_trades:
+            analysis += f"✅ استراتژی عملکرد مثبتی داشته است. {winning_trades} معامله برنده در مقابل {losing_trades} معامله بازنده.\n\n"
+        elif losing_trades > winning_trades:
+            analysis += f"⚠️ استراتژی نیاز به بهبود دارد. {losing_trades} معامله بازنده در مقابل {winning_trades} معامله برنده.\n\n"
+        else:
+            analysis += f"📊 تعداد معاملات برنده و بازنده برابر است.\n\n"
+        
+        if total_return > 0:
+            analysis += f"💹 با استفاده از این استراتژی، سرمایه شما {total_return:.2f}% افزایش یافته است.\n\n"
+        elif total_return < 0:
+            analysis += f"📉 متأسفانه با این استراتژی، سرمایه شما {abs(total_return):.2f}% کاهش یافته است.\n\n"
+        else:
+            analysis += f"➡️ این استراتژی در این بازه زمانی سود یا ضرر خاصی نداشته است.\n\n"
+    else:
+        analysis += "⚠️ هیچ معامله‌ای در این بک‌تست انجام نشده است. ممکن است شرایط ورود یا خروج با داده‌های موجود همخوانی نداشته باشند.\n\n"
+    
+    # Strategy analysis
+    if entry_conditions or exit_conditions:
+        analysis += f"📋 تحلیل استراتژی:\n"
+        analysis += f"- تعداد شرایط ورود: {len(entry_conditions)}\n"
+        analysis += f"- تعداد شرایط خروج: {len(exit_conditions)}\n\n"
+        
+        if entry_conditions:
+            analysis += "شرایط ورود:\n"
+            for idx, cond in enumerate(entry_conditions[:5], 1):
+                analysis += f"  {idx}. {cond[:100]}...\n"
+            analysis += "\n"
+        
+        if exit_conditions:
+            analysis += "شرایط خروج:\n"
+            for idx, cond in enumerate(exit_conditions[:5], 1):
+                analysis += f"  {idx}. {cond[:100]}...\n"
+            analysis += "\n"
+    
+    # Trade analysis if available
+    trades = backtest_results.get('trades', [])
+    if trades:
+        profits = [t.get('profit', 0) for t in trades if t.get('profit', 0) > 0]
+        losses = [t.get('profit', 0) for t in trades if t.get('profit', 0) < 0]
+        
+        if profits:
+            avg_profit = sum(profits) / len(profits)
+            analysis += f"💰 متوسط سود هر معامله برنده: {avg_profit:.2f}\n"
+        
+        if losses:
+            avg_loss = abs(sum(losses) / len(losses))
+            analysis += f"📉 متوسط ضرر هر معامله بازنده: {avg_loss:.2f}\n"
+    
+    analysis += "\n" + "=" * 80
+    analysis += "\n\n💡 توصیه: برای تحلیل دقیق‌تر هر شرط ورود/خروج، از تحلیل هوش مصنوعی GapGPT استفاده کنید."
+    
+    return analysis
 

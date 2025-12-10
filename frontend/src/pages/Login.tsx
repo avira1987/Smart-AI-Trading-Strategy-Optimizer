@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { sendOTP, verifyOTP } from '../api/auth'
 import { useToast } from '../components/ToastProvider'
 import { getCaptcha, initPageLoadTime, prepareCaptchaData, clearCaptcha } from '../utils/selfCaptcha'
+import SEO from '../components/SEO'
 
 export default function Login() {
   const [step, setStep] = useState<'phone' | 'otp'>('phone')
@@ -125,10 +126,10 @@ export default function Login() {
             if (isNewUser) {
               // Show welcome message with registration bonus
               showToast(
-                '🎉 به پلتفرم خوش آمدید! مبلغ 399 تومان هدیه ثبت‌نام به حساب شما اضافه شد.',
+                '🎉 به پلتفرم خوش آمدید! مبلغ 45000 هزار تومان هدیه ثبت‌نام به حساب شما اضافه شد.',
                 { type: 'success', duration: 8000 }
               )
-              navigate('/complete-profile')
+              navigate('/')
             } else {
               showToast('ورود با موفقیت انجام شد', { type: 'success' })
               navigate('/')
@@ -348,10 +349,10 @@ export default function Login() {
         if (isNewUser) {
           // Show welcome message with registration bonus
           showToast(
-            '🎉 به پلتفرم خوش آمدید! مبلغ 399 تومان هدیه ثبت‌نام به حساب شما اضافه شد.',
+            '🎉 به پلتفرم خوش آمدید! مبلغ 45000 هزار تومان هدیه ثبت‌نام به حساب شما اضافه شد.',
             { type: 'success', duration: 8000 }
           )
-          navigate('/complete-profile')
+          navigate('/')
         } else {
           showToast('ورود با موفقیت انجام شد', { type: 'success' })
           navigate('/')
@@ -490,17 +491,27 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center px-4">
+    <>
+      <SEO
+        title="ورود | ثبت‌نام | ترید با هوش مصنوعی"
+        description="ورود و ثبت‌نام در سامانه ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی. شروع معاملات هوشمند با AI"
+        keywords="ورود, ثبت‌نام, ترید با هوش مصنوعی, ورود به سیستم معاملات هوشمند"
+        canonical="https://myaibaz.ir/login"
+        ogTitle="ورود به سامانه ترید با هوش مصنوعی"
+        ogDescription="ورود و ثبت‌نام در سامانه ترید با هوش مصنوعی"
+        ogUrl="https://myaibaz.ir/login"
+      />
+    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 flex items-center justify-center px-4 py-4 overflow-x-hidden">
       <div className="w-full max-w-md">
-        <div className="bg-gray-800 rounded-xl shadow-2xl p-8">
-          <div className="text-center mb-8">
-            <h1 className="text-3xl font-bold text-white mb-2">ورود به سیستم</h1>
-            <p className="text-gray-400">ورود با شماره موبایل و کد یکبار مصرف</p>
+        <div className="bg-gray-800 rounded-xl shadow-2xl p-4 sm:p-6 md:p-8">
+          <div className="text-center mb-6 sm:mb-8">
+            <h1 className="text-2xl sm:text-3xl font-bold text-white mb-2">ورود به سیستم</h1>
+            <p className="text-sm sm:text-base text-gray-400">ورود با شماره موبایل و کد یکبار مصرف</p>
           </div>
 
           {step === 'phone' ? (
             <>
-              <form onSubmit={handlePhoneSubmit} className="space-y-6">
+              <form onSubmit={handlePhoneSubmit} className="space-y-4 sm:space-y-6">
                 <div>
                   <label htmlFor="phone" className="label-standard text-center">
                     شماره موبایل
@@ -615,7 +626,7 @@ export default function Login() {
               </form>
             </>
           ) : (
-            <form onSubmit={handleOTPSubmit} className="space-y-6">
+            <form onSubmit={handleOTPSubmit} className="space-y-4 sm:space-y-6">
               <div>
                 <label htmlFor="otp" className="label-standard">
                   کد یکبار مصرف
@@ -725,7 +736,7 @@ export default function Login() {
             </form>
           )}
 
-          <div className="mt-6 text-center text-sm text-gray-400 leading-relaxed">
+          <div className="mt-4 sm:mt-6 text-center text-xs sm:text-sm text-gray-400 leading-relaxed">
             ورود شما به وب‌سایت به معنی قبول قوانین وب‌سایت است. قوانین را از{' '}
             <Link to="/terms" className="text-blue-400 hover:text-blue-300 underline">
               اینجا
@@ -734,7 +745,7 @@ export default function Login() {
           </div>
 
           {/* Telegram Support Link */}
-          <div className="mt-8 pt-6 border-t border-gray-700">
+          <div className="mt-4 sm:mt-8 pt-4 sm:pt-6 border-t border-gray-700">
             <div className="text-center">
               <p className="text-sm text-gray-400 mb-3">
                 در صورت بروز مشکل در ورود، با ما در تماس باشید
@@ -755,6 +766,7 @@ export default function Login() {
         </div>
       </div>
     </div>
+    </>
   )
 }
 
