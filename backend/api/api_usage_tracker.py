@@ -175,7 +175,12 @@ def log_api_usage(
                     
                     if total_tokens > 0:
                         # محاسبه هزینه بر اساس تنظیمات سیستم
-                        token_cost = (Decimal(str(total_tokens)) / Decimal('1000')) * settings.token_cost_per_1000
+                        # محاسبه هزینه پایه
+                        base_cost_per_1000 = Decimal('100.0')
+                        base_token_cost = (Decimal(str(total_tokens)) / Decimal('1000')) * base_cost_per_1000
+                        # اعمال ضریب سود
+                        profit_multiplier = settings.profit_margin_multiplier
+                        token_cost = base_token_cost * profit_multiplier
                         
                         # کسر از موجودی
                         if wallet.balance >= token_cost:

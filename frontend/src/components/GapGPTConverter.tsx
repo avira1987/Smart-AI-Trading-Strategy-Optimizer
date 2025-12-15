@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { getGapGPTModels, convertStrategyWithGapGPT, compareModelsWithGapGPT, GapGPTModel, saveGapGPTConversion, getSystemSettings, analyzeConvertedStrategyAmbiguities } from '../api/client'
+import { useState, useEffect, useRef } from 'react'
+import { getGapGPTModels, convertStrategyWithGapGPT, compareModelsWithGapGPT, GapGPTModel, saveGapGPTConversion, analyzeConvertedStrategyAmbiguities, updateStrategyFileContent } from '../api/client'
 import { useToast } from './ToastProvider'
 import StrategyQuestions from './StrategyQuestions'
 
@@ -22,26 +22,26 @@ const getModelInfo = (model: GapGPTModel, costPerWord: number = 0.001) => {
   if (ownedByLower.includes('openai') || nameLower.includes('gpt')) {
     if (nameLower.includes('gpt-5') || nameLower.includes('gpt5')) {
       return {
-        description: 'مدل پیشرفته و قدرتمند GPT-5 از طریق GapGPT با قابلیت‌های استدلال پیشرفته',
+        description: 'مدل پیشرفته و قدرتمند GPT-5 با قابلیت‌های استدلال پیشرفته',
         cost: costDisplay,
         suitableFor: 'تحلیل‌های پیچیده، استدلال پیشرفته، کدنویسی و ریاضیات'
       }
     } else if (nameLower.includes('gpt-4.5') || nameLower.includes('gpt4.5')) {
       return {
-        description: 'مدل خلاقانه و پیشرفته GPT-4.5 از طریق GapGPT برای وظایف پیچیده',
+        description: 'مدل خلاقانه و پیشرفته GPT-4.5 برای وظایف پیچیده',
         cost: costDisplay,
         suitableFor: 'تولید محتوای خلاقانه، برنامه‌ریزی پیچیده، تحلیل‌های حرفه‌ای'
       }
     } else if (nameLower.includes('gpt-4o') || nameLower.includes('gpt4o') || nameLower.includes('gpt-40')) {
       if (nameLower.includes('mini')) {
         return {
-          description: 'مدل سریع و مقرون‌به‌صرفه GPT-4o-mini از طریق GapGPT با عملکرد عالی',
+          description: 'مدل سریع و مقرون‌به‌صرفه GPT-4o-mini با عملکرد عالی',
           cost: costDisplay,
           suitableFor: 'تحلیل‌های روزمره، تبدیل استراتژی‌ها، کارهای سریع'
         }
       } else {
         return {
-          description: 'مدل قدرتمند و همه‌کاره GPT-4o از طریق GapGPT با دقت بالا',
+          description: 'مدل قدرتمند و همه‌کاره GPT-4o با دقت بالا',
           cost: costDisplay,
           suitableFor: 'تحلیل‌های دقیق، تبدیل استراتژی‌های پیچیده، تولید محتوای باکیفیت'
         }
@@ -67,9 +67,9 @@ const getModelInfo = (model: GapGPTModel, costPerWord: number = 0.001) => {
         suitableFor: 'مکالمات تعاملی، تحلیل‌های سریع، تبدیل استراتژی‌ها'
       }
     }
-    // پیش‌فرض برای مدل‌های OpenAI دیگر از طریق GapGPT
+    // پیش‌فرض برای مدل‌های OpenAI دیگر
     return {
-      description: 'مدل OpenAI از طریق GapGPT با عملکرد متعادل',
+      description: 'مدل OpenAI با عملکرد متعادل',
       cost: costDisplay,
       suitableFor: 'تحلیل و تبدیل استراتژی‌های معاملاتی'
     }
@@ -115,6 +115,7 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
   const [loadingModels, setLoadingModels] = useState(true)
   const [selectedModel, setSelectedModel] = useState<string>('')
   const [text, setText] = useState(strategyText)
+  const [originalText, setOriginalText] = useState(strategyText)
   const [showGuide, setShowGuide] = useState(!strategyText.trim())
   const [textareaRef, setTextareaRef] = useState<HTMLTextAreaElement | null>(null)
   const [temperature, setTemperature] = useState(0.3)
@@ -124,31 +125,41 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
   const [result, setResult] = useState<any>(null)
   const [compareResults, setCompareResults] = useState<any>(null)
   const [saving, setSaving] = useState(false)
-  const [modelCosts, setModelCosts] = useState<{ [key: string]: number }>({})
+  const [savingText, setSavingText] = useState(false)
   const defaultCost = 0.001
   const [showQuestions, setShowQuestions] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
   const { showToast } = useToast()
+  const resultsRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    loadModels()
-    loadModelCosts()
-  }, [])
-
-  const loadModelCosts = async () => {
-    try {
-      const response = await getSystemSettings()
-      if (response.data.model_costs) {
-        setModelCosts(response.data.model_costs)
-      }
-    } catch (error) {
-      console.error('Error loading model costs:', error)
+  // محاسبه هزینه تخمینی بر اساس منطق بک‌اند
+  const calculateEstimatedCost = (): number => {
+    // منطق بک‌اند: base_cost_per_1000 = 100 تومان
+    // profit_multiplier معمولاً بین 1.0 تا 2.0 است، ما از 1.0 استفاده می‌کنیم برای تخمین محافظه‌کارانه
+    const baseCostPer1000 = 100 // تومان
+    const profitMultiplier = 1.0 // می‌تواند از API دریافت شود، فعلاً 1.0
+    
+    if (mode === 'single') {
+      // برای یک مدل: (max_tokens / 1000) * 100 * profit_multiplier
+      const estimatedTokens = maxTokens
+      return (estimatedTokens / 1000) * baseCostPer1000 * profitMultiplier
+    } else {
+      // برای مقایسه: (max_tokens / 1000) * 100 * profit_multiplier * تعداد مدل‌ها
+      const numModels = selectedModels.length > 0 ? selectedModels.length : 3 // پیش‌فرض 3 مدل
+      const estimatedTokensPerModel = maxTokens
+      const totalEstimatedTokens = estimatedTokensPerModel * numModels
+      return (totalEstimatedTokens / 1000) * baseCostPer1000 * profitMultiplier
     }
   }
 
   useEffect(() => {
+    loadModels()
+  }, [])
+
+  useEffect(() => {
     if (strategyText) {
       setText(strategyText)
+      setOriginalText(strategyText)
       setShowGuide(false)
     }
   }, [strategyText])
@@ -172,7 +183,7 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
         }
       }
     } catch (error: any) {
-      console.error('Error loading GapGPT models:', error)
+      console.error('Error loading AI models:', error)
       showToast('خطا در دریافت لیست مدل‌ها', { type: 'error' })
     } finally {
       setLoadingModels(false)
@@ -209,6 +220,10 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
           if (onConverted) {
             onConverted(response.data.data.converted_strategy)
           }
+          // اسکرول خودکار به نتایج
+          setTimeout(() => {
+            resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }, 100)
         } else {
           showToast(response.data.message || response.data.data?.error || 'خطا در تبدیل استراتژی', { type: 'error' })
         }
@@ -234,6 +249,10 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
           if (response.data.data.best_result && onConverted) {
             onConverted(response.data.data.best_result.result.converted_strategy)
           }
+          // اسکرول خودکار به نتایج
+          setTimeout(() => {
+            resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }, 100)
         } else {
           showToast(response.data.message || 'خطا در مقایسه مدل‌ها', { type: 'error' })
         }
@@ -293,7 +312,47 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
 
       {/* Strategy Text Input */}
       <div>
-        <label className="block text-white mb-2 font-semibold">متن استراتژی</label>
+        <div className="flex items-center justify-between mb-2">
+          <label className="block text-white font-semibold">متن استراتژی</label>
+          {text.trim() && text !== originalText && strategyId && (
+            <button
+              onClick={async () => {
+                if (!strategyId) return
+                try {
+                  setSavingText(true)
+                  await updateStrategyFileContent(strategyId, text)
+                  setOriginalText(text)
+                  showToast('متن استراتژی با موفقیت ذخیره شد!', { type: 'success' })
+                  if (onSave) {
+                    onSave()
+                  }
+                } catch (error: any) {
+                  console.error('Error saving strategy text:', error)
+                  showToast(error.response?.data?.message || 'خطا در ذخیره متن استراتژی', { type: 'error' })
+                } finally {
+                  setSavingText(false)
+                }
+              }}
+              disabled={savingText}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded font-semibold transition-colors flex items-center gap-2 text-sm"
+            >
+              {savingText ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  در حال ذخیره...
+                </>
+              ) : (
+                <>
+                  <span>💾</span>
+                  <span>ذخیره تغییرات</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
         {showGuide && !text.trim() ? (
           <div 
             onClick={() => setShowGuide(false)}
@@ -348,8 +407,7 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
                 className="w-full bg-gray-700 text-white rounded p-3 border border-gray-600 focus:border-blue-500 focus:outline-none"
               >
                 {models.map((model) => {
-                  const costPerWord = modelCosts[model.id] || defaultCost
-                  const modelInfo = getModelInfo(model, costPerWord)
+                  const modelInfo = getModelInfo(model, defaultCost)
                   return (
                     <option key={model.id} value={model.id}>
                       {model.name} - {modelInfo.description} (هزینه: {modelInfo.cost})
@@ -360,8 +418,7 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
               {selectedModel && (() => {
                 const selectedModelData = models.find(m => m.id === selectedModel)
                 if (!selectedModelData) return null
-                const costPerWord = modelCosts[selectedModelData.id] || defaultCost
-                const modelInfo = getModelInfo(selectedModelData, costPerWord)
+                const modelInfo = getModelInfo(selectedModelData, defaultCost)
                 return (
                   <div className="mt-3 p-3 bg-gray-900 rounded-lg border border-gray-700">
                     <p className="text-sm text-gray-300 mb-2">
@@ -387,8 +444,7 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
               <label className="block text-white mb-2 font-semibold">انتخاب مدل‌ها برای مقایسه</label>
               <div className="grid grid-cols-1 gap-2 max-h-[300px] overflow-y-auto bg-gray-700 p-3 rounded border border-gray-600">
                 {models.map((model) => {
-                  const costPerWord = modelCosts[model.id] || defaultCost
-                  const modelInfo = getModelInfo(model, costPerWord)
+                  const modelInfo = getModelInfo(model, defaultCost)
                   return (
                     <label key={model.id} className="flex items-start space-x-2 space-x-reverse text-white cursor-pointer hover:bg-gray-600 p-2 rounded">
                       <input
@@ -573,13 +629,18 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
             در حال تبدیل...
           </span>
         ) : (
-          mode === 'single' ? '🔮 تبدیل استراتژی' : '📊 مقایسه مدل‌ها'
+          <span className="flex flex-col items-center gap-1">
+            <span>{mode === 'single' ? '🔮 تبدیل استراتژی' : '📊 مقایسه مدل‌ها'}</span>
+            <span className="text-xs font-normal opacity-90">
+              💰 هزینه تخمینی: {calculateEstimatedCost().toFixed(0)} تومان
+            </span>
+          </span>
         )}
       </button>
 
       {/* Results - Single Model */}
       {result && result.converted_strategy && (
-        <div className="mt-6 bg-gray-900 rounded p-4 border border-gray-700">
+        <div ref={resultsRef} className="mt-6 bg-gray-900 rounded p-4 border border-gray-700">
           <h3 className="text-white font-bold mb-3 text-lg">✓ نتیجه تبدیل</h3>
           <div className="text-sm text-gray-400 mb-3 flex gap-4">
             <span>مدل: <span className="text-green-400">{result.model_used}</span></span>
@@ -607,7 +668,7 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
                         onSave()
                       }
                     } catch (error: any) {
-                      console.error('Error saving GapGPT conversion:', error)
+                      console.error('Error saving AI conversion:', error)
                       showToast(error.response?.data?.message || 'خطا در ذخیره استراتژی', { type: 'error' })
                     } finally {
                       setSaving(false)
@@ -690,7 +751,7 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
 
       {/* Results - Compare Models */}
       {compareResults && (
-        <div className="mt-6 space-y-4">
+        <div ref={resultsRef} className="mt-6 space-y-4">
           <h3 className="text-white font-bold text-lg">📊 نتایج مقایسه</h3>
           
           {/* Summary */}
@@ -744,7 +805,7 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
                           onSave()
                         }
                       } catch (error: any) {
-                        console.error('Error saving GapGPT conversion:', error)
+                        console.error('Error saving AI conversion:', error)
                         showToast(error.response?.data?.message || 'خطا در ذخیره استراتژی', { type: 'error' })
                       } finally {
                         setSaving(false)

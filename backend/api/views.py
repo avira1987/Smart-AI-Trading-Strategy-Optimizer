@@ -6,6 +6,7 @@ from rest_framework.views import APIView
 from rest_framework.serializers import ValidationError
 from django.shortcuts import get_object_or_404
 from django.http import Http404, FileResponse, HttpResponse
+from django.utils.datastructures import MultiValueDict
 import os
 import mimetypes
 from urllib.parse import quote
@@ -750,6 +751,13 @@ class BacktestPrecheckView(APIView):
                 
                 strategy = marketplace_access.listing.strategy
 
+            # بررسی می‌کنیم که استراتژی توسط هوش مصنوعی پردازش شده باشد
+            if strategy.processing_status != 'processed':
+                return Response({
+                    'status': 'error',
+                    'message': 'فقط استراتژی‌هایی که توسط هوش مصنوعی پردازش شده‌اند قابلیت بک‌تست دارند. لطفاً ابتدا استراتژی را پردازش کنید.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             # Use pre-processed strategy data if available, otherwise parse on the fly
             # IMPORTANT: If parsed_strategy_data exists and processing_status is 'processed',
             # we don't need to parse the file again. This avoids slow re-parsing on every precheck.
@@ -851,8 +859,10 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
         return TradingStrategy.objects.filter(user=user)
 
     def create(self, request):
-        """Upload new strategy"""
+        """Upload new strategy - supports both file upload and text input"""
         import logging
+        import tempfile
+        from django.core.files.uploadedfile import SimpleUploadedFile
         logger = logging.getLogger(__name__)
         
         # Log request details
@@ -860,6 +870,209 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
         logger.info(f"Request method: {request.method}")
         logger.info(f"Content-Type: {request.content_type}")
         logger.info(f"Request data keys: {list(request.data.keys()) if hasattr(request.data, 'keys') else 'N/A'}")
+        
+        # Check if strategy_text is provided instead of file
+        try:
+            # Try to get strategy_text from request data
+            # For FormData, it might be in request.data or request.POST
+            strategy_text = ''
+            if 'strategy_text' in request.data:
+                text_value = request.data.get('strategy_text', '')
+                # Handle case where Django returns a list
+                if isinstance(text_value, list):
+                    strategy_text = text_value[0] if text_value else ''
+                else:
+                    strategy_text = str(text_value).strip()
+            elif 'strategy_text' in request.POST:
+                text_value = request.POST.get('strategy_text', '')
+                if isinstance(text_value, list):
+                    strategy_text = text_value[0] if text_value else ''
+                else:
+                    strategy_text = str(text_value).strip()
+            
+            logger.info(f"Strategy text received: length={len(strategy_text) if strategy_text else 0} characters")
+            logger.info(f"Strategy text preview: {strategy_text[:100] if strategy_text else 'empty'}...")
+        except Exception as e:
+            import traceback
+            logger.error(f"Error reading strategy_text from request: {str(e)}\n{traceback.format_exc()}")
+            strategy_text = ''
+        
+        has_file = 'strategy_file' in request.FILES
+        
+        # Validate that either file or text is provided
+        if not has_file and not strategy_text:
+            logger.error("Neither strategy_file nor strategy_text provided")
+            return Response(
+                {'detail': 'لطفاً یک فایل آپلود کنید یا متن استراتژی را وارد کنید'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # If text is provided, create a temporary file from it
+        if strategy_text and not has_file:
+            try:
+                # Validate text length
+                MAX_TEXT_SIZE = 10 * 1024 * 1024  # 10MB
+                text_bytes = strategy_text.encode('utf-8')
+                text_size = len(text_bytes)
+                
+                logger.info(f"Processing text input: {text_size} bytes ({text_size / (1024*1024):.2f} MB)")
+                
+                if text_size > MAX_TEXT_SIZE:
+                    logger.error(f"Text too large: {text_size} bytes, max: {MAX_TEXT_SIZE} bytes")
+                    return Response(
+                        {'detail': f'متن استراتژی بیش از حد مجاز است. حداکثر اندازه: {MAX_TEXT_SIZE // (1024*1024)} مگابایت'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                MIN_TEXT_SIZE = 10  # 10 bytes
+                if text_size < MIN_TEXT_SIZE:
+                    logger.error(f"Text too small: {text_size} bytes, min: {MIN_TEXT_SIZE} bytes")
+                    return Response(
+                        {'detail': 'متن استراتژی خالی است یا خیلی کوچک است'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                # Create a temporary file from text
+                # Use the strategy name for filename if available, otherwise use default
+                strategy_name = request.data.get('name', 'strategy')
+                if isinstance(strategy_name, list):
+                    strategy_name = strategy_name[0] if strategy_name else 'strategy'
+                strategy_name = str(strategy_name).strip()
+                
+                # Sanitize filename
+                import re
+                safe_name = re.sub(r'[^\w\s-]', '', strategy_name).strip()
+                safe_name = re.sub(r'[-\s]+', '-', safe_name)
+                if not safe_name:
+                    safe_name = 'strategy'
+                
+                filename = f"{safe_name}.docx"
+                
+                # Create Word document from text using python-docx
+                try:
+                    from docx import Document
+                    from docx.shared import Pt
+                    from io import BytesIO
+                    
+                    # Create a new Document
+                    doc = Document()
+                    
+                    # Add content to Document
+                    # Split content into lines and add each line as a paragraph
+                    lines = strategy_text.split('\n')
+                    for line in lines:
+                        if line.strip():  # Only non-empty lines
+                            para = doc.add_paragraph(line.strip())
+                            # Set font for Persian/Farsi support
+                            for run in para.runs:
+                                run.font.name = 'Arial'
+                                run.font.size = Pt(11)
+                        else:
+                            doc.add_paragraph()  # Empty line
+                    
+                    # Save document to BytesIO buffer
+                    doc_buffer = BytesIO()
+                    doc.save(doc_buffer)
+                    doc_buffer.seek(0)
+                    
+                    # Create SimpleUploadedFile from docx content
+                    uploaded_file = SimpleUploadedFile(
+                        name=filename,
+                        content=doc_buffer.read(),
+                        content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                    )
+                    
+                    logger.info(f"Created Word document from text: {filename}, size={uploaded_file.size} bytes")
+                    
+                except ImportError:
+                    logger.warning("python-docx not available, falling back to text file")
+                    # Fallback to text file if python-docx is not available
+                    filename = f"{safe_name}.txt"
+                    uploaded_file = SimpleUploadedFile(
+                        name=filename,
+                        content=text_bytes,
+                        content_type='text/plain'
+                    )
+                except Exception as e:
+                    import traceback
+                    error_trace = traceback.format_exc()
+                    logger.error(f"Error creating Word document: {str(e)}\nTraceback: {error_trace}")
+                    # Fallback to text file on error
+                    filename = f"{safe_name}.txt"
+                    uploaded_file = SimpleUploadedFile(
+                        name=filename,
+                        content=text_bytes,
+                        content_type='text/plain'
+                    )
+                
+                # Create a new MultiValueDict with existing files plus the new file
+                # request.FILES is a MultiValueDict and we can't directly assign to it
+                new_files = MultiValueDict()
+                # Copy existing files if any
+                for key, value_list in request.FILES.lists():
+                    new_files.setlist(key, value_list)
+                # Add the new file using setlist (not direct assignment)
+                new_files.setlist('strategy_file', [uploaded_file])
+                
+                # Properly update request.FILES
+                # The key is to update both request._files and the underlying Django request
+                request._files = new_files
+                
+                # CRITICAL: Update request._request._files - this is what DRF reads from!
+                # DRF's FileField.to_internal_value() reads from request._request.FILES, not request.FILES
+                if hasattr(request, '_request'):
+                    django_request = request._request
+                    # Create a new MultiValueDict for django_request._files
+                    django_files = MultiValueDict()
+                    # Copy existing files if any
+                    if hasattr(django_request, '_files') and django_request._files:
+                        for key, value_list in django_request._files.lists():
+                            django_files.setlist(key, value_list)
+                    # Add our new file
+                    django_files.setlist('strategy_file', [uploaded_file])
+                    django_request._files = django_files
+                    logger.info("Updated django_request._files with strategy_file")
+                    logger.info(f"django_request._files keys: {list(django_request._files.keys())}")
+                else:
+                    logger.warning("request._request not found - DRF might not find the file")
+                
+                # Force update request.FILES property by accessing it
+                # This ensures the property is refreshed
+                _ = request.FILES
+                logger.info(f"request.FILES after update: {list(request.FILES.keys())}")
+                
+                # Verify file was added successfully
+                if 'strategy_file' not in request.FILES:
+                    logger.error("Failed to add strategy_file to request.FILES")
+                    logger.error(f"request.FILES keys after update: {list(request.FILES.keys())}")
+                    return Response(
+                        {'detail': 'خطا در ایجاد فایل از متن. لطفاً دوباره تلاش کنید.'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+                
+                file_size = uploaded_file.size
+                logger.info(f"Created file from text: name={filename}, original text size={text_size} bytes, file size={file_size} bytes")
+                logger.info(f"File added to request.FILES: {request.FILES['strategy_file'].name}, size={request.FILES['strategy_file'].size}")
+            except UnicodeEncodeError as e:
+                logger.error(f"Unicode encoding error: {str(e)}")
+                return Response(
+                    {'detail': 'خطا در کدگذاری متن. لطفاً از کاراکترهای معتبر استفاده کنید.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            except MemoryError as e:
+                logger.error(f"Memory error creating file from text: {str(e)}")
+                return Response(
+                    {'detail': 'متن استراتژی خیلی بزرگ است و حافظه کافی در دسترس نیست. لطفاً از فایل استفاده کنید.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            except Exception as e:
+                import traceback
+                error_trace = traceback.format_exc()
+                logger.error(f"Error creating file from text: {str(e)}\nTraceback: {error_trace}")
+                return Response(
+                    {'detail': f'خطا در ایجاد فایل از متن: {str(e)}. لطفاً دوباره تلاش کنید یا از فایل استفاده کنید.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         
         # Log file details if present
         if 'strategy_file' in request.FILES:
@@ -876,15 +1089,204 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
             logger.info(f"Strategy name: {request.data.get('name')}")
         if 'description' in request.data:
             logger.info(f"Strategy description length: {len(request.data.get('description', ''))}")
+        if strategy_text:
+            logger.info(f"Strategy text length: {len(strategy_text)} characters")
         
-        serializer = self.get_serializer(data=request.data)
+        # Prepare data for serializer
+        # DRF automatically reads files from request.FILES, so we just need to pass request.data
+        # But we need to make sure strategy_file is in request.FILES (which we already added if text was provided)
+        
+        # Verify file is in request.FILES before creating serializer
+        if 'strategy_file' not in request.FILES:
+            logger.error("strategy_file not found in request.FILES after processing")
+            logger.error(f"request.FILES keys: {list(request.FILES.keys())}")
+            logger.error(f"request.data keys: {list(request.data.keys()) if hasattr(request.data, 'keys') else 'N/A'}")
+            return Response(
+                {'detail': 'خطا در پردازش فایل استراتژی. لطفاً دوباره تلاش کنید.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Remove strategy_text from data if it exists (we've already converted it to file)
+        # Prepare serializer data - convert QueryDict to regular dict and handle list values
+        # This is important because FormData can send values as lists, and DRF expects strings
+        serializer_data = {}
+        for key, value in request.data.items():
+            # Skip strategy_text as we've already converted it to a file
+            if key == 'strategy_text':
+                logger.info("Skipping strategy_text in serializer_data (converted to file)")
+                continue
+            
+            # Handle QueryDict values - if it's a list with one item, extract it
+            if isinstance(value, list):
+                if len(value) == 1:
+                    serializer_data[key] = value[0]
+                elif len(value) > 1:
+                    serializer_data[key] = value  # Keep as list if multiple values
+                else:
+                    serializer_data[key] = ''  # Empty list becomes empty string
+            else:
+                # Keep the value as is (DRF will handle type conversion)
+                serializer_data[key] = value
+        
+        logger.info(f"Serializer data keys: {list(serializer_data.keys())}")
+        logger.info(f"Serializer data sample: name={str(serializer_data.get('name', 'N/A'))[:50]}, description length={len(str(serializer_data.get('description', '')))}")
+        
+        # Ensure file is in request.FILES before creating serializer
+        if 'strategy_file' not in request.FILES:
+            logger.error("strategy_file not found in request.FILES before serializer creation")
+            logger.error(f"request.FILES keys: {list(request.FILES.keys())}")
+            return Response(
+                {'detail': 'خطا در پردازش فایل استراتژی. لطفاً دوباره تلاش کنید.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get the file to verify it's accessible
+        strategy_file = request.FILES['strategy_file']
+        logger.info(f"File ready for serializer: name={strategy_file.name}, size={strategy_file.size}, content_type={strategy_file.content_type}")
+        
+        # CRITICAL FIX: Ensure request._request._files has the file
+        # DRF's FileField.to_internal_value() reads from request._request.FILES, not request.FILES!
+        # We need to ensure the file is accessible through request._request.FILES
+        if hasattr(request, '_request'):
+            django_request = request._request
+            # Make sure django_request._files exists and has our file
+            if not hasattr(django_request, '_files'):
+                django_request._files = MultiValueDict()
+            
+            # Always update django_request._files with our file
+            # This ensures DRF can find it
+            # CRITICAL: We must ensure the file is in django_request._files
+            # DRF's FileField.to_internal_value() reads from request._request.FILES
+            # which is a property that reads from request._request._files
+            if 'strategy_file' not in django_request._files:
+                django_request._files.setlist('strategy_file', [strategy_file])
+                logger.info("Added file to django_request._files before serializer creation")
+            else:
+                # File already exists, but make sure it's the right one
+                existing_file = django_request._files.get('strategy_file')
+                if existing_file != strategy_file:
+                    django_request._files.setlist('strategy_file', [strategy_file])
+                    logger.info("Updated file in django_request._files")
+            
+            # Force refresh the FILES property by accessing it
+            # This ensures the property reflects the updated _files
+            try:
+                _ = django_request.FILES
+                logger.info(f"django_request.FILES keys: {list(django_request.FILES.keys())}")
+                if 'strategy_file' not in django_request.FILES:
+                    logger.error("File is in django_request._files but NOT in django_request.FILES!")
+                    logger.error("This is the problem - DRF reads from FILES property, not _files")
+            except Exception as e:
+                logger.warning(f"Could not access django_request.FILES: {str(e)}")
+            
+            logger.info(f"django_request._files keys: {list(django_request._files.keys())}")
+        else:
+            logger.warning("request._request not found - DRF might not find the file")
+        
+        # Also verify that request.FILES has the file
+        if 'strategy_file' not in request.FILES:
+            logger.error("strategy_file not in request.FILES before serializer creation!")
+            return Response(
+                {'detail': 'خطا در پردازش فایل استراتژی. لطفاً دوباره تلاش کنید.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Create serializer with explicit request context
+        # DRF should automatically read files from request._request.FILES when request is in context
+        # The key is that DRF's FileField.to_internal_value() reads from request._request.FILES
+        # However, if DRF still can't find the file, we need to ensure it's in the right place
+        # DRF's FileField.to_internal_value() actually reads from request.FILES (the DRF request object)
+        # which internally reads from request._request.FILES (the Django request object)
+        # So we need to make sure the file is in request._request._files
+        
+        # Final check: ensure file is in both request.FILES and request._request._files
+        if 'strategy_file' not in request.FILES:
+            logger.error("CRITICAL: strategy_file not in request.FILES before serializer creation!")
+            return Response(
+                {'detail': 'خطا در پردازش فایل استراتژی. لطفاً دوباره تلاش کنید.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if hasattr(request, '_request'):
+            django_request = request._request
+            if not hasattr(django_request, '_files') or 'strategy_file' not in django_request._files:
+                logger.error("CRITICAL: strategy_file not in django_request._files before serializer creation!")
+                # Try to add it one more time
+                if not hasattr(django_request, '_files'):
+                    django_request._files = MultiValueDict()
+                django_request._files.setlist('strategy_file', [strategy_file])
+                logger.error("Added file to django_request._files as last resort")
+        
+        serializer = self.get_serializer(
+            data=serializer_data,
+            context={'request': request}
+        )
         
         # Check validation before raising exception
         if not serializer.is_valid():
             logger.error(f"Serializer validation failed: {serializer.errors}")
-            logger.error(f"Request data: {dict(request.data)}")
+            logger.error(f"Request data keys: {list(serializer_data.keys())}")
+            logger.error(f"Request.FILES keys: {list(request.FILES.keys())}")
+            
+            # Check if request._request._files has the file
+            if hasattr(request, '_request'):
+                django_request = request._request
+                if hasattr(django_request, '_files'):
+                    logger.error(f"django_request._files keys: {list(django_request._files.keys())}")
+                if hasattr(django_request, 'FILES'):
+                    try:
+                        logger.error(f"django_request.FILES keys: {list(django_request.FILES.keys())}")
+                    except Exception as e:
+                        logger.error(f"Could not access django_request.FILES: {str(e)}")
+            
             if 'strategy_file' in request.FILES:
-                logger.error(f"File details: name={request.FILES['strategy_file'].name}, size={request.FILES['strategy_file'].size}")
+                file = request.FILES['strategy_file']
+                logger.error(f"File details: name={file.name}, size={file.size}, content_type={file.content_type}")
+                # Try to read file to see if it's accessible
+                try:
+                    file.seek(0)
+                    first_bytes = file.read(10)
+                    file.seek(0)
+                    logger.error(f"File first 10 bytes: {first_bytes}")
+                except Exception as e:
+                    logger.error(f"Error reading file: {str(e)}")
+            
+            # Check if the error is about missing file and provide better error message
+            if 'strategy_file' in serializer.errors:
+                error_msg = str(serializer.errors['strategy_file'])
+                logger.error(f"strategy_file validation error: {error_msg}")
+                # Log the full error for debugging
+                logger.error(f"Full serializer errors: {serializer.errors}")
+                
+                # If the error is "No file was submitted", it means DRF couldn't find the file
+                # Try to manually set the file in serializer's validated_data
+                if 'No file was submitted' in error_msg or 'required' in error_msg.lower():
+                    logger.error("DRF couldn't find the file - trying to manually set it")
+                    # Check if file is in request._request._files
+                    if hasattr(request, '_request'):
+                        django_request = request._request
+                        if hasattr(django_request, '_files') and 'strategy_file' in django_request._files:
+                            logger.error("File IS in django_request._files but DRF still can't find it")
+                            logger.error("This suggests DRF is reading from a different location")
+                            # Try to force update request.FILES one more time
+                            if 'strategy_file' in request.FILES:
+                                file_from_request = request.FILES['strategy_file']
+                                logger.error(f"File from request.FILES: {file_from_request.name}, size={file_from_request.size}")
+                        else:
+                            logger.error("File is NOT in django_request._files!")
+                            # Try to add it again
+                            if 'strategy_file' in request.FILES:
+                                strategy_file = request.FILES['strategy_file']
+                                if not hasattr(django_request, '_files'):
+                                    django_request._files = MultiValueDict()
+                                django_request._files.setlist('strategy_file', [strategy_file])
+                                logger.error("Tried to add file to django_request._files again")
+                
+                # Return a more user-friendly error message
+                return Response(
+                    {'detail': f'خطا در ثبت استراتژی: {error_msg}. لطفاً دوباره تلاش کنید.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
         self.perform_create(serializer)
@@ -1255,6 +1657,118 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                 'message': f'خطا در خواندن فایل: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
+    @action(detail=True, methods=['post'], url_path='update-file-content')
+    def update_file_content(self, request, pk=None):
+        """
+        به‌روزرسانی محتوای فایل استراتژی
+        
+        Request Body:
+            content: متن جدید برای فایل استراتژی
+        
+        Returns:
+            پیام موفقیت یا خطا
+        """
+        strategy = self.get_object()
+        
+        # بررسی دسترسی
+        if not (request.user.is_staff or request.user.is_superuser or strategy.user == request.user):
+            return Response({
+                'status': 'error',
+                'message': 'شما دسترسی به این استراتژی ندارید'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        if not strategy.strategy_file:
+            return Response({
+                'status': 'error',
+                'message': 'فایل استراتژی یافت نشد'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        content = request.data.get('content')
+        if not content:
+            return Response({
+                'status': 'error',
+                'message': 'محتوا الزامی است'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            import os
+            
+            strategy_file_path = strategy.strategy_file.path
+            if not os.path.exists(strategy_file_path):
+                return Response({
+                    'status': 'error',
+                    'message': f'فایل در مسیر یافت نشد: {strategy_file_path}'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # تشخیص نوع فایل
+            file_ext = os.path.splitext(strategy.strategy_file.name)[1].lower()
+            
+            # نوشتن محتوا به فایل
+            if file_ext == '.txt':
+                # برای فایل‌های متنی، مستقیماً نوشتن
+                with open(strategy_file_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+            elif file_ext in ['.docx', '.doc']:
+                # برای فایل‌های Word، استفاده از python-docx
+                try:
+                    from docx import Document
+                    from docx.shared import Pt
+                    
+                    # ایجاد یک Document جدید
+                    doc = Document()
+                    
+                    # اضافه کردن محتوا به Document
+                    # تقسیم محتوا به خطوط و اضافه کردن هر خط به عنوان پاراگراف
+                    lines = content.split('\n')
+                    for line in lines:
+                        if line.strip():  # فقط خطوط غیرخالی
+                            para = doc.add_paragraph(line)
+                            # تنظیم فونت برای پشتیبانی از فارسی
+                            for run in para.runs:
+                                run.font.name = 'Arial'
+                        else:
+                            doc.add_paragraph()  # خط خالی
+                    
+                    # ذخیره فایل
+                    doc.save(strategy_file_path)
+                except ImportError:
+                    logger.error("python-docx library not installed")
+                    return Response({
+                        'status': 'error',
+                        'message': 'کتابخانه python-docx نصب نشده است'
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                except Exception as e:
+                    logger.error(f"Error writing docx file: {e}", exc_info=True)
+                    return Response({
+                        'status': 'error',
+                        'message': f'خطا در نوشتن فایل Word: {str(e)}'
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            else:
+                return Response({
+                    'status': 'error',
+                    'message': f'نوع فایل پشتیبانی نمی‌شود: {file_ext}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # به‌روزرسانی وضعیت پردازش استراتژی (بازنشانی به not_processed)
+            # چون محتوای فایل تغییر کرده، باید دوباره پردازش شود
+            strategy.processing_status = 'not_processed'
+            strategy.processing_error = ''
+            strategy.save(update_fields=['processing_status', 'processing_error'])
+            
+            logger.info(f"Strategy file content updated successfully for strategy {strategy.id}")
+            
+            return Response({
+                'status': 'success',
+                'message': 'محتوای فایل استراتژی با موفقیت به‌روزرسانی شد'
+            })
+            
+        except Exception as e:
+            logger.error(f"Error updating strategy file content: {e}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f'خطا در به‌روزرسانی فایل: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
     @action(detail=True, methods=['post'])
     def process(self, request, pk=None):
         """Process strategy file to extract and parse strategy data"""
@@ -1281,7 +1795,11 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                 with db_transaction.atomic():
                     wallet, _ = Wallet.objects.select_for_update().get_or_create(user=user)
                     settings = SystemSettings.load()
-                    processing_cost = settings.strategy_processing_cost
+                    # محاسبه هزینه پایه
+                    base_processing_cost = settings.strategy_processing_cost
+                    # اعمال ضریب سود
+                    profit_multiplier = settings.profit_margin_multiplier
+                    processing_cost = base_processing_cost * profit_multiplier
                     
                     # Validate processing_cost
                     from decimal import Decimal
@@ -2728,6 +3246,16 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
                     status=status.HTTP_429_TOO_MANY_REQUESTS
                 )
             
+            # بررسی می‌کنیم که استراتژی توسط هوش مصنوعی پردازش شده باشد
+            if strategy.processing_status != 'processed':
+                return Response(
+                    {
+                        'error': 'strategy_not_processed',
+                        'message': 'فقط استراتژی‌هایی که توسط هوش مصنوعی پردازش شده‌اند قابلیت بک‌تست دارند. لطفاً ابتدا استراتژی را پردازش کنید.'
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
             # فقط برای استراتژی‌های کاربر (نه مارکت‌پلیس) بررسی می‌کنیم که آیا حداقل یک استراتژی وجود دارد
             # اما اجازه می‌دهیم هر استراتژی کاربر برای بک‌تست استفاده شود، نه فقط استراتژی اصلی
             if not marketplace_access:
@@ -3613,7 +4141,15 @@ class WalletViewSet(viewsets.ModelViewSet):
     def charge(self, request):
         """Create payment request for wallet charge"""
         from django.utils import timezone
+        from django.conf import settings
         from api.payment_service import get_zarinpal_service
+        
+        # Check if Zarinpal is enabled
+        if not getattr(settings, 'ZARINPAL_ENABLED', False):
+            return Response(
+                {'error': 'پرداخت آنلاین زرین‌پال در حال حاضر غیرفعال است.'},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
         
         amount = request.data.get('amount')
         if not amount:
@@ -3799,6 +4335,14 @@ class AIRecommendationViewSet(viewsets.ModelViewSet):
         
         # Check balance
         if wallet.balance < recommendation.price:
+            # Check if Zarinpal is enabled
+            from django.conf import settings
+            if not getattr(settings, 'ZARINPAL_ENABLED', False):
+                return Response(
+                    {'error': 'پرداخت آنلاین زرین‌پال در حال حاضر غیرفعال است. لطفاً از روش دیگری برای شارژ حساب استفاده کنید.'},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE
+                )
+            
             # Need to charge - create payment request
             payment_service = get_zarinpal_service()
             
@@ -3881,6 +4425,11 @@ class PaymentViewSet(viewsets.ViewSet):
         from api.payment_service import get_zarinpal_service
         from django.shortcuts import redirect
         from django.conf import settings
+        
+        # Check if Zarinpal is enabled
+        if not getattr(settings, 'ZARINPAL_ENABLED', False):
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')
+            return redirect(f'{frontend_url}/?payment_error=service_disabled')
         
         authority = request.query_params.get('Authority')
         status = request.query_params.get('Status')
@@ -4423,7 +4972,12 @@ class GapGPTViewSet(viewsets.ViewSet):
                         
                         # تخمین هزینه بر اساس max_tokens (حداکثر توکن‌های ممکن)
                         estimated_tokens = max_tokens  # استفاده از max_tokens به عنوان تخمین
-                        estimated_cost = (Decimal(str(estimated_tokens)) / Decimal('1000')) * settings.token_cost_per_1000
+                        # محاسبه هزینه پایه (فرض: هر 1000 توکن = 100 تومان)
+                        base_cost_per_1000 = Decimal('100.0')
+                        base_cost = (Decimal(str(estimated_tokens)) / Decimal('1000')) * base_cost_per_1000
+                        # اعمال ضریب سود
+                        profit_multiplier = settings.profit_margin_multiplier
+                        estimated_cost = base_cost * profit_multiplier
                         
                         # بررسی موجودی
                         if wallet.balance < estimated_cost:
@@ -4468,7 +5022,12 @@ class GapGPTViewSet(viewsets.ViewSet):
                                 settings = SystemSettings.load()
                                 
                                 # محاسبه هزینه بر اساس تعداد توکن‌ها
-                                token_cost = (Decimal(str(tokens_used)) / Decimal('1000')) * settings.token_cost_per_1000
+                                # محاسبه هزینه پایه
+                                base_cost_per_1000 = Decimal('100.0')
+                                base_token_cost = (Decimal(str(tokens_used)) / Decimal('1000')) * base_cost_per_1000
+                                # اعمال ضریب سود
+                                profit_multiplier = settings.profit_margin_multiplier
+                                token_cost = base_token_cost * profit_multiplier
                                 
                                 # بررسی موجودی
                                 if wallet.balance >= token_cost:
@@ -4598,7 +5157,12 @@ class GapGPTViewSet(viewsets.ViewSet):
                         # تخمین هزینه بر اساس max_tokens * تعداد مدل‌ها
                         estimated_tokens_per_model = max_tokens
                         estimated_total_tokens = estimated_tokens_per_model * num_models
-                        estimated_cost = (Decimal(str(estimated_total_tokens)) / Decimal('1000')) * settings.token_cost_per_1000
+                        # محاسبه هزینه پایه
+                        base_cost_per_1000 = Decimal('100.0')
+                        base_cost = (Decimal(str(estimated_total_tokens)) / Decimal('1000')) * base_cost_per_1000
+                        # اعمال ضریب سود
+                        profit_multiplier = settings.profit_margin_multiplier
+                        estimated_cost = base_cost * profit_multiplier
                         
                         # بررسی موجودی
                         if wallet.balance < estimated_cost:
@@ -4650,7 +5214,12 @@ class GapGPTViewSet(viewsets.ViewSet):
                             settings = SystemSettings.load()
                             
                             # محاسبه هزینه بر اساس تعداد کل توکن‌ها
-                            token_cost = (Decimal(str(total_tokens_used)) / Decimal('1000')) * settings.token_cost_per_1000
+                            # محاسبه هزینه پایه
+                            base_cost_per_1000 = Decimal('100.0')
+                            base_token_cost = (Decimal(str(total_tokens_used)) / Decimal('1000')) * base_cost_per_1000
+                            # اعمال ضریب سود
+                            profit_multiplier = settings.profit_margin_multiplier
+                            token_cost = base_token_cost * profit_multiplier
                             
                             # بررسی موجودی
                             if wallet.balance >= token_cost:
@@ -4757,6 +5326,213 @@ class GapGPTViewSet(viewsets.ViewSet):
             return Response({
                 'status': 'error',
                 'message': f'خطا در بررسی موجودی حساب GapGPT: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['get'], url_path='logs', permission_classes=[IsAdminOrStaff])
+    def get_logs(self, request):
+        """
+        دریافت لاگ‌های درخواست‌های GapGPT (فقط برای ادمین‌ها)
+        
+        Query Parameters:
+            limit: تعداد لاگ‌های برگشتی (پیش‌فرض: 100)
+            start_date: تاریخ شروع (ISO format)
+            end_date: تاریخ پایان (ISO format)
+            success_only: فقط درخواست‌های موفق (true/false)
+        """
+        try:
+            from ai_module.gapgpt_client import get_gapgpt_request_logs
+            from django.utils.dateparse import parse_datetime
+            
+            limit = int(request.query_params.get('limit', 100))
+            start_date = None
+            end_date = None
+            success_only = None
+            
+            if request.query_params.get('start_date'):
+                start_date = parse_datetime(request.query_params.get('start_date'))
+            if request.query_params.get('end_date'):
+                end_date = parse_datetime(request.query_params.get('end_date'))
+            if request.query_params.get('success_only'):
+                success_only = request.query_params.get('success_only').lower() == 'true'
+            
+            result = get_gapgpt_request_logs(user=None, limit=limit, start_date=start_date, end_date=end_date, success_only=success_only)
+            
+            return Response({
+                'status': 'success' if result.get('success') else 'error',
+                'data': {
+                    'logs': result.get('logs', []),
+                    'total': result.get('total', 0),
+                    'returned': result.get('returned', 0)
+                }
+            })
+                
+        except Exception as e:
+            logger.error(f"Error getting GapGPT request logs: {e}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f'خطا در دریافت لاگ‌ها: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['get'], url_path='report', permission_classes=[IsAdminOrStaff])
+    def get_report(self, request):
+        """
+        دریافت گزارش پیشرفته استفاده از GapGPT (فقط برای ادمین‌ها)
+        
+        Query Parameters:
+            start_date: تاریخ شروع (ISO format)
+            end_date: تاریخ پایان (ISO format)
+            group_by: گروه‌بندی (day, hour, user)
+        """
+        try:
+            from ai_module.gapgpt_client import get_gapgpt_usage_report
+            from django.utils.dateparse import parse_datetime
+            
+            start_date = None
+            end_date = None
+            group_by = request.query_params.get('group_by', 'day')
+            
+            if request.query_params.get('start_date'):
+                start_date = parse_datetime(request.query_params.get('start_date'))
+            if request.query_params.get('end_date'):
+                end_date = parse_datetime(request.query_params.get('end_date'))
+            
+            result = get_gapgpt_usage_report(start_date=start_date, end_date=end_date, group_by=group_by)
+            
+            return Response({
+                'status': 'success' if result.get('success') else 'error',
+                'data': result
+            })
+                
+        except Exception as e:
+            logger.error(f"Error generating GapGPT usage report: {e}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f'خطا در تولید گزارش: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class OpenAIViewSet(viewsets.ViewSet):
+    """
+    ViewSet for OpenAI API operations and monitoring
+    """
+    
+    @action(detail=False, methods=['get'], url_path='balance', permission_classes=[IsAdminOrStaff])
+    def check_balance(self, request):
+        """
+        بررسی موجودی حساب OpenAI (فقط برای ادمین‌ها)
+        
+        Returns:
+            اطلاعات موجودی حساب OpenAI و آمار استفاده
+        """
+        try:
+            from ai_module.openai_client import check_openai_account_balance
+            
+            user = request.user if request.user.is_authenticated else None
+            result = check_openai_account_balance(user=user)
+            
+            return Response({
+                'status': 'success' if result.get('success') else 'error',
+                'message': result.get('message', ''),
+                'error': result.get('error'),
+                'data': {
+                    'balance': result.get('balance'),
+                    'balance_formatted': result.get('balance_formatted', 'نامشخص'),
+                    'currency': result.get('currency', '$'),
+                    'message': result.get('message', ''),
+                    'usage_stats': result.get('usage_stats', {}),
+                    'last_checked': result.get('last_checked'),
+                    'latency_ms': result.get('latency_ms'),
+                    'test_success': result.get('test_success', False)
+                }
+            })
+                
+        except Exception as e:
+            logger.error(f"Error checking OpenAI account balance: {e}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f'خطا در بررسی موجودی حساب OpenAI: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['get'], url_path='logs', permission_classes=[IsAdminOrStaff])
+    def get_logs(self, request):
+        """
+        دریافت لاگ‌های درخواست‌های OpenAI (فقط برای ادمین‌ها)
+        
+        Query Parameters:
+            limit: تعداد لاگ‌های برگشتی (پیش‌فرض: 100)
+            start_date: تاریخ شروع (ISO format)
+            end_date: تاریخ پایان (ISO format)
+            success_only: فقط درخواست‌های موفق (true/false)
+        """
+        try:
+            from ai_module.openai_client import get_openai_request_logs
+            from django.utils.dateparse import parse_datetime
+            
+            limit = int(request.query_params.get('limit', 100))
+            start_date = None
+            end_date = None
+            success_only = None
+            
+            if request.query_params.get('start_date'):
+                start_date = parse_datetime(request.query_params.get('start_date'))
+            if request.query_params.get('end_date'):
+                end_date = parse_datetime(request.query_params.get('end_date'))
+            if request.query_params.get('success_only'):
+                success_only = request.query_params.get('success_only').lower() == 'true'
+            
+            result = get_openai_request_logs(user=None, limit=limit, start_date=start_date, end_date=end_date, success_only=success_only)
+            
+            return Response({
+                'status': 'success' if result.get('success') else 'error',
+                'data': {
+                    'logs': result.get('logs', []),
+                    'total': result.get('total', 0),
+                    'returned': result.get('returned', 0)
+                }
+            })
+                
+        except Exception as e:
+            logger.error(f"Error getting OpenAI request logs: {e}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f'خطا در دریافت لاگ‌ها: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['get'], url_path='report', permission_classes=[IsAdminOrStaff])
+    def get_report(self, request):
+        """
+        دریافت گزارش پیشرفته استفاده از OpenAI (فقط برای ادمین‌ها)
+        
+        Query Parameters:
+            start_date: تاریخ شروع (ISO format)
+            end_date: تاریخ پایان (ISO format)
+            group_by: گروه‌بندی (day, hour, user)
+        """
+        try:
+            from ai_module.openai_client import get_openai_usage_report
+            from django.utils.dateparse import parse_datetime
+            
+            start_date = None
+            end_date = None
+            group_by = request.query_params.get('group_by', 'day')
+            
+            if request.query_params.get('start_date'):
+                start_date = parse_datetime(request.query_params.get('start_date'))
+            if request.query_params.get('end_date'):
+                end_date = parse_datetime(request.query_params.get('end_date'))
+            
+            result = get_openai_usage_report(start_date=start_date, end_date=end_date, group_by=group_by)
+            
+            return Response({
+                'status': 'success' if result.get('success') else 'error',
+                'data': result
+            })
+                
+        except Exception as e:
+            logger.error(f"Error generating OpenAI usage report: {e}", exc_info=True)
+            return Response({
+                'status': 'error',
+                'message': f'خطا در تولید گزارش: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 

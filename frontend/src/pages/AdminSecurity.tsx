@@ -8,11 +8,15 @@ import {
   unblockAllIPs,
   getSecurityLogs,
   checkGapGPTBalance,
+  getGapGPTLogs,
+  getGapGPTReport,
   type SecurityManagementData,
   type BlockedIP,
   type RateLimitStat,
   type SecurityLog,
   type GapGPTBalanceResponse,
+  type GapGPTLog,
+  type GapGPTUsageReport,
 } from '../api/client'
 import Breadcrumbs from '../components/Breadcrumbs'
 
@@ -24,10 +28,18 @@ export default function AdminSecurity() {
   const [data, setData] = useState<SecurityManagementData | null>(null)
   const [logs, setLogs] = useState<SecurityLog[]>([])
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'overview' | 'blocked' | 'stats' | 'logs'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'blocked' | 'stats' | 'logs' | 'openai'>('overview')
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [gapgptBalance, setGapgptBalance] = useState<GapGPTBalanceResponse['data'] | null>(null)
   const [loadingBalance, setLoadingBalance] = useState(false)
+  const [gapgptLogs, setGapgptLogs] = useState<GapGPTLog[]>([])
+  const [loadingGapgptLogs, setLoadingGapgptLogs] = useState(false)
+  const [gapgptReport, setGapgptReport] = useState<GapGPTUsageReport | null>(null)
+  const [loadingGapgptReport, setLoadingGapgptReport] = useState(false)
+  const [reportFilters, setReportFilters] = useState<{
+    start_date?: string
+    end_date?: string
+  }>({})
 
   const loadData = async () => {
     try {
@@ -70,6 +82,38 @@ export default function AdminSecurity() {
     }
   }
 
+  const loadGapGPTLogs = async () => {
+    try {
+      setLoadingGapgptLogs(true)
+      const response = await getGapGPTLogs({ limit: 100 })
+      if (response.data.status === 'success' && response.data.data) {
+        setGapgptLogs(response.data.data.logs)
+      }
+    } catch (error: any) {
+      console.error('Error loading GapGPT logs:', error)
+    } finally {
+      setLoadingGapgptLogs(false)
+    }
+  }
+
+  const loadGapGPTReport = async () => {
+    try {
+      setLoadingGapgptReport(true)
+      const response = await getGapGPTReport({
+        start_date: reportFilters.start_date,
+        end_date: reportFilters.end_date,
+      })
+      if (response.data.status === 'success' && response.data.data) {
+        setGapgptReport(response.data.data)
+      }
+    } catch (error: any) {
+      console.error('Error loading GapGPT report:', error)
+      showToast('خطا در بارگذاری گزارش', { type: 'error' })
+    } finally {
+      setLoadingGapgptReport(false)
+    }
+  }
+
   useEffect(() => {
     if (!isAdmin) {
       return
@@ -85,6 +129,10 @@ export default function AdminSecurity() {
       if (activeTab === 'logs') {
         loadLogs()
       }
+      if (activeTab === 'openai') {
+        loadGapGPTLogs()
+        loadGapGPTReport()
+      }
     }, AUTO_REFRESH_INTERVAL_MS)
     return () => clearInterval(interval)
   }, [isAdmin, activeTab])
@@ -92,6 +140,10 @@ export default function AdminSecurity() {
   useEffect(() => {
     if (isAdmin && activeTab === 'logs') {
       loadLogs()
+    }
+    if (isAdmin && activeTab === 'openai') {
+      loadGapGPTLogs()
+      loadGapGPTReport()
     }
   }, [isAdmin, activeTab])
 
@@ -211,6 +263,7 @@ export default function AdminSecurity() {
               { id: 'blocked', label: 'IP های مسدود شده', icon: '🚫' },
               { id: 'stats', label: 'آمار Rate Limit', icon: '📈' },
               { id: 'logs', label: 'لاگ‌های امنیتی', icon: '📝' },
+              { id: 'openai', label: 'مانیتورینگ GapGPT', icon: '🤖' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -306,10 +359,63 @@ export default function AdminSecurity() {
                       <p className={`text-2xl font-bold ${
                         gapgptBalance.is_low_balance ? 'text-red-100' : 'text-white'
                       }`}>
-                        {gapgptBalance.balance_formatted}
+                        {typeof gapgptBalance.balance === 'number' 
+                          ? `${gapgptBalance.currency}${gapgptBalance.balance.toLocaleString('fa-IR')}`
+                          : gapgptBalance.balance === 'کافی'
+                          ? gapgptBalance.balance_formatted
+                          : gapgptBalance.balance !== null && gapgptBalance.balance !== undefined
+                          ? `${gapgptBalance.currency}${gapgptBalance.balance}`
+                          : gapgptBalance.balance_formatted
+                        }
                       </p>
                       {gapgptBalance.is_low_balance && (
                         <p className="text-red-200 text-xs mt-1">⚠️ موجودی کم</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-white text-sm">نامشخص</p>
+                  )}
+                </div>
+              </div>
+
+              {/* GapGPT Balance Card - Second Row */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className={`rounded-xl p-6 shadow-lg ${
+                  gapgptBalance?.is_low_balance
+                    ? 'bg-gradient-to-br from-orange-600 to-red-700' 
+                    : 'bg-gradient-to-br from-purple-600 to-purple-700'
+                }`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-gray-200 text-sm font-medium">موجودی GapGPT</h3>
+                    <button
+                      onClick={loadGapGPTBalance}
+                      disabled={loadingBalance}
+                      className="p-1 hover:bg-white/20 rounded transition disabled:opacity-50"
+                      title="بررسی مجدد"
+                    >
+                      <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                    </button>
+                  </div>
+                  {loadingBalance ? (
+                    <div className="flex items-center gap-2">
+                      <div className="inline-block animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white"></div>
+                      <p className="text-white text-sm">در حال بررسی...</p>
+                    </div>
+                  ) : gapgptBalance ? (
+                    <div>
+                      <p className={`text-2xl font-bold ${
+                        gapgptBalance.is_low_balance 
+                          ? 'text-red-100' 
+                          : 'text-white'
+                      }`}>
+                        {gapgptBalance.balance_formatted}
+                      </p>
+                      {gapgptBalance.message && (
+                        <p className={`text-xs mt-1 ${gapgptBalance.is_low_balance ? 'text-red-200' : 'text-gray-200'}`}>
+                          {gapgptBalance.is_low_balance ? '⚠️ ' : ''}{gapgptBalance.message}
+                        </p>
                       )}
                     </div>
                   ) : (
@@ -553,6 +659,225 @@ export default function AdminSecurity() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* GapGPT Monitoring Tab */}
+          {activeTab === 'openai' && (
+            <div className="space-y-6">
+              {/* Balance and Stats Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-gray-800 rounded-lg p-6">
+                  <h3 className="text-lg font-bold text-white mb-4">وضعیت حساب</h3>
+                  {loadingBalance ? (
+                    <div className="text-center py-4">
+                      <div className="inline-block animate-spin rounded-full h-6 w-6 border-t-2 border-b-2 border-blue-500"></div>
+                    </div>
+                  ) : gapgptBalance ? (
+                    <div>
+                      <p className={`text-2xl font-bold ${
+                        gapgptBalance.is_low_balance ? 'text-red-400' : 'text-green-400'
+                      }`}>
+                        {gapgptBalance.balance_formatted}
+                      </p>
+                      {gapgptBalance.message && (
+                        <p className={`text-sm mt-2 ${gapgptBalance.is_low_balance ? 'text-red-400' : 'text-green-400'}`}>
+                          {gapgptBalance.is_low_balance ? '✗' : '✓'} {gapgptBalance.message}
+                        </p>
+                      )}
+                      {gapgptBalance.latency_ms && (
+                        <p className="text-gray-400 text-xs mt-1">زمان پاسخ: {gapgptBalance.latency_ms.toFixed(0)}ms</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-gray-400">نامشخص</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Request Logs */}
+              <div className="bg-gray-800 rounded-lg p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-xl font-bold text-white">لاگ‌های درخواست‌های GapGPT</h3>
+                  <button
+                    onClick={loadGapGPTLogs}
+                    disabled={loadingGapgptLogs}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:opacity-50"
+                  >
+                    {loadingGapgptLogs ? 'در حال بارگذاری...' : 'بروزرسانی'}
+                  </button>
+                </div>
+                {loadingGapgptLogs ? (
+                  <div className="text-center py-8">
+                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+                    <p className="text-gray-400 mt-2">در حال بارگذاری...</p>
+                  </div>
+                ) : gapgptLogs.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-gray-400">هیچ لاگی وجود ندارد</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-700">
+                      <thead>
+                        <tr>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-300 uppercase">زمان</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-300 uppercase">کاربر</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-300 uppercase">وضعیت</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-300 uppercase">هزینه (USD)</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-300 uppercase">زمان پاسخ</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-gray-700 divide-y divide-gray-600">
+                        {gapgptLogs.map((log) => (
+                          <tr key={log.id}>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">
+                              {formatDate(log.created_at)}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-white">
+                              {log.user}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm">
+                              <span className={`px-2 py-1 rounded text-xs ${
+                                log.success ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+                              }`}>
+                                {log.success ? 'موفق' : 'ناموفق'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-white">
+                              ${log.cost_usd.toFixed(4)}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-300">
+                              {log.response_time_ms ? `${log.response_time_ms.toFixed(0)}ms` : 'N/A'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* Advanced Report */}
+              <div className="bg-gray-800 rounded-lg p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-xl font-bold text-white">گزارش پیشرفته</h3>
+                  <div className="flex gap-2">
+                    <input
+                      type="date"
+                      value={reportFilters.start_date || ''}
+                      onChange={(e) => setReportFilters({ ...reportFilters, start_date: e.target.value })}
+                      className="px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600"
+                    />
+                    <input
+                      type="date"
+                      value={reportFilters.end_date || ''}
+                      onChange={(e) => setReportFilters({ ...reportFilters, end_date: e.target.value })}
+                      className="px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600"
+                    />
+                    <button
+                      onClick={loadGapGPTReport}
+                      disabled={loadingGapgptReport}
+                      className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition disabled:opacity-50"
+                    >
+                      {loadingGapgptReport ? 'در حال بارگذاری...' : 'تولید گزارش'}
+                    </button>
+                  </div>
+                </div>
+                {loadingGapgptReport ? (
+                  <div className="text-center py-8">
+                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-green-500"></div>
+                    <p className="text-gray-400 mt-2">در حال تولید گزارش...</p>
+                  </div>
+                ) : gapgptReport ? (
+                  <div className="space-y-4">
+                    {/* Summary */}
+                    <div className="bg-gray-700 rounded-lg p-4">
+                      <h4 className="text-lg font-bold text-white mb-3">خلاصه گزارش</h4>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                        <div>
+                          <span className="text-gray-400">کل درخواست‌ها:</span>
+                          <p className="text-white font-semibold">{gapgptReport.summary.total_requests.toLocaleString('fa-IR')}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">نرخ موفقیت:</span>
+                          <p className="text-green-400 font-semibold">{gapgptReport.summary.success_rate.toFixed(1)}%</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">هزینه کل (USD):</span>
+                          <p className="text-white font-semibold">${gapgptReport.summary.total_cost_usd.toFixed(2)}</p>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">میانگین زمان پاسخ:</span>
+                          <p className="text-white font-semibold">{gapgptReport.summary.avg_response_time_ms.toFixed(0)}ms</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* By User */}
+                    {Object.keys(gapgptReport.by_user).length > 0 && (
+                      <div className="bg-gray-700 rounded-lg p-4">
+                        <h4 className="text-lg font-bold text-white mb-3">آمار بر اساس کاربر</h4>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full divide-y divide-gray-600">
+                            <thead>
+                              <tr>
+                                <th className="px-4 py-2 text-right text-xs font-medium text-gray-300">کاربر</th>
+                                <th className="px-4 py-2 text-right text-xs font-medium text-gray-300">درخواست‌ها</th>
+                                <th className="px-4 py-2 text-right text-xs font-medium text-gray-300">موفق</th>
+                                <th className="px-4 py-2 text-right text-xs font-medium text-gray-300">هزینه (USD)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-600">
+                              {Object.entries(gapgptReport.by_user).map(([user, stats]) => (
+                                <tr key={user}>
+                                  <td className="px-4 py-2 text-sm text-white">{user}</td>
+                                  <td className="px-4 py-2 text-sm text-gray-300">{stats.total_requests}</td>
+                                  <td className="px-4 py-2 text-sm text-green-400">{stats.successful_requests}</td>
+                                  <td className="px-4 py-2 text-sm text-white">${stats.total_cost_usd.toFixed(2)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* By Day */}
+                    {gapgptReport.by_day.length > 0 && (
+                      <div className="bg-gray-700 rounded-lg p-4">
+                        <h4 className="text-lg font-bold text-white mb-3">آمار روزانه</h4>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full divide-y divide-gray-600">
+                            <thead>
+                              <tr>
+                                <th className="px-4 py-2 text-right text-xs font-medium text-gray-300">تاریخ</th>
+                                <th className="px-4 py-2 text-right text-xs font-medium text-gray-300">درخواست‌ها</th>
+                                <th className="px-4 py-2 text-right text-xs font-medium text-gray-300">موفق</th>
+                                <th className="px-4 py-2 text-right text-xs font-medium text-gray-300">هزینه (USD)</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-600">
+                              {gapgptReport.by_day.map((day) => (
+                                <tr key={day.date}>
+                                  <td className="px-4 py-2 text-sm text-white">{day.date}</td>
+                                  <td className="px-4 py-2 text-sm text-gray-300">{day.total_requests}</td>
+                                  <td className="px-4 py-2 text-sm text-green-400">{day.successful_requests}</td>
+                                  <td className="px-4 py-2 text-sm text-white">${day.total_cost_usd.toFixed(2)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-gray-400">برای تولید گزارش، بازه زمانی را انتخاب کنید و دکمه "تولید گزارش" را بزنید</p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </>

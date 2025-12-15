@@ -2,13 +2,10 @@ import { Link } from 'react-router-dom'
 import SEO from '../components/SEO'
 import Breadcrumbs from '../components/Breadcrumbs'
 import { getBlogPostsArray } from '../data/blogPosts'
+import { getBlogViewCount, formatViewCount } from '../utils/blogViews'
 
 export default function Blog() {
   const blogPosts = getBlogPostsArray()
-  
-  // تست: بررسی تعداد مقالات
-  console.log('🔍 تست - تعداد کل مقالات:', blogPosts.length)
-  console.log('🔍 تست - لیست مقالات:', blogPosts.map((p, index) => `${index + 1}. ${p.title} (${p.slug})`))
   
   return (
     <>
@@ -33,22 +30,6 @@ export default function Blog() {
             <p className="text-xl text-gray-300 max-w-3xl mx-auto">
               مقالات و راهنماهای جامع درباره ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی
             </p>
-            {/* تست: نمایش تعداد مقالات */}
-            <div className="mt-4 p-4 bg-yellow-900/30 border border-yellow-600 rounded-lg">
-              <p className="text-yellow-300 text-sm">
-                🔍 تست: تعداد مقالات یافت شده: <strong className="text-yellow-200">{blogPosts.length}</strong>
-              </p>
-              <details className="mt-2 text-xs text-yellow-400">
-                <summary className="cursor-pointer">لیست مقالات (کلیک کنید)</summary>
-                <ul className="mt-2 text-right space-y-1">
-                  {blogPosts.map((post, index) => (
-                    <li key={post.id}>
-                      {index + 1}. {post.title} ({post.slug})
-                    </li>
-                  ))}
-                </ul>
-              </details>
-            </div>
           </div>
 
           {/* Blog Posts Grid */}
@@ -79,6 +60,14 @@ export default function Blog() {
                     <span>{post.date}</span>
                     <span>•</span>
                     <span>{post.readTime} مطالعه</span>
+                    <span>•</span>
+                    <span className="flex items-center gap-1">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      {formatViewCount(getBlogViewCount(post.slug))} بازدید
+                    </span>
                   </div>
                   <h2 className="text-xl font-bold text-white mb-3 group-hover:text-blue-400 transition-colors">
                     {post.title}

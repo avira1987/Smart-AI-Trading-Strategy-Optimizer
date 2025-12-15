@@ -1,4 +1,4 @@
-import client, { type GoldAPIAccessInfo } from './client'
+import client from './client'
 
 export interface AuthResponse {
   success: boolean
@@ -13,7 +13,6 @@ export interface AuthResponse {
     last_name?: string
     is_staff?: boolean
     is_superuser?: boolean
-    gold_api_access?: GoldAPIAccessInfo
   }
   device_id?: string
   authenticated?: boolean
@@ -96,7 +95,6 @@ export interface UpdateProfileResponse {
     email?: string
     first_name?: string
     last_name?: string
-    gold_api_access?: GoldAPIAccessInfo
   }
   errors?: {
     email?: string

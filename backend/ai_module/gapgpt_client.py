@@ -1530,3 +1530,176 @@ def generate_basic_backtest_analysis(
     
     return analysis
 
+
+def get_gapgpt_request_logs(user=None, limit=100, start_date=None, end_date=None, success_only=None) -> Dict[str, Any]:
+    """
+    دریافت لاگ‌های درخواست‌های GapGPT
+    
+    Args:
+        user: کاربر برای فیلتر (اختیاری)
+        limit: تعداد لاگ‌های برگشتی
+        start_date: تاریخ شروع (اختیاری)
+        end_date: تاریخ پایان (اختیاری)
+        success_only: فقط درخواست‌های موفق (اختیاری)
+    
+    Returns:
+        Dict شامل لیست لاگ‌ها و آمار
+    """
+    try:
+        from core.models import APIUsageLog
+        from django.db.models import Q
+        
+        # فیلتر لاگ‌های GapGPT
+        logs_query = APIUsageLog.objects.filter(
+            Q(provider='gapgpt')
+        ).order_by('-created_at')
+        
+        if user:
+            logs_query = logs_query.filter(user=user)
+        
+        if start_date:
+            logs_query = logs_query.filter(created_at__gte=start_date)
+        
+        if end_date:
+            logs_query = logs_query.filter(created_at__lte=end_date)
+        
+        if success_only is not None:
+            logs_query = logs_query.filter(success=success_only)
+        
+        total_count = logs_query.count()
+        logs = logs_query[:limit]
+        
+        logs_data = []
+        for log in logs:
+            logs_data.append({
+                'id': log.id,
+                'user': log.user.username if log.user else 'سیستم',
+                'user_id': log.user.id if log.user else None,
+                'endpoint': log.endpoint,
+                'request_type': log.request_type,
+                'status_code': log.status_code,
+                'success': log.success,
+                'cost_usd': float(log.cost),
+                'cost_toman': float(log.cost_toman),
+                'response_time_ms': log.response_time_ms,
+                'error_message': log.error_message,
+                'metadata': log.metadata,
+                'created_at': log.created_at.isoformat(),
+            })
+        
+        return {
+            'success': True,
+            'logs': logs_data,
+            'total': total_count,
+            'returned': len(logs_data)
+        }
+    except Exception as e:
+        logger.error(f"Error getting GapGPT request logs: {e}", exc_info=True)
+        return {
+            'success': False,
+            'error': str(e),
+            'logs': [],
+            'total': 0,
+            'returned': 0
+        }
+
+
+def get_gapgpt_usage_report(start_date=None, end_date=None, group_by='day') -> Dict[str, Any]:
+    """
+    دریافت گزارش پیشرفته استفاده از GapGPT
+    
+    Args:
+        start_date: تاریخ شروع
+        end_date: تاریخ پایان
+        group_by: گروه‌بندی بر اساس 'day', 'hour', 'user'
+    
+    Returns:
+        Dict شامل گزارش تفصیلی
+    """
+    try:
+        from core.models import APIUsageLog
+        from django.db.models import Q, Sum, Count
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        logs_query = APIUsageLog.objects.filter(
+            Q(provider='gapgpt')
+        )
+        
+        if start_date:
+            logs_query = logs_query.filter(created_at__gte=start_date)
+        
+        if end_date:
+            logs_query = logs_query.filter(created_at__lte=end_date)
+        
+        # آمار کلی
+        total_requests = logs_query.count()
+        successful_requests = logs_query.filter(success=True).count()
+        failed_requests = logs_query.filter(success=False).count()
+        
+        # هزینه‌ها
+        cost_stats = logs_query.aggregate(
+            total_cost_usd=Sum('cost'),
+            total_cost_toman=Sum('cost_toman'),
+            avg_response_time=Sum('response_time_ms') / Count('id')
+        )
+        
+        # آمار بر اساس کاربر
+        user_stats = {}
+        for log in logs_query.select_related('user'):
+            username = log.user.username if log.user else 'سیستم'
+            if username not in user_stats:
+                user_stats[username] = {
+                    'total_requests': 0,
+                    'successful_requests': 0,
+                    'total_cost_usd': 0.0,
+                }
+            
+            user_stats[username]['total_requests'] += 1
+            if log.success:
+                user_stats[username]['successful_requests'] += 1
+            user_stats[username]['total_cost_usd'] += float(log.cost)
+        
+        # آمار روزانه
+        by_day = []
+        if group_by == 'day':
+            from django.db.models.functions import TruncDate
+            daily_stats = logs_query.annotate(
+                date=TruncDate('created_at')
+            ).values('date').annotate(
+                total_requests=Count('id'),
+                successful_requests=Count('id', filter=Q(success=True)),
+                total_cost_usd=Sum('cost')
+            ).order_by('date')
+            
+            for stat in daily_stats:
+                by_day.append({
+                    'date': stat['date'].strftime('%Y-%m-%d') if stat['date'] else 'نامشخص',
+                    'total_requests': stat['total_requests'],
+                    'successful_requests': stat['successful_requests'],
+                    'total_cost_usd': float(stat['total_cost_usd'] or 0),
+                })
+        
+        return {
+            'success': True,
+            'summary': {
+                'total_requests': total_requests,
+                'successful_requests': successful_requests,
+                'failed_requests': failed_requests,
+                'success_rate': (successful_requests / total_requests * 100) if total_requests > 0 else 0,
+                'total_cost_usd': float(cost_stats['total_cost_usd'] or 0),
+                'total_cost_toman': float(cost_stats['total_cost_toman'] or 0),
+                'avg_response_time_ms': float(cost_stats['avg_response_time'] or 0),
+            },
+            'by_user': user_stats,
+            'by_day': by_day,
+        }
+    except Exception as e:
+        logger.error(f"Error generating GapGPT usage report: {e}", exc_info=True)
+        return {
+            'success': False,
+            'error': str(e),
+            'summary': {},
+            'by_user': {},
+            'by_day': [],
+        }

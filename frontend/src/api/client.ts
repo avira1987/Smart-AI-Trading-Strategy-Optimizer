@@ -281,7 +281,17 @@ client.interceptors.response.use(
       }
       
       // Only redirect for user-initiated requests, not background checks, strategy processing, or backtest operations
-      if (!isAuthCheckEndpoint && !isStrategyProcessingEndpoint && !isBacktestEndpoint && !isRedirectingToLogin && window.location.pathname !== '/login') {
+      // Also don't redirect if user is on public pages (home, landing, about, blog, etc.)
+      const isPublicPage = window.location.pathname === '/' || 
+                          window.location.pathname === '/about' || 
+                          window.location.pathname === '/blog' || 
+                          window.location.pathname.startsWith('/blog/') ||
+                          window.location.pathname === '/tutorial' ||
+                          window.location.pathname === '/terms' ||
+                          window.location.pathname === '/guides/free-gold-api' ||
+                          window.location.pathname === '/login'
+      
+      if (!isAuthCheckEndpoint && !isStrategyProcessingEndpoint && !isBacktestEndpoint && !isRedirectingToLogin && !isPublicPage) {
         isRedirectingToLogin = true
         
         // Log error message for debugging
@@ -317,44 +327,6 @@ export interface APIConfiguration {
   is_owner?: boolean
 }
 
-export interface GoldAPIAccessInfo {
-  provider: string
-  api_key: string
-  source?: string | null
-  assigned_by_admin: boolean
-  allow_mt5_access?: boolean
-  is_active: boolean
-  assigned_at?: string | null
-  updated_at?: string | null
-  notes?: string
-  has_credentials: boolean
-}
-
-export interface GoldAPIAccessRequest {
-  id: number
-  status: string
-  status_display: string
-  preferred_provider: string
-  user_notes: string
-  admin_notes: string
-  price_amount: number
-  transaction_id: number | null
-  payment_confirmed_at: string | null
-  assigned_provider: string
-  assigned_api_key: string
-  assigned_at: string | null
-  assigned_by: number | null
-  assigned_by_username: string | null
-  created_at: string
-  updated_at: string
-  user_id?: number
-  username?: string
-  user_email?: string
-  user_phone?: string
-  user_has_gold_access?: boolean
-  user_allow_mt5_access?: boolean
-}
-
 export interface TradingStrategy {
   id: number
   name: string
@@ -369,6 +341,7 @@ export interface TradingStrategy {
   processing_error?: string
   marketplace_listing_id?: number | null
   marketplace_listing_status?: 'published' | 'draft' | null
+  has_backtest_capability?: boolean
 }
 
 export interface Job {
@@ -444,6 +417,13 @@ export interface Result {
       profit_factor?: number
     }
   }
+  improvement_recommendations?: Array<{
+    type: string
+    title: string
+    description: string
+    priority: 'critical' | 'high' | 'medium' | 'low'
+    action: string
+  }>
   created_at: string
 }
 
@@ -600,6 +580,8 @@ export const downloadStrategy = (id: number) => client.get(`/strategies/${id}/do
 })
 export const getStrategyFileContent = (id: number) => 
   client.get<{status: string, content: string, file_name: string, file_size: number}>(`/strategies/${id}/file-content/`)
+export const updateStrategyFileContent = (id: number, content: string) => 
+  client.post<{status: string, message: string}>(`/strategies/${id}/update-file-content/`, { content })
 export const saveGapGPTConversion = (id: number, data: { converted_strategy: any, model_used?: string, tokens_used?: number }) => 
   client.post(`/strategies/${id}/save-gapgpt-conversion/`, data)
 export const analyzeConvertedStrategyAmbiguities = (strategyId: number) => 
@@ -919,11 +901,10 @@ export interface SystemSettingsResponse {
   live_trading_enabled: boolean
   use_ai_cache: boolean
   google_auth_enabled?: boolean
-  token_cost_per_1000?: number
   backtest_cost?: number
   strategy_processing_cost?: number
   registration_bonus?: number
-  model_costs?: { [modelId: string]: number }
+  profit_margin_multiplier?: number
 }
 
 export const getSystemSettings = () =>
@@ -1049,27 +1030,6 @@ export const deleteUser = (user_id: number) =>
     params: { user_id: user_id.toString() }
   })
 
-// Gold API Access
-export const getUserGoldAPIAccess = () =>
-  client.get<GoldAPIAccessInfo>('/gold-access/self/')
-
-export const updateUserGoldAPIAccess = (data: Partial<Pick<GoldAPIAccessInfo, 'provider' | 'api_key' | 'notes'>>) =>
-  client.put<GoldAPIAccessInfo>('/gold-access/self/', data)
-
-export const createGoldAPIAccessRequest = (data: { preferred_provider?: string; user_notes?: string }) =>
-  client.post<GoldAPIAccessRequest & { payment_url?: string }>('/gold-access/requests/', data)
-
-export const listGoldAPIAccessRequests = (params?: Record<string, any>) =>
-  client.get<GoldAPIAccessRequest[] | { results: GoldAPIAccessRequest[] }>('/gold-access/requests/', { params })
-
-export const cancelGoldAPIAccessRequest = (id: number) =>
-  client.post<{ detail: string }>(`/gold-access/requests/${id}/cancel/`)
-
-export const assignGoldAPIAccessRequest = (
-  id: number,
-  data: { provider: string; api_key: string; admin_notes?: string; is_active?: boolean; allow_mt5_access?: boolean }
-) => client.post<GoldAPIAccessRequest>(`/gold-access/requests/${id}/assign/`, data)
-
 // User Activity Logs
 export interface UserActivityLog {
   id: number
@@ -1096,6 +1056,133 @@ export async function getUserActivityLogs(limit: number = 50, offset: number = 0
     params: { limit, offset }
   })
 }
+
+// ==================== Analytics API Functions ====================
+
+// Google Analytics
+export interface GoogleAnalyticsStats {
+  activeUsers: number
+  newUsers: number
+  sessions: number
+  screenPageViews: number
+  averageSessionDuration: number
+  bounceRate: number
+}
+
+export interface GoogleAnalyticsPage {
+  path: string
+  title: string
+  views: number
+  users: number
+  avgDuration: number
+}
+
+export interface GoogleAnalyticsTimeSeries {
+  date: string
+  users: number
+  sessions: number
+  views: number
+}
+
+export const getGoogleAnalyticsStats = (days: number = 7) =>
+  client.get<{ success: boolean; message: string; data: GoogleAnalyticsStats }>('/admin/analytics/google/stats/', {
+    params: { days }
+  })
+
+export const getGoogleAnalyticsPages = (days: number = 7, limit: number = 10) =>
+  client.get<{ success: boolean; message: string; data: GoogleAnalyticsPage[] }>('/admin/analytics/google/pages/', {
+    params: { days, limit }
+  })
+
+export const getGoogleAnalyticsTimeSeries = (days: number = 7) =>
+  client.get<{ success: boolean; message: string; data: GoogleAnalyticsTimeSeries[] }>('/admin/analytics/google/timeseries/', {
+    params: { days }
+  })
+
+// Database Analytics
+export interface DatabaseAnalyticsStats {
+  totalSessions: number
+  activeSessions: number
+  completedSessions: number
+  totalPageVisits: number
+  uniquePages: number
+  uniqueUsers: number
+  totalRegisteredUsers: number
+  registeredUsersInPeriod: number
+  uniquePhoneNumbers: number
+  avgSessionDuration: number
+  avgPageDuration: number
+}
+
+export interface DatabaseAnalyticsPage {
+  path: string
+  title: string
+  views: number
+  users: number
+  avgDuration: number
+}
+
+export interface DatabaseAnalyticsUser {
+  userId: number
+  username: string
+  email: string
+  sessions: number
+  totalDuration: number
+  lastLogin: string | null
+  pageVisits: number
+}
+
+export interface DatabaseAnalyticsTimeSeries {
+  date: string
+  sessions: number
+  users: number
+  visits: number
+}
+
+export const getDatabaseAnalyticsStats = (days: number = 7) =>
+  client.get<{ success: boolean; message: string; data: DatabaseAnalyticsStats }>('/admin/analytics/database/stats/', {
+    params: { days }
+  })
+
+export const getDatabaseAnalyticsPages = (days: number = 7, limit: number = 10) =>
+  client.get<{ success: boolean; message: string; data: DatabaseAnalyticsPage[] }>('/admin/analytics/database/pages/', {
+    params: { days, limit }
+  })
+
+export const getDatabaseAnalyticsUsers = (days: number = 7, limit: number = 20) =>
+  client.get<{ success: boolean; message: string; data: DatabaseAnalyticsUser[] }>('/admin/analytics/database/users/', {
+    params: { days, limit }
+  })
+
+export const getDatabaseAnalyticsTimeSeries = (days: number = 7) =>
+  client.get<{ success: boolean; message: string; data: DatabaseAnalyticsTimeSeries[] }>('/admin/analytics/database/timeseries/', {
+    params: { days }
+  })
+
+// Track APIs
+export const trackSession = (sessionId: string, deviceId?: string) =>
+  client.post<{ success: boolean; message: string; session_id: string }>('/analytics/track/session/', {
+    session_id: sessionId,
+    device_id: deviceId
+  })
+
+export const trackPageVisit = (sessionId: string, pagePath: string, pageTitle?: string, referrer?: string) =>
+  client.post<{ success: boolean; message: string; visit_id: number }>('/analytics/track/page/', {
+    session_id: sessionId,
+    page_path: pagePath,
+    page_title: pageTitle,
+    referrer: referrer
+  })
+
+export const endPageVisit = (visitId: number) =>
+  client.post<{ success: boolean; message: string; duration: number }>('/analytics/track/page/end/', {
+    visit_id: visitId
+  })
+
+export const endSession = (sessionId: string) =>
+  client.post<{ success: boolean; message: string; duration: number }>('/analytics/track/session/end/', {
+    session_id: sessionId
+  })
 
 export default client
 
@@ -1178,6 +1265,216 @@ export interface GapGPTBalanceResponse {
   }
 }
 
-export const checkGapGPTBalance = () => 
+export const checkGapGPTBalance = () =>
   gapGPTClient.get<GapGPTBalanceResponse>('/gapgpt/balance/')
+
+// OpenAI Account Balance and Monitoring (Admin Only)
+export interface OpenAIBalanceResponse {
+  status: string
+  message?: string
+  error?: string
+  data: {
+    balance: string | null
+    balance_formatted: string
+    currency: string
+    message?: string
+    usage_stats?: {
+      total_requests_30d: number
+      successful_requests_30d: number
+      failed_requests_30d: number
+      success_rate: number
+      total_cost_usd_30d: number
+      total_cost_toman_30d: number
+      total_tokens_30d: number
+      input_tokens_30d: number
+      output_tokens_30d: number
+      today_requests: number
+      today_cost_usd: number
+    }
+    last_checked: string
+    latency_ms?: number
+    test_success?: boolean
+  }
+}
+
+export interface OpenAILog {
+  id: number
+  user: string
+  user_id: number | null
+  endpoint: string
+  request_type: string
+  status_code: number | null
+  success: boolean
+  cost_usd: number
+  cost_toman: number
+  response_time_ms: number | null
+  error_message: string
+  metadata: any
+  created_at: string
+}
+
+export interface OpenAILogsResponse {
+  status: string
+  data: {
+    logs: OpenAILog[]
+    total: number
+    returned: number
+  }
+}
+
+export interface OpenAIUsageReport {
+  success: boolean
+  error?: string
+  summary: {
+    total_requests: number
+    successful_requests: number
+    failed_requests: number
+    success_rate: number
+    total_cost_usd: number
+    total_cost_toman: number
+    avg_response_time_ms: number
+  }
+  by_user: Record<string, {
+    total_requests: number
+    successful_requests: number
+    failed_requests: number
+    total_cost_usd: number
+    total_cost_toman: number
+  }>
+  by_day: Array<{
+    date: string
+    total_requests: number
+    successful_requests: number
+    failed_requests: number
+    total_cost_usd: number
+  }>
+  period: {
+    start_date: string | null
+    end_date: string | null
+  }
+}
+
+export interface OpenAIReportResponse {
+  status: string
+  data: OpenAIUsageReport
+}
+
+export const checkOpenAIBalance = () =>
+  client.get<OpenAIBalanceResponse>('/openai/balance/')
+
+export const getOpenAILogs = (params?: {
+  limit?: number
+  start_date?: string
+  end_date?: string
+  success_only?: boolean
+}) => {
+  const queryParams = new URLSearchParams()
+  if (params?.limit) queryParams.append('limit', params.limit.toString())
+  if (params?.start_date) queryParams.append('start_date', params.start_date)
+  if (params?.end_date) queryParams.append('end_date', params.end_date)
+  if (params?.success_only !== undefined) queryParams.append('success_only', params.success_only.toString())
+  
+  const queryString = queryParams.toString()
+  return client.get<OpenAILogsResponse>(`/openai/logs/${queryString ? '?' + queryString : ''}`)
+}
+
+export const getOpenAIReport = (params?: {
+  start_date?: string
+  end_date?: string
+  group_by?: 'day' | 'hour' | 'user'
+}) => {
+  const queryParams = new URLSearchParams()
+  if (params?.start_date) queryParams.append('start_date', params.start_date)
+  if (params?.end_date) queryParams.append('end_date', params.end_date)
+  if (params?.group_by) queryParams.append('group_by', params.group_by)
+  
+  const queryString = queryParams.toString()
+  return client.get<OpenAIReportResponse>(`/openai/report/${queryString ? '?' + queryString : ''}`)
+}
+
+// GapGPT Logs and Reports (Admin Only)
+export interface GapGPTLog {
+  id: number
+  user: string
+  user_id: number | null
+  endpoint: string
+  request_type: string
+  status_code: number | null
+  success: boolean
+  cost_usd: number
+  cost_toman: number
+  response_time_ms: number | null
+  error_message: string
+  metadata: any
+  created_at: string
+}
+
+export interface GapGPTLogsResponse {
+  status: string
+  data: {
+    logs: GapGPTLog[]
+    total: number
+    returned: number
+  }
+}
+
+export interface GapGPTUsageReport {
+  success: boolean
+  error?: string
+  summary: {
+    total_requests: number
+    successful_requests: number
+    failed_requests: number
+    success_rate: number
+    total_cost_usd: number
+    total_cost_toman: number
+    avg_response_time_ms: number
+  }
+  by_user: Record<string, {
+    total_requests: number
+    successful_requests: number
+    total_cost_usd: number
+  }>
+  by_day: Array<{
+    date: string
+    total_requests: number
+    successful_requests: number
+    total_cost_usd: number
+  }>
+}
+
+export interface GapGPTReportResponse {
+  status: string
+  data: GapGPTUsageReport
+}
+
+export const getGapGPTLogs = (params?: {
+  limit?: number
+  start_date?: string
+  end_date?: string
+  success_only?: boolean
+}) => {
+  const queryParams = new URLSearchParams()
+  if (params?.limit) queryParams.append('limit', params.limit.toString())
+  if (params?.start_date) queryParams.append('start_date', params.start_date)
+  if (params?.end_date) queryParams.append('end_date', params.end_date)
+  if (params?.success_only !== undefined) queryParams.append('success_only', params.success_only.toString())
+  
+  const queryString = queryParams.toString()
+  return gapGPTClient.get<GapGPTLogsResponse>(`/gapgpt/logs/${queryString ? '?' + queryString : ''}`)
+}
+
+export const getGapGPTReport = (params?: {
+  start_date?: string
+  end_date?: string
+  group_by?: 'day' | 'hour' | 'user'
+}) => {
+  const queryParams = new URLSearchParams()
+  if (params?.start_date) queryParams.append('start_date', params.start_date)
+  if (params?.end_date) queryParams.append('end_date', params.end_date)
+  if (params?.group_by) queryParams.append('group_by', params.group_by)
+  
+  const queryString = queryParams.toString()
+  return gapGPTClient.get<GapGPTReportResponse>(`/gapgpt/report/${queryString ? '?' + queryString : ''}`)
+}
 

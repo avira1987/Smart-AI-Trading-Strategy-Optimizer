@@ -151,6 +151,10 @@ AI_MAX_TOKENS_PER_CHUNK = int(os.environ.get('AI_MAX_TOKENS_PER_CHUNK', '1500'))
 AI_RETRY_ATTEMPTS = int(os.environ.get('AI_RETRY_ATTEMPTS', '5'))  # Max retry attempts
 
 # Zarinpal Payment Gateway Settings
+# Feature flag to enable/disable Zarinpal payment gateway
+# Set to 'True' to enable, 'False' to disable
+ZARINPAL_ENABLED = os.environ.get('ZARINPAL_ENABLED', 'False') == 'True'
+
 ZARINPAL_MERCHANT_ID = get_api_key_from_db_or_env('zarinpal', 'ZARINPAL_MERCHANT_ID')
 if not ZARINPAL_MERCHANT_ID:
     # Only raise error in production, allow empty in development
@@ -369,6 +373,11 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 CACHE_DIR = BASE_DIR / 'cache'
+
+# File upload settings - Allow up to 10MB for strategy text/files
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB - for in-memory file uploads
+FILE_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024  # 10MB - for file uploads
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 1000  # Maximum number of form fields
 
 # Create directories
 for directory in [STATIC_ROOT, MEDIA_ROOT, CACHE_DIR]:

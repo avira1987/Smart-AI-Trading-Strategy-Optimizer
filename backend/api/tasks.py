@@ -10,6 +10,8 @@ import time
 import os
 import logging
 import re
+import json
+import math
 import pandas as pd
 import numpy as np
 from typing import Any, List
@@ -21,15 +23,28 @@ def make_json_serializable(obj: Any) -> Any:
     """Recursively convert object to JSON-serializable types.
     
     Handles pandas Timestamp, numpy types, datetime objects, and other non-JSON types.
+    Also handles NaN, Infinity, and other invalid JSON values.
     """
     if obj is None:
         return None
-    elif isinstance(obj, (str, int, float, bool)):
+    elif isinstance(obj, (str, int, bool)):
+        return obj
+    elif isinstance(obj, float):
+        # Handle NaN and Infinity which are not valid JSON
+        if math.isnan(obj):
+            return None
+        elif math.isinf(obj):
+            return None  # Replace infinity with None
         return obj
     elif isinstance(obj, (pd.Timestamp, datetime)):
         return obj.isoformat() if hasattr(obj, 'isoformat') else str(obj)
     elif isinstance(obj, (np.integer, np.floating)):
-        return obj.item()
+        val = obj.item()
+        # Handle NaN and Infinity from numpy
+        if isinstance(val, float):
+            if math.isnan(val) or math.isinf(val):
+                return None
+        return val
     elif isinstance(obj, np.ndarray):
         return obj.tolist()
     elif isinstance(obj, dict):
@@ -41,10 +56,43 @@ def make_json_serializable(obj: Any) -> Any:
         try:
             # Try to convert to native Python type first
             if hasattr(obj, 'item'):
-                return obj.item()
+                val = obj.item()
+                if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+                    return None
+                return val
             return str(obj)
         except Exception:
             return None
+
+
+def validate_and_clean_json(data: Any) -> dict:
+    """Validate and clean data to ensure it's valid JSON.
+    
+    Returns a dict that is guaranteed to be JSON-serializable.
+    If validation fails, returns empty dict.
+    """
+    try:
+        # First, make it JSON-serializable
+        cleaned = make_json_serializable(data)
+        
+        # Try to serialize and deserialize to ensure it's valid JSON
+        json_str = json.dumps(cleaned, ensure_ascii=False)
+        validated = json.loads(json_str)
+        
+        # Ensure it's a dict (not list or other type)
+        if isinstance(validated, dict):
+            return validated
+        elif isinstance(validated, (list, tuple)):
+            # If it's a list, wrap it in a dict
+            return {'data': validated}
+        else:
+            return {}
+    except (TypeError, ValueError, OverflowError) as e:
+        logger.warning(f"JSON validation failed: {e}, using empty dict")
+        return {}
+    except Exception as e:
+        logger.warning(f"Unexpected error in JSON validation: {e}, using empty dict")
+        return {}
 
 
 def _mt5_symbol_from(symbol: Any) -> str:
@@ -137,7 +185,11 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                 with db_transaction.atomic():
                     wallet, _ = Wallet.objects.select_for_update().get_or_create(user=job.user)
                     settings = SystemSettings.load()
-                    backtest_cost = settings.backtest_cost
+                    # محاسبه هزینه پایه
+                    base_backtest_cost = settings.backtest_cost
+                    # اعمال ضریب سود
+                    profit_multiplier = settings.profit_margin_multiplier
+                    backtest_cost = base_backtest_cost * profit_multiplier
                     
                     # Validate backtest_cost
                     if backtest_cost is None or backtest_cost < 0:
@@ -848,12 +900,81 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             if 'execution_details' in data_sources_info:
                 data_sources_info['execution_details']['total_duration_seconds'] = round(total_duration, 2)
             
-            # Ensure data_sources_info is JSON-serializable before saving
+            # Ensure data_sources_info is JSON-serializable and valid before saving
             try:
-                data_sources_info = make_json_serializable(data_sources_info)
+                data_sources_info = validate_and_clean_json(data_sources_info)
             except Exception as json_error:
-                logger.warning(f"Error serializing data_sources_info: {json_error}, using empty dict")
+                logger.warning(f"Error validating data_sources_info: {json_error}, using empty dict")
                 data_sources_info = {}
+            
+            # Generate improvement recommendations based on backtest results
+            improvement_recommendations = []
+            try:
+                total_return = float(result_data.get('total_return', 0.0))
+                win_rate = float(result_data.get('win_rate', 0.0))
+                max_drawdown = float(result_data.get('max_drawdown', 0.0))
+                total_trades = int(result_data.get('total_trades', 0))
+                profit_factor = float(result_data.get('profit_factor', 0.0))
+                
+                # Generate recommendations based on performance metrics
+                if total_return < 0:
+                    improvement_recommendations.append({
+                        'type': 'performance',
+                        'title': 'بازدهی منفی',
+                        'description': f'استراتژی شما بازدهی منفی ({total_return:.2f}%) داشته است. پیشنهاد می‌شود شرایط ورود و خروج را بازبینی کنید.',
+                        'priority': 'high',
+                        'action': 'بازبینی شرایط ورود و خروج'
+                    })
+                
+                if win_rate < 50 and total_trades > 0:
+                    improvement_recommendations.append({
+                        'type': 'win_rate',
+                        'title': 'نرخ برد پایین',
+                        'description': f'نرخ برد استراتژی ({win_rate:.2f}%) کمتر از 50% است. پیشنهاد می‌شود فیلترهای ورود را بهبود دهید.',
+                        'priority': 'high',
+                        'action': 'بهبود فیلترهای ورود'
+                    })
+                
+                if max_drawdown > 20:
+                    improvement_recommendations.append({
+                        'type': 'risk_management',
+                        'title': 'حداکثر افت سرمایه بالا',
+                        'description': f'حداکثر افت سرمایه ({max_drawdown:.2f}%) بیش از 20% است. پیشنهاد می‌شود مدیریت ریسک را تقویت کنید.',
+                        'priority': 'high',
+                        'action': 'تقویت مدیریت ریسک و استاپ لاس'
+                    })
+                
+                if profit_factor < 1.0 and total_trades > 0:
+                    improvement_recommendations.append({
+                        'type': 'profit_factor',
+                        'title': 'فاکتور سود کمتر از 1',
+                        'description': f'فاکتور سود ({profit_factor:.2f}) کمتر از 1 است. این نشان می‌دهد متوسط ضررها بیشتر از متوسط سودهاست.',
+                        'priority': 'high',
+                        'action': 'بهبود نسبت ریسک به ریوارد'
+                    })
+                
+                if total_trades == 0:
+                    improvement_recommendations.append({
+                        'type': 'no_trades',
+                        'title': 'هیچ معامله‌ای انجام نشده',
+                        'description': 'در این بک‌تست هیچ معامله‌ای انجام نشده است. ممکن است شرایط ورود خیلی محدود باشند یا با داده‌های موجود همخوانی نداشته باشند.',
+                        'priority': 'critical',
+                        'action': 'بازبینی و ساده‌سازی شرایط ورود'
+                    })
+                
+                if total_trades > 0 and len(improvement_recommendations) == 0:
+                    # If performance is good but could be better
+                    if total_return < 10:
+                        improvement_recommendations.append({
+                            'type': 'optimization',
+                            'title': 'بهینه‌سازی بیشتر',
+                            'description': 'استراتژی شما عملکرد قابل قبولی دارد اما می‌تواند بهبود یابد. پیشنهاد می‌شود از بهینه‌ساز استراتژی استفاده کنید.',
+                            'priority': 'medium',
+                            'action': 'استفاده از بهینه‌ساز استراتژی'
+                        })
+            except Exception as rec_error:
+                logger.warning(f"Error generating improvement recommendations: {rec_error}", exc_info=True)
+                improvement_recommendations = []
             
             # Create result with error handling
             # Handle profit_factor (can be inf or a number)
@@ -875,7 +996,8 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                 equity_curve_data=result_data.get('equity_curve_data', []),
                 description=final_description,
                 trades_details=result_data.get('trades', []),
-                data_sources=data_sources_info
+                data_sources=data_sources_info,
+                improvement_recommendations=improvement_recommendations
             )
             
             # Award gamification points
@@ -913,8 +1035,12 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                     'symbol': symbol if 'symbol' in locals() else 'unknown',
                     'error': str(result_error)
                 }
-                # Ensure data_sources_info is JSON-serializable
-                data_sources_info = make_json_serializable(data_sources_info)
+                # Ensure data_sources_info is JSON-serializable and valid
+                try:
+                    data_sources_info = validate_and_clean_json(data_sources_info)
+                except Exception as json_error:
+                    logger.warning(f"Error validating error data_sources_info: {json_error}, using empty dict")
+                    data_sources_info = {}
                 result = Result.objects.create(
                     job=job,
                     total_return=0.0,

@@ -427,6 +427,12 @@ class Result(models.Model):
         blank=True, 
         help_text="اطلاعات منابع داده استفاده شده در بک‌تست (مثلاً: provider, symbol, date_range)"
     )
+    # توصیه‌های بهبود استراتژی
+    improvement_recommendations = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="توصیه‌های بهبود استراتژی بر اساس نتایج بک‌تست"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
@@ -1269,11 +1275,18 @@ class SystemSettings(models.Model):
         help_text="مبلغ هدیه ثبت‌نام به تومان"
     )
     
-    # هزینه‌های مدل‌ها (هر کلمه به تومان)
+    profit_margin_multiplier = models.DecimalField(
+        max_digits=10,
+        decimal_places=4,
+        default=1.2000,  # 20% سود (1.2 = 120%)
+        help_text="ضریب سود بر قیمت API GapGPT (مثلاً 1.2 = 20% سود، 1.5 = 50% سود)"
+    )
+    
+    # هزینه‌های مدل‌ها (هر کلمه به تومان) - deprecated، نگه داشته شده برای backward compatibility
     model_costs = models.JSONField(
         default=dict,
         blank=True,
-        help_text="هزینه هر کلمه برای هر مدل به تومان (JSON: {'model_id': cost})"
+        help_text="هزینه هر کلمه برای هر مدل به تومان (JSON: {'model_id': cost}) - deprecated"
     )
     
     created_at = models.DateTimeField(auto_now_add=True)
@@ -1525,3 +1538,172 @@ class UserAchievement(models.Model):
     
     def __str__(self):
         return f"{self.user.username} - {self.achievement.name}"
+
+
+class UserSession(models.Model):
+    """ردیابی جلسات کاربران برای Analytics"""
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='sessions',
+        help_text="کاربری که این جلسه را دارد"
+    )
+    session_id = models.CharField(
+        max_length=255,
+        db_index=True,
+        help_text="شناسه یکتا جلسه (از frontend)"
+    )
+    login_time = models.DateTimeField(
+        db_index=True,
+        help_text="زمان ورود"
+    )
+    logout_time = models.DateTimeField(
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="زمان خروج (null اگر هنوز فعال است)"
+    )
+    total_duration = models.IntegerField(
+        default=0,
+        help_text="مدت زمان کل جلسه به ثانیه"
+    )
+    ip_address = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        help_text="آدرس IP کاربر"
+    )
+    user_agent = models.TextField(
+        blank=True,
+        help_text="User Agent مرورگر"
+    )
+    device_id = models.CharField(
+        max_length=255,
+        blank=True,
+        db_index=True,
+        help_text="شناسه دستگاه (از Device model)"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text="آیا جلسه هنوز فعال است"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "جلسه کاربر"
+        verbose_name_plural = "جلسات کاربران"
+        ordering = ['-login_time']
+        indexes = [
+            models.Index(fields=['user', 'login_time']),
+            models.Index(fields=['user', 'is_active']),
+            models.Index(fields=['login_time']),
+            models.Index(fields=['is_active', 'login_time']),
+        ]
+    
+    def __str__(self):
+        status = "فعال" if self.is_active else "پایان یافته"
+        return f"{self.user.username} - {self.session_id[:20]} - {status}"
+    
+    def calculate_duration(self):
+        """محاسبه مدت زمان جلسه"""
+        if self.logout_time:
+            delta = self.logout_time - self.login_time
+            return int(delta.total_seconds())
+        elif self.is_active:
+            delta = timezone.now() - self.login_time
+            return int(delta.total_seconds())
+        return 0
+    
+    def end_session(self):
+        """پایان دادن به جلسه"""
+        if self.is_active:
+            self.logout_time = timezone.now()
+            self.total_duration = self.calculate_duration()
+            self.is_active = False
+            self.save(update_fields=['logout_time', 'total_duration', 'is_active', 'updated_at'])
+
+
+class PageVisit(models.Model):
+    """ردیابی بازدید صفحات برای Analytics"""
+    session = models.ForeignKey(
+        UserSession,
+        on_delete=models.CASCADE,
+        related_name='visits',
+        help_text="جلسه مربوطه"
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='page_visits',
+        db_index=True,
+        help_text="کاربر (برای دسترسی سریع)"
+    )
+    page_path = models.CharField(
+        max_length=500,
+        db_index=True,
+        help_text="مسیر صفحه (مثل /dashboard)"
+    )
+    page_title = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="عنوان صفحه"
+    )
+    visit_time = models.DateTimeField(
+        db_index=True,
+        help_text="زمان بازدید"
+    )
+    duration = models.IntegerField(
+        default=0,
+        help_text="مدت زمان در صفحه به ثانیه"
+    )
+    referrer = models.CharField(
+        max_length=500,
+        blank=True,
+        help_text="صفحه قبلی (referrer)"
+    )
+    exit_time = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="زمان خروج از صفحه"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text="آیا بازدید هنوز فعال است"
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        verbose_name = "بازدید صفحه"
+        verbose_name_plural = "بازدیدهای صفحات"
+        ordering = ['-visit_time']
+        indexes = [
+            models.Index(fields=['user', 'visit_time']),
+            models.Index(fields=['page_path', 'visit_time']),
+            models.Index(fields=['session', 'visit_time']),
+            models.Index(fields=['visit_time']),
+            models.Index(fields=['is_active', 'visit_time']),
+        ]
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.page_path} - {self.visit_time.strftime('%Y-%m-%d %H:%M')}"
+    
+    def calculate_duration(self):
+        """محاسبه مدت زمان در صفحه"""
+        if self.exit_time:
+            delta = self.exit_time - self.visit_time
+            return int(delta.total_seconds())
+        elif self.is_active:
+            delta = timezone.now() - self.visit_time
+            return int(delta.total_seconds())
+        return 0
+    
+    def end_visit(self):
+        """پایان دادن به بازدید"""
+        if self.is_active:
+            self.exit_time = timezone.now()
+            self.duration = self.calculate_duration()
+            self.is_active = False
+            self.save(update_fields=['exit_time', 'duration', 'is_active', 'updated_at'])

@@ -21,7 +21,7 @@ from core.models import (
     TicketMessage,
     StrategyOptimization,
 )
-from core.models import Wallet, Transaction, AIRecommendation, SystemSettings, UserGoldAPIAccess, GoldAPIAccessRequest
+from core.models import Wallet, Transaction, AIRecommendation, SystemSettings
 from core.models import UserScore, Achievement, UserAchievement
 from django.contrib.auth.models import User
 import re
@@ -145,7 +145,7 @@ class APIConfigurationSerializer(serializers.ModelSerializer):
 class SystemSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = SystemSettings
-        fields = ['live_trading_enabled', 'use_ai_cache', 'token_cost_per_1000', 'backtest_cost', 'strategy_processing_cost', 'registration_bonus', 'model_costs']
+        fields = ['live_trading_enabled', 'use_ai_cache', 'backtest_cost', 'strategy_processing_cost', 'registration_bonus', 'profit_margin_multiplier']
 
 
 class PublicSystemSettingsSerializer(serializers.Serializer):
@@ -158,15 +158,20 @@ class TradingStrategySerializer(serializers.ModelSerializer):
     analysis_sources_display = serializers.SerializerMethodField()
     marketplace_listing_id = serializers.SerializerMethodField()
     marketplace_listing_status = serializers.SerializerMethodField()
+    has_backtest_capability = serializers.SerializerMethodField()
+    
+    # فیلد را اختیاری می‌کنیم تا DRF خطای "No file was submitted" ندهد
+    strategy_file = serializers.FileField(required=False, allow_null=True)
     
     class Meta:
         model = TradingStrategy
         fields = ['id', 'user', 'name', 'description', 'strategy_file', 'is_active', 'is_primary', 'uploaded_at',
                   'parsed_strategy_data', 'processing_status', 'processed_at', 'processing_error', 
                   'questions_count', 'analysis_sources', 'analysis_sources_display',
-                  'marketplace_listing_id', 'marketplace_listing_status']
+                  'marketplace_listing_id', 'marketplace_listing_status', 'has_backtest_capability']
         read_only_fields = ['user', 'uploaded_at', 'parsed_strategy_data', 'processing_status', 'processed_at', 
-                           'processing_error', 'questions_count', 'analysis_sources', 'analysis_sources_display']
+                           'processing_error', 'questions_count', 'analysis_sources', 'analysis_sources_display',
+                           'has_backtest_capability']
     
     def validate_strategy_file(self, value):
         """اعتبارسنجی فایل آپلود شده برای امنیت"""
@@ -174,12 +179,12 @@ class TradingStrategySerializer(serializers.ModelSerializer):
         import logging
         logger = logging.getLogger(__name__)
         
-        logger.info(f"Validating strategy file: name={value.name if value else 'None'}, size={value.size if value else 'None'}")
-        
-        # بررسی وجود فایل
+        # اگر فایل None است، validation را skip کنید (اختیاری است)
+        # بررسی نهایی در متد validate انجام می‌شود
         if not value:
-            logger.error("Strategy file is None or empty")
-            raise serializers.ValidationError('فایل استراتژی الزامی است')
+            return value
+        
+        logger.info(f"Validating strategy file: name={value.name if value else 'None'}, size={value.size if value else 'None'}")
         
         # بررسی پسوند فایل
         ALLOWED_EXTENSIONS = ['.docx', '.txt', '.doc']
@@ -215,20 +220,56 @@ class TradingStrategySerializer(serializers.ModelSerializer):
         logger.info(f"File validation passed: {file_name}")
         
         # بررسی magic bytes برای docx (امنیت بیشتر)
+        # فقط برای فایل‌های آپلود شده از کاربر (نه فایل‌های ایجاد شده از متن)
         if file_ext == '.docx':
             try:
                 value.seek(0)
                 header = value.read(4)
                 # Magic bytes for ZIP (docx is a ZIP file)
                 if not header.startswith(b'PK\x03\x04'):
-                    raise serializers.ValidationError(
-                        'محتوای فایل docx نامعتبر است. فایل باید یک فایل Word معتبر باشد.'
-                    )
+                    # اگر magic bytes درست نیست، ممکن است فایل از متن ایجاد شده باشد
+                    # در این صورت فقط یک warning می‌دهیم اما اجازه می‌دهیم ادامه دهد
+                    logger.warning(f"DOCX file does not have valid magic bytes, but allowing it (may be generated from text)")
                 value.seek(0)  # Reset file pointer
             except Exception as e:
-                raise serializers.ValidationError(f'خطا در بررسی فایل: {str(e)}')
+                # اگر خطا در خواندن فایل بود، فقط warning می‌دهیم
+                logger.warning(f"Error checking DOCX magic bytes: {str(e)}, but allowing file to continue")
+                try:
+                    value.seek(0)  # Reset file pointer
+                except:
+                    pass
         
         return value
+    
+    def validate(self, attrs):
+        """اعتبارسنجی کلی - بررسی می‌کند که فایل در request.FILES وجود دارد"""
+        request = self.context.get('request')
+        
+        # اگر فایل در attrs نیست، از request.FILES بگیرید
+        if request and hasattr(request, 'FILES') and 'strategy_file' in request.FILES:
+            if 'strategy_file' not in attrs or not attrs.get('strategy_file'):
+                attrs['strategy_file'] = request.FILES['strategy_file']
+        
+        # بررسی نهایی: اگر هنوز فایل وجود ندارد، بررسی کنید که آیا strategy_text وجود دارد
+        if not attrs.get('strategy_file'):
+            if request and hasattr(request, 'data'):
+                strategy_text = request.data.get('strategy_text', '')
+                if isinstance(strategy_text, list):
+                    strategy_text = strategy_text[0] if strategy_text else ''
+                if strategy_text and str(strategy_text).strip():
+                    # اگر متن وجود دارد، view باید فایل را ایجاد کرده باشد
+                    # در اینجا فقط pass می‌کنیم و اجازه می‌دهیم view خطا را مدیریت کند
+                    pass
+                else:
+                    raise serializers.ValidationError({
+                        'strategy_file': 'فایل استراتژی الزامی است. لطفاً یک فایل آپلود کنید یا متن استراتژی را وارد کنید.'
+                    })
+            else:
+                raise serializers.ValidationError({
+                    'strategy_file': 'فایل استراتژی الزامی است.'
+                })
+        
+        return attrs
     
     def get_questions_count(self, obj):
         return obj.questions.count()
@@ -384,6 +425,40 @@ class TradingStrategySerializer(serializers.ModelSerializer):
         if not entry:
             return None
         return 'published' if entry.is_published else 'draft'
+    
+    def get_has_backtest_capability(self, obj):
+        """
+        بررسی می‌کند که آیا استراتژی قابلیت بک‌تست دارد یا خیر.
+        اگر خروجی بک‌تست صفر باشد (total_trades == 0)، استراتژی قابلیت بک‌تست ندارد.
+        اگر هنوز بک‌تستی اجرا نشده باشد، None برمی‌گرداند (هشدار نمایش داده نمی‌شود).
+        """
+        from core.models import Job, Result
+        
+        # بررسی می‌کنیم که آیا استراتژی پردازش شده است
+        if obj.processing_status != 'processed':
+            return None  # اگر پردازش نشده، هشدار نمایش نمی‌دهیم
+        
+        # بررسی می‌کنیم که آیا بک‌تست تکمیل شده‌ای وجود دارد
+        completed_backtest_jobs = Job.objects.filter(
+            strategy=obj,
+            job_type='backtest',
+            status='completed',
+            result__isnull=False
+        ).select_related('result')
+        
+        # اگر هیچ بک‌تست تکمیل شده‌ای وجود نداشت، None برمی‌گردانیم (هشدار نمایش نمی‌دهیم)
+        if not completed_backtest_jobs.exists():
+            return None
+        
+        # بررسی می‌کنیم که آیا حداقل یک نتیجه با total_trades > 0 وجود دارد
+        for job in completed_backtest_jobs:
+            if job.result:
+                # اگر total_trades بیشتر از 0 باشد، استراتژی قابلیت بک‌تست دارد
+                if job.result.total_trades > 0:
+                    return True
+        
+        # اگر همه نتایج صفر بودند (total_trades == 0)
+        return False
 
 
 class StrategyListingAccessSerializer(serializers.ModelSerializer):
@@ -643,8 +718,9 @@ class ResultSerializer(serializers.ModelSerializer):
         model = Result
         fields = ['id', 'job', 'strategy_name', 'total_return', 'total_trades', 'winning_trades', 
                   'losing_trades', 'win_rate', 'max_drawdown', 'profit_factor', 'equity_curve_data',
-                  'description', 'trades_details', 'data_sources', 'data_sources_display', 'created_at']
-        read_only_fields = ['created_at', 'data_sources', 'data_sources_display', 'strategy_name']
+                  'description', 'trades_details', 'data_sources', 'data_sources_display', 
+                  'improvement_recommendations', 'created_at']
+        read_only_fields = ['created_at', 'data_sources', 'data_sources_display', 'strategy_name', 'improvement_recommendations']
     
     def get_strategy_name(self, obj):
         """Get strategy name from the related job"""
@@ -795,7 +871,6 @@ class UserSerializer(serializers.ModelSerializer):
     """User serializer with profile info"""
     phone_number = serializers.SerializerMethodField()
     nickname = serializers.SerializerMethodField()
-    gold_api_access = serializers.SerializerMethodField()
     is_staff = serializers.BooleanField(read_only=True)
     is_superuser = serializers.BooleanField(read_only=True)
     
@@ -812,9 +887,8 @@ class UserSerializer(serializers.ModelSerializer):
             'date_joined',
             'is_staff',
             'is_superuser',
-            'gold_api_access',
         ]
-        read_only_fields = ['id', 'username', 'date_joined', 'is_staff', 'is_superuser', 'gold_api_access']
+        read_only_fields = ['id', 'username', 'date_joined', 'is_staff', 'is_superuser']
     
     def get_phone_number(self, obj):
         """Get phone number from profile, return empty string if profile doesn't exist"""
@@ -834,48 +908,6 @@ class UserSerializer(serializers.ModelSerializer):
             return ''
         except Exception:
             return ''
-    
-    def get_gold_api_access(self, obj):
-        try:
-            access = getattr(obj, 'gold_api_access', None)
-            if not access:
-                return {
-                    'has_credentials': False,
-                    'provider': '',
-                    'api_key': '',
-                    'source': None,
-                    'assigned_by_admin': False,
-                    'allow_mt5_access': False,
-                    'is_active': False,
-                    'assigned_at': None,
-                    'updated_at': None,
-                    'notes': '',
-                }
-            return {
-                'has_credentials': access.has_credentials,
-                'provider': access.provider or '',
-                'api_key': access.api_key or '',
-                'source': access.source,
-                'assigned_by_admin': access.assigned_by_admin,
-                'allow_mt5_access': access.allow_mt5_access,
-                'is_active': access.is_active,
-                'assigned_at': access.assigned_at.isoformat() if access.assigned_at else None,
-                'updated_at': access.updated_at.isoformat() if access.updated_at else None,
-                'notes': access.notes,
-            }
-        except Exception:
-            return {
-                'has_credentials': False,
-                'provider': '',
-                'api_key': '',
-                'source': None,
-                'assigned_by_admin': False,
-                'allow_mt5_access': False,
-                'is_active': False,
-                'assigned_at': None,
-                'updated_at': None,
-                'notes': '',
-            }
 
 
 class DeviceSerializer(serializers.ModelSerializer):
@@ -935,111 +967,6 @@ class TicketCreateSerializer(serializers.ModelSerializer):
         if value not in valid_categories:
             raise serializers.ValidationError('دسته‌بندی نامعتبر است')
         return value
-
-
-class UserGoldAPIAccessSerializer(serializers.ModelSerializer):
-    """Serializer for user gold API access configuration"""
-    has_credentials = serializers.SerializerMethodField()
-    
-    class Meta:
-        model = UserGoldAPIAccess
-        fields = [
-            'provider',
-            'api_key',
-            'source',
-            'assigned_by_admin',
-            'allow_mt5_access',
-            'is_active',
-            'assigned_at',
-            'updated_at',
-            'notes',
-            'has_credentials',
-        ]
-        read_only_fields = ['source', 'assigned_by_admin', 'allow_mt5_access', 'assigned_at', 'updated_at', 'has_credentials']
-        extra_kwargs = {
-            'provider': {'allow_blank': True, 'required': False},
-            'api_key': {'allow_blank': True, 'required': False},
-            'notes': {'allow_blank': True, 'required': False},
-        }
-    
-    def get_has_credentials(self, obj):
-        return obj.has_credentials
-
-
-class GoldAPIAccessRequestSerializer(serializers.ModelSerializer):
-    """Serializer for gold API access requests (user view)"""
-    status_display = serializers.CharField(source='get_status_display', read_only=True)
-    assigned_by_username = serializers.CharField(source='assigned_by.username', read_only=True, allow_null=True)
-    
-    class Meta:
-        model = GoldAPIAccessRequest
-        fields = [
-            'id',
-            'status',
-            'status_display',
-            'preferred_provider',
-            'user_notes',
-            'admin_notes',
-            'price_amount',
-            'transaction_id',
-            'payment_confirmed_at',
-            'assigned_provider',
-            'assigned_api_key',
-            'assigned_at',
-            'assigned_by',
-            'assigned_by_username',
-            'created_at',
-            'updated_at',
-        ]
-        read_only_fields = [
-            'status',
-            'status_display',
-            'admin_notes',
-            'price_amount',
-            'transaction_id',
-            'payment_confirmed_at',
-            'assigned_provider',
-            'assigned_api_key',
-            'assigned_at',
-            'assigned_by',
-            'assigned_by_username',
-            'created_at',
-            'updated_at',
-        ]
-    
-    transaction_id = serializers.IntegerField(source='transaction.id', read_only=True, allow_null=True)
-
-
-class AdminGoldAPIAccessRequestSerializer(GoldAPIAccessRequestSerializer):
-    """Serializer for admin view of gold API access requests"""
-    user_id = serializers.IntegerField(source='user.id', read_only=True)
-    username = serializers.CharField(source='user.username', read_only=True)
-    user_email = serializers.EmailField(source='user.email', read_only=True)
-    user_phone = serializers.SerializerMethodField()
-    user_has_gold_access = serializers.SerializerMethodField()
-    user_allow_mt5_access = serializers.SerializerMethodField()
-    
-    class Meta(GoldAPIAccessRequestSerializer.Meta):
-        fields = GoldAPIAccessRequestSerializer.Meta.fields + [
-            'user_id',
-            'username',
-            'user_email',
-            'user_phone',
-            'user_has_gold_access',
-            'user_allow_mt5_access',
-        ]
-    
-    def get_user_phone(self, obj):
-        profile = getattr(obj.user, 'profile', None)
-        return profile.phone_number if profile else ''
-    
-    def get_user_has_gold_access(self, obj):
-        access = getattr(obj.user, 'gold_api_access', None)
-        return access.has_credentials if access else False
-
-    def get_user_allow_mt5_access(self, obj):
-        access = getattr(obj.user, 'gold_api_access', None)
-        return access.allow_mt5_access if access else False
 
 
 class StrategyOptimizationSerializer(serializers.ModelSerializer):

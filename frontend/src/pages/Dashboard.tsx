@@ -258,7 +258,7 @@ export default function Dashboard() {
             <div className="text-white text-xl">...</div>
           ) : (
             <p className="text-white text-2xl font-bold">
-              {stats.walletBalance.toLocaleString('fa-IR')} تومان
+              {Math.floor(stats.walletBalance / 1000).toLocaleString('fa-IR')} هزار تومان
             </p>
           )}
           <Link 

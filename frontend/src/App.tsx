@@ -1,3 +1,4 @@
+import React from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import Dashboard from './pages/Dashboard'
 import Landing from './pages/Landing'
@@ -13,6 +14,7 @@ import Tickets from './pages/Tickets'
 import Profile from './pages/Profile'
 import AdminSecurity from './pages/AdminSecurity'
 import AdminUserManagement from './pages/AdminUserManagement'
+import AdminAnalytics from './pages/AdminAnalytics'
 import SystemSettings from './pages/SystemSettings'
 import FreeGoldAPIGuide from './pages/FreeGoldAPIGuide'
 import NotFound from './pages/NotFound'
@@ -27,12 +29,34 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import { FeatureFlagsProvider } from './context/FeatureFlagsContext'
 import { ProfileCompletionProvider } from './context/ProfileCompletionContext'
 import GoogleAnalytics from './components/GoogleAnalytics'
+import { setupPageTracking } from './utils/analytics'
 
 // Component to conditionally show Landing or Dashboard
 function Home() {
   const { isAuthenticated, isLoading } = useAuth()
+  const [showLoading, setShowLoading] = React.useState(true)
   
-  if (isLoading) {
+  // Show loading spinner only for a short time (max 2 seconds)
+  // After that, show Landing if not authenticated, or Dashboard if authenticated
+  React.useEffect(() => {
+    if (!isLoading) {
+      setShowLoading(false)
+    } else {
+      // Set a timeout to stop showing loading after 2 seconds
+      const timer = setTimeout(() => {
+        setShowLoading(false)
+      }, 2000)
+      return () => clearTimeout(timer)
+    }
+  }, [isLoading])
+  
+  // If authenticated, show Dashboard (even if still loading)
+  if (isAuthenticated) {
+    return <Dashboard />
+  }
+  
+  // If still loading and we should show loading spinner, show it
+  if (isLoading && showLoading) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
         <div className="text-center">
@@ -43,10 +67,16 @@ function Home() {
     )
   }
   
-  return isAuthenticated ? <Dashboard /> : <Landing />
+  // Show Landing page (default for unauthenticated users)
+  return <Landing />
 }
 
 function App() {
+  // Setup analytics tracking
+  React.useEffect(() => {
+    setupPageTracking()
+  }, [])
+
   return (
     <Router>
       <GoogleAnalytics />
@@ -123,6 +153,14 @@ function App() {
                       element={
                         <ProtectedRoute>
                           <AdminUserManagement />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/admin/analytics"
+                      element={
+                        <ProtectedRoute>
+                          <AdminAnalytics />
                         </ProtectedRoute>
                       }
                     />

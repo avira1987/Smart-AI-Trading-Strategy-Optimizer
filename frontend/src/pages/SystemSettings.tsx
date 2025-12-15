@@ -7,8 +7,6 @@ import {
   updateSystemSettings,
   clearAICache,
   type SystemSettingsResponse,
-  getGapGPTModels,
-  type GapGPTModel,
   checkGapGPTBalance,
   type GapGPTBalanceResponse,
 } from '../api/client'
@@ -22,15 +20,12 @@ export default function SystemSettings() {
   const [settingsLoading, setSettingsLoading] = useState(false)
   const [settingsActionLoading, setSettingsActionLoading] = useState(false)
   const [clearingCache, setClearingCache] = useState(false)
-  const [models, setModels] = useState<GapGPTModel[]>([])
-  const [loadingModels, setLoadingModels] = useState(false)
   const [gapgptBalance, setGapgptBalance] = useState<GapGPTBalanceResponse['data'] | null>(null)
   const [loadingBalance, setLoadingBalance] = useState(false)
 
   useEffect(() => {
     if (isAdmin) {
       loadSystemSettings()
-      loadModels()
       loadGapGPTBalance()
     }
   }, [isAdmin])
@@ -61,20 +56,6 @@ export default function SystemSettings() {
     }
   }
 
-  const loadModels = async () => {
-    try {
-      setLoadingModels(true)
-      const response = await getGapGPTModels()
-      if (response.data.status === 'success') {
-        setModels(response.data.models || [])
-      }
-    } catch (error) {
-      console.error('Error loading models:', error)
-    } finally {
-      setLoadingModels(false)
-    }
-  }
-
   const loadGapGPTBalance = async () => {
     try {
       setLoadingBalance(true)
@@ -91,28 +72,6 @@ export default function SystemSettings() {
       }
     } finally {
       setLoadingBalance(false)
-    }
-  }
-
-  const handleModelCostChange = async (modelId: string, cost: number) => {
-    if (!systemSettings) return
-    
-    const updatedCosts = {
-      ...(systemSettings.model_costs || {}),
-      [modelId]: cost
-    }
-    
-    try {
-      setSettingsActionLoading(true)
-      const response = await updateSystemSettings({
-        model_costs: updatedCosts
-      })
-      setSystemSettings(response.data)
-      showToast('هزینه مدل به‌روزرسانی شد', { type: 'success' })
-    } catch (error: any) {
-      showToast('خطا در به‌روزرسانی هزینه مدل', { type: 'error' })
-    } finally {
-      setSettingsActionLoading(false)
     }
   }
 
@@ -209,7 +168,7 @@ export default function SystemSettings() {
         {/* GapGPT Account Balance */}
         <div className="bg-gray-900 rounded-lg p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-white">موجودی حساب GapGPT</h3>
+            <h3 className="text-lg font-semibold text-white">موجودی حساب AI</h3>
             <button
               onClick={loadGapGPTBalance}
               disabled={loadingBalance}
@@ -279,15 +238,7 @@ export default function SystemSettings() {
               {gapgptBalance.is_low_balance && (
                 <div className="mt-3 p-3 bg-yellow-900/30 border border-yellow-700 rounded-lg">
                   <p className="text-yellow-300 text-sm">
-                    ⚠️ موجودی حساب GapGPT کم است. لطفاً حساب را در{' '}
-                    <a 
-                      href="https://gapgpt.app" 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="underline hover:text-yellow-200"
-                    >
-                      gapgpt.app
-                    </a>
+                    ⚠️ موجودی حساب AI کم است. لطفاً حساب را شارژ کنید.
                     {' '}شارژ کنید.
                   </p>
                 </div>
@@ -377,191 +328,54 @@ export default function SystemSettings() {
               </div>
             </div>
 
-            {/* Cost Settings */}
+            {/* Profit Margin Settings */}
             <div className="bg-gray-900 rounded-lg p-5 space-y-4">
-              <h4 className="text-lg font-semibold text-white">تنظیمات هزینه‌ها</h4>
+              <h4 className="text-lg font-semibold text-white">تنظیمات ضریب سود</h4>
               
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-2">
-                    هزینه هر 1000 توکن (تومان)
+                    ضریب سود بر قیمت API
                   </label>
                   <input
                     type="number"
-                    value={systemSettings.token_cost_per_1000 || ''}
+                    value={systemSettings.profit_margin_multiplier || ''}
                     onChange={(e) => {
                       const value = parseFloat(e.target.value)
-                      if (!isNaN(value) && value >= 0) {
-                        setSystemSettings({ ...systemSettings, token_cost_per_1000: value })
+                      if (!isNaN(value) && value > 0) {
+                        setSystemSettings({ ...systemSettings, profit_margin_multiplier: value })
                       }
                     }}
                     onBlur={async () => {
-                      if (systemSettings.token_cost_per_1000 !== undefined) {
+                      if (systemSettings.profit_margin_multiplier !== undefined) {
                         try {
                           setSettingsActionLoading(true)
                           const response = await updateSystemSettings({
-                            token_cost_per_1000: systemSettings.token_cost_per_1000,
+                            profit_margin_multiplier: systemSettings.profit_margin_multiplier,
                           })
                           setSystemSettings(response.data)
-                          showToast('هزینه توکن به‌روزرسانی شد', { type: 'success' })
+                          const profitPercent = ((systemSettings.profit_margin_multiplier - 1) * 100).toFixed(2)
+                          showToast(`ضریب سود به‌روزرسانی شد (${profitPercent}% سود)`, { type: 'success' })
                         } catch (error: any) {
-                          showToast('خطا در به‌روزرسانی هزینه توکن', { type: 'error' })
+                          showToast('خطا در به‌روزرسانی ضریب سود', { type: 'error' })
                         } finally {
                           setSettingsActionLoading(false)
                         }
                       }
                     }}
                     className="w-full px-4 py-2 bg-gray-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    min="0"
-                    step="0.01"
+                    min="1"
+                    step="0.0001"
+                    placeholder="1.2000"
                   />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    هزینه هر بک‌تست (تومان)
-                  </label>
-                  <input
-                    type="number"
-                    value={systemSettings.backtest_cost || ''}
-                    onChange={(e) => {
-                      const value = parseFloat(e.target.value)
-                      if (!isNaN(value) && value >= 0) {
-                        setSystemSettings({ ...systemSettings, backtest_cost: value })
-                      }
-                    }}
-                    onBlur={async () => {
-                      if (systemSettings.backtest_cost !== undefined) {
-                        try {
-                          setSettingsActionLoading(true)
-                          const response = await updateSystemSettings({
-                            backtest_cost: systemSettings.backtest_cost,
-                          })
-                          setSystemSettings(response.data)
-                          showToast('هزینه بک‌تست به‌روزرسانی شد', { type: 'success' })
-                        } catch (error: any) {
-                          showToast('خطا در به‌روزرسانی هزینه بک‌تست', { type: 'error' })
-                        } finally {
-                          setSettingsActionLoading(false)
-                        }
-                      }
-                    }}
-                    className="w-full px-4 py-2 bg-gray-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    min="0"
-                    step="0.01"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    هزینه پردازش هر استراتژی (تومان)
-                  </label>
-                  <input
-                    type="number"
-                    value={systemSettings.strategy_processing_cost || ''}
-                    onChange={(e) => {
-                      const value = parseFloat(e.target.value)
-                      if (!isNaN(value) && value >= 0) {
-                        setSystemSettings({ ...systemSettings, strategy_processing_cost: value })
-                      }
-                    }}
-                    onBlur={async () => {
-                      if (systemSettings.strategy_processing_cost !== undefined) {
-                        try {
-                          setSettingsActionLoading(true)
-                          const response = await updateSystemSettings({
-                            strategy_processing_cost: systemSettings.strategy_processing_cost,
-                          })
-                          setSystemSettings(response.data)
-                          showToast('هزینه پردازش استراتژی به‌روزرسانی شد', { type: 'success' })
-                        } catch (error: any) {
-                          showToast('خطا در به‌روزرسانی هزینه پردازش استراتژی', { type: 'error' })
-                        } finally {
-                          setSettingsActionLoading(false)
-                        }
-                      }
-                    }}
-                    className="w-full px-4 py-2 bg-gray-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    min="0"
-                    step="0.01"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    مبلغ هدیه ثبت‌نام (تومان)
-                  </label>
-                  <input
-                    type="number"
-                    value={systemSettings.registration_bonus || ''}
-                    onChange={(e) => {
-                      const value = parseFloat(e.target.value)
-                      if (!isNaN(value) && value >= 0) {
-                        setSystemSettings({ ...systemSettings, registration_bonus: value })
-                      }
-                    }}
-                    onBlur={async () => {
-                      if (systemSettings.registration_bonus !== undefined) {
-                        try {
-                          setSettingsActionLoading(true)
-                          const response = await updateSystemSettings({
-                            registration_bonus: systemSettings.registration_bonus,
-                          })
-                          setSystemSettings(response.data)
-                          showToast('مبلغ هدیه ثبت‌نام به‌روزرسانی شد', { type: 'success' })
-                        } catch (error: any) {
-                          showToast('خطا در به‌روزرسانی مبلغ هدیه ثبت‌نام', { type: 'error' })
-                        } finally {
-                          setSettingsActionLoading(false)
-                        }
-                      }
-                    }}
-                    className="w-full px-4 py-2 bg-gray-800 text-white rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    min="0"
-                    step="0.01"
-                  />
-                </div>
-
-                {/* تنظیمات هزینه مدل‌ها */}
-                <div className="mt-6 pt-6 border-t border-gray-700">
-                  <h5 className="text-md font-semibold text-white mb-3">هزینه هر کلمه برای مدل‌های AI (تومان)</h5>
-                  {loadingModels ? (
-                    <div className="text-gray-400 text-center py-4">در حال بارگذاری مدل‌ها...</div>
-                  ) : models.length === 0 ? (
-                    <div className="text-yellow-400 text-center py-4 text-sm">
-                      هیچ مدلی یافت نشد. لطفاً کلید API GPT را در تنظیمات اضافه کنید.
-                    </div>
-                  ) : (
-                    <div className="space-y-3 max-h-[400px] overflow-y-auto">
-                      {models.map((model) => {
-                        const currentCost = systemSettings?.model_costs?.[model.id] || 0.001
-                        return (
-                          <div key={model.id} className="flex items-center justify-between bg-gray-800 p-3 rounded">
-                            <div className="flex-1">
-                              <span className="text-white font-medium">{model.name}</span>
-                              {model.owned_by && (
-                                <span className="text-gray-400 text-sm mr-2">({model.owned_by})</span>
-                              )}
-                            </div>
-                            <input
-                              type="number"
-                              value={currentCost}
-                              onChange={(e) => {
-                                const value = parseFloat(e.target.value)
-                                if (!isNaN(value) && value >= 0) {
-                                  handleModelCostChange(model.id, value)
-                                }
-                              }}
-                              className="w-32 px-3 py-1 bg-gray-700 text-white rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              min="0"
-                              step="0.0001"
-                              placeholder="0.001"
-                            />
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
+                  <p className="text-xs text-gray-400 mt-1">
+                    مثال: 1.2 = 20% سود، 1.5 = 50% سود، 2.0 = 100% سود
+                    {systemSettings.profit_margin_multiplier && (
+                      <span className="text-green-400 mr-2">
+                        (سود فعلی: {((systemSettings.profit_margin_multiplier - 1) * 100).toFixed(2)}%)
+                      </span>
+                    )}
+                  </p>
                 </div>
               </div>
             </div>

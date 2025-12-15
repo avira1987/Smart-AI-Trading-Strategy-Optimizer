@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react'
 import { checkAuth, logout as logoutAPI } from '../api/auth'
-import type { GoldAPIAccessInfo } from '../api/client'
 
 interface User {
   id: number
@@ -12,7 +11,6 @@ interface User {
   last_name?: string
   is_staff?: boolean
   is_superuser?: boolean
-  gold_api_access?: GoldAPIAccessInfo
 }
 
 interface AuthContextType {

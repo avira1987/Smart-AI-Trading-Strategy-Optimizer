@@ -78,7 +78,7 @@ export default function StrategyQuestions({ strategyId, onComplete }: StrategyQu
     } catch (error: any) {
       const errorMessage = error?.response?.data?.message || 
                           error?.message || 
-                          'خطا در تولید سوالات. لطفاً GapGPT API را بررسی کنید.'
+                          'خطا در تولید سوالات. لطفاً API را بررسی کنید.'
       showToast(errorMessage.replace(/\n/g, ' '), { type: 'error' })
       console.error('Error generating questions:', error)
       console.error('Error response:', error?.response?.data)
@@ -302,7 +302,7 @@ export default function StrategyQuestions({ strategyId, onComplete }: StrategyQu
         </h3>
         <p className="text-blue-700 text-sm">
           برای تبدیل دقیق‌تر استراتژی به مدل قابل اجرا، لطفاً به سوالات زیر پاسخ دهید.
-          سیستم از GapGPT برای تولید سوالات هوشمند استفاده می‌کند.
+          سیستم از هوش مصنوعی برای تولید سوالات هوشمند استفاده می‌کند.
         </p>
       </div>
 

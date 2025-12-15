@@ -24,16 +24,28 @@ from .views import (
     AchievementViewSet,
     UserAchievementViewSet,
     GapGPTViewSet,
+    OpenAIViewSet,
     AdminUserManagementView,
 )
 from .auth_views import SendOTPView, VerifyOTPView, check_auth, logout, get_csrf_token, check_profile_completion, update_profile, check_ip_location, get_user_activity_logs
 from .captcha_views import GetCaptchaView
-from .gold_price_views import GoldPriceView
-from .gold_access_views import GoldAPIAccessRequestViewSet, UserGoldAPIAccessView
 from .demo_trading_views import (
     DemoAccountView, DemoTradeView, DemoCloseTradeView, DemoUpdatePricesView
 )
 from .security_views import SecurityManagementView, SecurityLogsView
+from .analytics_views import (
+    GoogleAnalyticsStatsView,
+    GoogleAnalyticsPagesView,
+    GoogleAnalyticsTimeSeriesView,
+    DatabaseAnalyticsStatsView,
+    DatabaseAnalyticsPagesView,
+    DatabaseAnalyticsUsersView,
+    DatabaseAnalyticsTimeSeriesView,
+    TrackSessionView,
+    TrackPageVisitView,
+    EndPageVisitView,
+    EndSessionView,
+)
 
 router = DefaultRouter()
 router.register(r'apis', APIConfigurationViewSet, basename='api')
@@ -49,11 +61,11 @@ router.register(r'wallets', WalletViewSet, basename='wallet')
 router.register(r'ai-recommendations', AIRecommendationViewSet, basename='ai-recommendation')
 router.register(r'payments', PaymentViewSet, basename='payment')
 router.register(r'strategy-optimizations', StrategyOptimizationViewSet, basename='strategy-optimization')
-router.register(r'gold-access/requests', GoldAPIAccessRequestViewSet, basename='gold-access-request')
 router.register(r'gamification/scores', UserScoreViewSet, basename='user-score')
 router.register(r'gamification/achievements', AchievementViewSet, basename='achievement')
 router.register(r'gamification/user-achievements', UserAchievementViewSet, basename='user-achievement')
 router.register(r'gapgpt', GapGPTViewSet, basename='gapgpt')
+router.register(r'openai', OpenAIViewSet, basename='openai')
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -74,9 +86,6 @@ urlpatterns = [
     # System settings
     path('system-settings/', SystemSettingsView.as_view(), name='system_settings'),
     path('admin/clear-ai-cache/', ClearAICacheView.as_view(), name='clear_ai_cache'),
-    # Gold price endpoints
-    path('gold-price/', GoldPriceView.as_view(), name='gold_price'),
-    path('gold-access/self/', UserGoldAPIAccessView.as_view(), name='gold_api_access_self'),
     # Demo trading endpoints
     path('demo/account/', DemoAccountView.as_view(), name='demo_account'),
     path('demo/trades/', DemoTradeView.as_view(), name='demo_trades'),
@@ -91,5 +100,18 @@ urlpatterns = [
     path('admin/security-logs/', SecurityLogsView.as_view(), name='security_logs'),
     # User management (admin only)
     path('admin/users/', AdminUserManagementView.as_view(), name='admin_user_management'),
+    # Analytics endpoints (admin only)
+    path('admin/analytics/google/stats/', GoogleAnalyticsStatsView.as_view(), name='google_analytics_stats'),
+    path('admin/analytics/google/pages/', GoogleAnalyticsPagesView.as_view(), name='google_analytics_pages'),
+    path('admin/analytics/google/timeseries/', GoogleAnalyticsTimeSeriesView.as_view(), name='google_analytics_timeseries'),
+    path('admin/analytics/database/stats/', DatabaseAnalyticsStatsView.as_view(), name='database_analytics_stats'),
+    path('admin/analytics/database/pages/', DatabaseAnalyticsPagesView.as_view(), name='database_analytics_pages'),
+    path('admin/analytics/database/users/', DatabaseAnalyticsUsersView.as_view(), name='database_analytics_users'),
+    path('admin/analytics/database/timeseries/', DatabaseAnalyticsTimeSeriesView.as_view(), name='database_analytics_timeseries'),
+    # Track endpoints (authenticated users)
+    path('analytics/track/session/', TrackSessionView.as_view(), name='track_session'),
+    path('analytics/track/page/', TrackPageVisitView.as_view(), name='track_page_visit'),
+    path('analytics/track/page/end/', EndPageVisitView.as_view(), name='end_page_visit'),
+    path('analytics/track/session/end/', EndSessionView.as_view(), name='end_session'),
 ]
 

@@ -12,6 +12,7 @@ interface Strategy {
   description: string
   uploaded_at: string
   is_primary: boolean
+  processing_status?: 'not_processed' | 'processing' | 'processed' | 'failed'
 }
 
 // Job interface removed - not used
@@ -464,11 +465,42 @@ export default function StrategyTesting() {
         console.error('Error running backtest:', error)
         setIsProcessingBacktest(false)
         
+        // Check for 403 Forbidden error
+        if (error?.response?.status === 403) {
+          const errorMessage = error?.response?.data?.error || 
+                              error?.response?.data?.message || 
+                              error?.response?.data?.detail ||
+                              'دسترسی مجاز نیست. لطفاً مطمئن شوید که به این استراتژی دسترسی دارید.'
+          
+          // پیام‌های خاص برای انواع مختلف خطای 403
+          let userFriendlyMessage = errorMessage
+          
+          if (errorMessage.includes('دسترسی ندارید') || errorMessage.includes('دسترسی منقضی')) {
+            userFriendlyMessage = 'شما به این استراتژی دسترسی ندارید یا دسترسی شما منقضی شده است. لطفاً استراتژی دیگری انتخاب کنید یا دسترسی خود را تمدید کنید.'
+          } else if (errorMessage.includes('حداکثر تعداد بک‌تست')) {
+            userFriendlyMessage = 'حداکثر تعداد بک‌تست در دوره آزمایشی مصرف شده است. برای ادامه استفاده، لطفاً دسترسی خود را خریداری کنید.'
+          } else if (errorMessage.includes('CSRF') || errorMessage.includes('csrf')) {
+            userFriendlyMessage = 'خطای امنیتی. لطفاً صفحه را رفرش کنید و دوباره تلاش کنید.'
+          }
+          
+          showToast(userFriendlyMessage, { type: 'error' })
+          setError(userFriendlyMessage)
+          return
+        }
+        
         // Check for rate limit error from backend
         if (error?.response?.status === 429 || (error?.response?.data?.error && error.response.data.error.includes('rate limit'))) {
           const rateLimitMsg = error?.response?.data?.message || 'شما می‌توانید فقط یک بار در دقیقه بک‌تست بگیرید. لطفاً صبر کنید'
           showToast(rateLimitMsg, { type: 'error' })
           setError(rateLimitMsg)
+          return
+        }
+        
+        // Check for strategy not processed error
+        if (error?.response?.status === 400 && (error?.response?.data?.error === 'strategy_not_processed' || error?.response?.data?.message?.includes('پردازش شده'))) {
+          const notProcessedMsg = error?.response?.data?.message || 'فقط استراتژی‌هایی که توسط هوش مصنوعی پردازش شده‌اند قابلیت بک‌تست دارند. لطفاً ابتدا استراتژی را پردازش کنید.'
+          showToast(notProcessedMsg, { type: 'error' })
+          setError(notProcessedMsg)
           return
         }
         
@@ -502,8 +534,16 @@ export default function StrategyTesting() {
           setError(finalErrorMessage)
           return
         }
-        setError('خطا در شروع بک تست: ' + (error.message || 'خطای نامشخص'))
-        showToast('خطا در شروع بک تست: ' + (error.message || 'خطای نامشخص'), { type: 'error' })
+        
+        // برای سایر خطاها، پیام خطا را از response استخراج می‌کنیم
+        const errorMessage = error?.response?.data?.error || 
+                            error?.response?.data?.message || 
+                            error?.response?.data?.detail ||
+                            error?.message || 
+                            'خطای نامشخص'
+        
+        setError('خطا در شروع بک تست: ' + errorMessage)
+        showToast('خطا در شروع بک تست: ' + errorMessage, { type: 'error' })
       }
     }, 0)
   })
@@ -533,21 +573,36 @@ export default function StrategyTesting() {
               disabled={runningJob !== null}
             >
               <option value="">یک استراتژی انتخاب کنید...</option>
-              {strategies.map((strategy) => (
-                <option key={strategy.id} value={strategy.id}>
-                  {strategy.name}
-                  {strategy.is_primary ? ' (استراتژی اصلی)' : ''}
-                  {' - '}
-                  {new Date(strategy.uploaded_at).toLocaleDateString()}
-                </option>
-              ))}
+              {strategies
+                .filter((strategy) => strategy.processing_status === 'processed')
+                .map((strategy) => (
+                  <option key={strategy.id} value={strategy.id}>
+                    {strategy.name}
+                    {strategy.is_primary ? ' (استراتژی اصلی)' : ''}
+                    {' - '}
+                    {new Date(strategy.uploaded_at).toLocaleDateString()}
+                  </option>
+                ))}
             </select>
+            
+            {strategies.filter((s) => s.processing_status === 'processed').length === 0 && strategies.length > 0 && (
+              <div className="mt-3 p-3 bg-yellow-900 border border-yellow-700 rounded">
+                <p className="text-yellow-200 text-sm">
+                  <strong>⚠️ هشدار:</strong> هیچ استراتژی پردازش شده‌ای یافت نشد. لطفاً ابتدا استراتژی‌های خود را در صفحه استراتژی‌ها پردازش کنید.
+                </p>
+              </div>
+            )}
             
             {selectedStrategyData && (
               <div className="mt-3 p-3 bg-gray-700 rounded">
                 <p className="text-gray-300 text-sm">
                   <strong>توضیحات:</strong> {selectedStrategyData.description || 'بدون توضیح'}
                 </p>
+                {selectedStrategyData.processing_status !== 'processed' && (
+                  <p className="text-yellow-300 text-sm mt-2">
+                    <strong>⚠️ توجه:</strong> این استراتژی هنوز پردازش نشده است. برای انجام بک‌تست، ابتدا استراتژی را پردازش کنید.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -761,7 +816,7 @@ export default function StrategyTesting() {
                   ))}
                 </>
               ) : (
-                <option disabled>هیچ مدلی یافت نشد - لطفاً کلید API GapGPT را در تنظیمات اضافه کنید</option>
+                <option disabled>هیچ مدلی یافت نشد - لطفاً کلید API را در تنظیمات اضافه کنید</option>
               )}
             </select>
             {loadingModels && (
@@ -792,9 +847,6 @@ export default function StrategyTesting() {
                   <p className="text-xs text-gray-400 mt-1">
                     <strong>💰 هزینه:</strong> تقریباً 0.001 تومان به ازای هر کلمه (ورودی + خروجی)
                   </p>
-                  <p className="text-xs text-yellow-400 mt-2">
-                    ⚠️ برای استفاده، ابتدا کلید API GapGPT را در تنظیمات اضافه کنید.
-                  </p>
                 </div>
               )}
               {!aiProvider && !loadingModels && (
@@ -803,7 +855,7 @@ export default function StrategyTesting() {
                     <strong>⚠️ هشدار:</strong> هیچ مدلی در دسترس نیست.
                   </p>
                   <p className="text-xs text-gray-400">
-                    لطفاً کلید API GapGPT را در تنظیمات اضافه کنید تا لیست مدل‌ها نمایش داده شود.
+                    لطفاً کلید API را در تنظیمات اضافه کنید تا لیست مدل‌ها نمایش داده شود.
                   </p>
                 </div>
               )}
@@ -817,13 +869,34 @@ export default function StrategyTesting() {
             </div>
           )}
 
+          {/* Warning for non-processed strategy */}
+          {selectedStrategyData && selectedStrategyData.processing_status !== 'processed' && (
+            <div className="mb-4 p-3 bg-yellow-900 border border-yellow-700 rounded">
+              <p className="text-yellow-200 text-sm">
+                <strong>⚠️ توجه:</strong> این استراتژی هنوز توسط هوش مصنوعی پردازش نشده است. برای انجام بک‌تست، لطفاً ابتدا به صفحه استراتژی‌ها بروید و استراتژی را پردازش کنید.
+              </p>
+            </div>
+          )}
+
           {/* Run Button */}
           <div className="flex gap-3">
             <button
               type="submit"
-              disabled={runningJob !== null || isProcessingBacktest || !selectedStrategy || !symbol || symbol.trim() === ''}
+              disabled={
+                runningJob !== null || 
+                isProcessingBacktest || 
+                !selectedStrategy || 
+                !symbol || 
+                symbol.trim() === '' ||
+                selectedStrategyData?.processing_status !== 'processed'
+              }
               className={`btn-success ${
-                runningJob !== null || isProcessingBacktest || !selectedStrategy || !symbol || symbol.trim() === ''
+                runningJob !== null || 
+                isProcessingBacktest || 
+                !selectedStrategy || 
+                !symbol || 
+                symbol.trim() === '' ||
+                selectedStrategyData?.processing_status !== 'processed'
                   ? 'opacity-50 cursor-not-allowed'
                   : ''
               }`}

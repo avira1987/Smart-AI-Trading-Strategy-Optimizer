@@ -643,6 +643,64 @@ export default function Results() {
                   )
                 })()}
 
+                {/* Improvement Recommendations Section */}
+                {selectedResult.improvement_recommendations && selectedResult.improvement_recommendations.length > 0 && (
+                  <div className="card-standard mb-6">
+                    <h2 className="text-xl font-semibold text-white mb-4 text-right flex items-center gap-2">
+                      <span>🐛</span>
+                      <span>باگ‌های بهبود استراتژی</span>
+                    </h2>
+                    <div className="space-y-3">
+                      {selectedResult.improvement_recommendations.map((rec, index) => {
+                        const priorityColors = {
+                          critical: 'bg-red-900/30 border-red-700 text-red-200',
+                          high: 'bg-orange-900/30 border-orange-700 text-orange-200',
+                          medium: 'bg-yellow-900/30 border-yellow-700 text-yellow-200',
+                          low: 'bg-blue-900/30 border-blue-700 text-blue-200'
+                        }
+                        const priorityLabels = {
+                          critical: 'بحرانی',
+                          high: 'بالا',
+                          medium: 'متوسط',
+                          low: 'پایین'
+                        }
+                        return (
+                          <div
+                            key={index}
+                            className={`border rounded-lg p-4 ${priorityColors[rec.priority] || priorityColors.medium}`}
+                          >
+                            <div className="flex items-start justify-between gap-3 mb-2">
+                              <div className="flex-1">
+                                <h3 className="font-semibold text-lg mb-1">{rec.title}</h3>
+                                <p className="text-sm opacity-90 mb-2">{rec.description}</p>
+                                <div className="flex items-center gap-2 mt-3">
+                                  <span className="text-xs px-2 py-1 bg-black/20 rounded">
+                                    اولویت: {priorityLabels[rec.priority] || 'متوسط'}
+                                  </span>
+                                  <span className="text-xs px-2 py-1 bg-black/20 rounded">
+                                    اقدام: {rec.action}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <div className="mt-4 p-4 bg-yellow-900/20 border border-yellow-700/50 rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <span className="text-yellow-400 text-xl">⚠️</span>
+                        <div className="flex-1">
+                          <p className="text-yellow-200 font-semibold mb-1">توصیه مهم:</p>
+                          <p className="text-yellow-100 text-sm">
+                            برای اعمال این توصیه‌ها، لطفاً به بخش استراتژی‌ها بروید و استراتژی خود را دوباره پردازش کنید.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* Key Metrics */}
                 <div className="card-standard mb-6">
                   <h2 className="text-xl font-semibold text-white mb-4 text-right">شاخص‌های عملکرد</h2>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { getStrategies, addStrategy, deleteStrategy as apiDeleteStrategy, processStrategy, getStrategyProgress, getAPIConfigurations, setPrimaryStrategy, downloadStrategy, getStrategyFileContent, toggleStrategyActive, ensureCsrfToken } from '../api/client'
+import { getStrategies, addStrategy, deleteStrategy as apiDeleteStrategy, processStrategy, getStrategyProgress, getAPIConfigurations, setPrimaryStrategy, downloadStrategy, getStrategyFileContent, toggleStrategyActive, ensureCsrfToken, getJobs } from '../api/client'
 import { useToast } from './ToastProvider'
 import StrategyQuestions from './StrategyQuestions'
 import StrategyOptimizer from './StrategyOptimizer'
@@ -23,6 +23,7 @@ interface TradingStrategy {
   processing_error?: string
   analysis_sources?: any
   analysis_sources_display?: any
+  has_backtest_capability?: boolean
 }
 
 export default function Strategies() {
@@ -31,6 +32,8 @@ export default function Strategies() {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [file, setFile] = useState<File | null>(null)
+  const [inputMode, setInputMode] = useState<'file' | 'text'>('file')
+  const [strategyText, setStrategyText] = useState('')
   const [expandedStrategyId, setExpandedStrategyId] = useState<number | null>(null)
   const [collapsedQuestionsStrategyIds, setCollapsedQuestionsStrategyIds] = useState<Set<number>>(new Set())
   const [expandedDetailsStrategyIds, setExpandedDetailsStrategyIds] = useState<Set<number>>(new Set())
@@ -40,8 +43,10 @@ export default function Strategies() {
   const [selectedStrategyForGapGPT, setSelectedStrategyForGapGPT] = useState<TradingStrategy | null>(null)
   const [gapGPTFileContent, setGapGPTFileContent] = useState<string>('')
   const [loadingFileContent, setLoadingFileContent] = useState(false)
+  const [strategiesWithRecommendations, setStrategiesWithRecommendations] = useState<Set<number>>(new Set())
   const { showToast } = useToast()
   const expandedStrategyIdRef = useRef<number | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const rateLimitClickSubmit = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'strategies-submit' })
   const rateLimitClickToggle = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'strategies-toggle' })
   const rateLimitClickDelete = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'strategies-delete' })
@@ -56,6 +61,7 @@ export default function Strategies() {
   useEffect(() => {
     loadStrategies()
     checkAIProvider()
+    checkImprovementRecommendations()
     
     // Check AI provider status periodically with throttling
     const interval = setInterval(() => {
@@ -93,6 +99,40 @@ export default function Strategies() {
       console.error('Error checking AI provider API:', error)
       // Only update if it was previously true
       setHasAIProvider(prev => prev ? false : prev)
+    }
+  }
+
+  const checkImprovementRecommendations = async () => {
+    try {
+      const jobsResponse = await getJobs()
+      const normalizeArrayResponse = <T = any>(data: any): T[] => {
+        if (!data) return []
+        if (Array.isArray(data)) return data
+        if (Array.isArray(data?.results)) return data.results
+        if (Array.isArray(data?.data)) return data.data
+        return []
+      }
+      
+      const jobsData = normalizeArrayResponse(jobsResponse.data)
+      const strategiesWithRecs = new Set<number>()
+      
+      // Check each job's result for improvement recommendations
+      for (const job of jobsData) {
+        if (job.result && job.result.improvement_recommendations && 
+            Array.isArray(job.result.improvement_recommendations) && 
+            job.result.improvement_recommendations.length > 0) {
+          // Get strategy ID from job
+          if (job.strategy && typeof job.strategy === 'object' && job.strategy.id) {
+            strategiesWithRecs.add(job.strategy.id)
+          } else if (typeof job.strategy === 'number') {
+            strategiesWithRecs.add(job.strategy)
+          }
+        }
+      }
+      
+      setStrategiesWithRecommendations(strategiesWithRecs)
+    } catch (error) {
+      console.error('Error checking improvement recommendations:', error)
     }
   }
 
@@ -147,8 +187,20 @@ export default function Strategies() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!file) {
-      showToast('Please select a file', { type: 'warning' })
+    
+    // Validate based on input mode
+    if (inputMode === 'file') {
+      if (!file) {
+        showToast('لطفاً یک فایل انتخاب کنید', { type: 'warning' })
+        return
+      }
+    } else if (inputMode === 'text') {
+      if (!strategyText.trim()) {
+        showToast('لطفاً متن استراتژی را وارد کنید', { type: 'warning' })
+        return
+      }
+    } else {
+      showToast('لطفاً یک روش ورود استراتژی را انتخاب کنید', { type: 'warning' })
       return
     }
 
@@ -157,24 +209,60 @@ export default function Strategies() {
         const formData = new FormData()
         formData.append('name', name)
         formData.append('description', description)
-        formData.append('strategy_file', file!)
+        
+        if (inputMode === 'file' && file) {
+          formData.append('strategy_file', file)
+        } else if (inputMode === 'text' && strategyText.trim()) {
+          formData.append('strategy_text', strategyText.trim())
+        }
 
-        console.log('Submitting strategy:', { name, description, file: file.name }) // Debug log
+        console.log('Submitting strategy:', { name, description, inputMode, file: file?.name, textLength: strategyText.length }) // Debug log
         
         const response = await addStrategy(formData)
         console.log('Strategy upload response:', response) // Debug log
         
-        showToast('Strategy uploaded successfully!', { type: 'success' })
+        showToast('استراتژی با موفقیت ثبت شد!', { type: 'success' })
         setShowModal(false)
         setName('')
         setDescription('')
         setFile(null)
+        setStrategyText('')
+        setInputMode('file')
         
         // Reload strategies after successful upload
         await loadStrategies()
       } catch (error: any) {
         console.error('Error uploading strategy:', error)
-        showToast('Error uploading strategy: ' + (error?.response?.data?.detail || 'Unknown error'), { type: 'error' })
+        
+        // Extract error message from different possible locations
+        let errorMessage = 'خطای نامشخص'
+        
+        if (error?.response?.data) {
+          // Try different error message fields
+          errorMessage = 
+            error.response.data.detail ||
+            error.response.data.message ||
+            error.response.data.error ||
+            (typeof error.response.data === 'string' ? error.response.data : 'خطای نامشخص')
+          
+          // If it's an object with multiple errors, try to format it
+          if (typeof error.response.data === 'object' && !error.response.data.detail && !error.response.data.message) {
+            const errorKeys = Object.keys(error.response.data)
+            if (errorKeys.length > 0) {
+              const firstError = error.response.data[errorKeys[0]]
+              if (Array.isArray(firstError)) {
+                errorMessage = firstError[0]
+              } else if (typeof firstError === 'string') {
+                errorMessage = firstError
+              }
+            }
+          }
+        } else if (error?.message) {
+          errorMessage = error.message
+        }
+        
+        // Show more detailed error message
+        showToast(`خطا در ثبت استراتژی: ${errorMessage}`, { type: 'error', duration: 8000 })
       }
     })
     
@@ -584,6 +672,44 @@ export default function Strategies() {
               <div key={strategy.id} className="bg-gray-700 rounded-lg overflow-hidden">
                 {/* Header Section - Always Visible */}
                 <div className="p-4">
+                  {/* Improvement Recommendations Alert */}
+                  {strategiesWithRecommendations.has(strategy.id) && (
+                    <div className="mb-4 p-4 bg-yellow-900/30 border border-yellow-700 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <span className="text-yellow-400 text-2xl">⚠️</span>
+                        <div className="flex-1">
+                          <h4 className="text-yellow-200 font-semibold mb-1">هشدار: توصیه‌های بهبود موجود است</h4>
+                          <p className="text-yellow-100 text-sm mb-3">
+                            نتایج بک‌تست اخیر شما شامل توصیه‌هایی برای بهبود استراتژی است. برای مشاهده جزئیات به بخش نتایج بروید و برای اعمال تغییرات، استراتژی خود را دوباره پردازش کنید.
+                          </p>
+                          <button
+                            onClick={() => {
+                              window.location.href = '/results'
+                            }}
+                            className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm font-medium transition"
+                          >
+                            مشاهده نتایج و توصیه‌ها
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {/* Backtest Capability Warning */}
+                  {strategy.processing_status === 'processed' && strategy.has_backtest_capability === false && (
+                    <div className="mb-4 p-4 bg-red-900/30 border border-red-700 rounded-lg">
+                      <div className="flex items-start gap-3">
+                        <span className="text-red-400 text-2xl">⚠️</span>
+                        <div className="flex-1">
+                          <h4 className="text-red-200 font-semibold mb-1">قابلیت بک تست ندارد</h4>
+                          <p className="text-red-100 text-sm">
+                            خروجی بک تست این استراتژی صفر است. استراتژی خود را کامل یا حذف کنید.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
                   <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
                     {/* Strategy Name and Status */}
                     <div className="flex items-center gap-3 flex-wrap flex-1">
@@ -760,7 +886,7 @@ export default function Strategies() {
                         <span className="text-green-400 text-lg">✓</span>
                         <span className="text-green-400 font-semibold">نتیجه پردازش:</span>
                       </div>
-                      {/* دکمه GapGPT در بخش Details */}
+                      {/* دکمه پردازش با هوش مصنوعی در بخش Details */}
                       <button
                         onClick={() => handleOpenGapGPTModal(strategy)}
                         className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg transition text-sm font-semibold flex items-center gap-2"
@@ -989,7 +1115,7 @@ export default function Strategies() {
                               </div>
                             )}
                             
-                            {/* پیام راهنمایی برای تحلیل پایه - فقط اگر کلید GapGPT موجود نباشد */}
+                            {/* پیام راهنمایی برای تحلیل پایه - فقط اگر کلید AI موجود نباشد */}
                             {strategy.parsed_strategy_data.analysis.is_basic && !hasAIProvider && (
                               <div className="mt-3 p-3 bg-blue-900/30 rounded-lg border border-blue-700">
                                 <p className="text-blue-300 text-xs mb-2">
@@ -999,7 +1125,7 @@ export default function Strategies() {
                                 برای دریافت تحلیل پیشرفته با هوش مصنوعی:
                                   <br />
                                   <br />
-                                1. از GapGPT (حساب کاربری در <code>gapgpt.app</code>) یک کلید API فعال دریافت کنید
+                                1. یک کلید API فعال دریافت کنید
                                   <br />
                                   <br />
                                   2. در داشبورد، به بخش "تنظیمات API" بروید
@@ -1008,7 +1134,7 @@ export default function Strategies() {
                                   3. روی دکمه "افزودن کلید API" کلیک کنید
                                   <br />
                                   <br />
-                                4. ارائه‌دهنده را "GapGPT" انتخاب کنید
+                                4. ارائه‌دهنده مورد نظر را انتخاب کنید
                                   <br />
                                   <br />
                                   5. کلید API خود را وارد و ذخیره کنید
@@ -1079,7 +1205,7 @@ export default function Strategies() {
                               </div>
                             )}
                           </div>
-                          {/* پیام راهنمایی - فقط اگر کلید GapGPT موجود نباشد */}
+                          {/* پیام راهنمایی - فقط اگر کلید AI موجود نباشد */}
                           {!hasAIProvider && (
                             <div className="mt-3 p-3 bg-blue-900/30 rounded-lg border border-blue-700">
                               <p className="text-blue-300 text-xs mb-2">
@@ -1174,8 +1300,8 @@ export default function Strategies() {
       {showModal && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3 className="text-xl font-semibold text-white mb-4">آپلود استراتژی جدید</h3>
-            <form onSubmit={handleSubmit}>
+            <h3 className="text-xl font-semibold text-white mb-4">افزودن استراتژی جدید</h3>
+            <form onSubmit={handleSubmit} noValidate>
               <div className="mb-4">
                 <label className="label-standard">نام استراتژی</label>
                 <input
@@ -1198,26 +1324,98 @@ export default function Strategies() {
                   required
                 />
               </div>
+              
+              {/* انتخاب روش ورود استراتژی */}
               <div className="mb-4">
-                <label className="label-standard">فایل استراتژی</label>
-                <input
-                  type="file"
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
-                  accept=".txt,.md,.pdf,.doc,.docx"
-                  className="w-full px-4 py-2.5 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 file:cursor-pointer"
-                  required
-                />
+                <label className="label-standard mb-2 block">روش ورود استراتژی</label>
+                <div className="flex gap-4 mb-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="inputMode"
+                      value="file"
+                      checked={inputMode === 'file'}
+                      onChange={() => {
+                        setInputMode('file')
+                        setStrategyText('')
+                      }}
+                      className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 focus:ring-blue-500"
+                    />
+                    <span className="text-white">آپلود فایل</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="inputMode"
+                      value="text"
+                      checked={inputMode === 'text'}
+                      onChange={() => {
+                        setInputMode('text')
+                        setFile(null)
+                        // Clear file input value when switching to text mode
+                        if (fileInputRef.current) {
+                          fileInputRef.current.value = ''
+                        }
+                      }}
+                      className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 focus:ring-blue-500"
+                    />
+                    <span className="text-white">تایپ یا پیست متن</span>
+                  </label>
+                </div>
+                
+                <div>
+                  <label className="label-standard">فایل استراتژی</label>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    accept=".txt,.md,.pdf,.doc,.docx"
+                    disabled={inputMode === 'text'}
+                    className={`w-full px-4 py-2.5 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-700 file:cursor-pointer ${
+                      inputMode === 'text' 
+                        ? 'opacity-50 cursor-not-allowed file:cursor-not-allowed file:bg-gray-600 file:hover:bg-gray-600' 
+                        : ''
+                    }`}
+                    required={inputMode === 'file'}
+                    key="file-input"
+                  />
+                  <p className="text-gray-400 text-xs mt-2">فایل‌های مجاز: .txt, .md, .pdf, .doc, .docx</p>
+                </div>
+                
+                {inputMode === 'text' && (
+                  <div>
+                    <label className="label-standard">متن استراتژی</label>
+                    <textarea
+                      value={strategyText}
+                      onChange={(e) => setStrategyText(e.target.value)}
+                      className="textarea-standard"
+                      rows={12}
+                      placeholder="متن استراتژی خود را اینجا تایپ کنید یا پیست کنید..."
+                      required={inputMode === 'text'}
+                      key="text-input"
+                    />
+                    <p className="text-gray-400 text-xs mt-2">متن استراتژی خود را مستقیماً اینجا وارد کنید</p>
+                  </div>
+                )}
               </div>
+              
               <div className="flex gap-2">
                 <button
                   type="submit"
                   className="flex-1 btn-success"
                 >
-                  آپلود
+                  {inputMode === 'file' ? 'آپلود' : 'ثبت'}
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowModal(false)}
+                  onClick={() => {
+                    setShowModal(false)
+                    setName('')
+                    setDescription('')
+                    setFile(null)
+                    setStrategyText('')
+                    setInputMode('file')
+                  }}
                   className="flex-1 btn-secondary"
                 >
                   انصراف
@@ -1228,7 +1426,7 @@ export default function Strategies() {
         </div>
       )}
 
-      {/* GapGPT Modal */}
+      {/* AI Processing Modal */}
       {showGapGPTModal && selectedStrategyForGapGPT && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" style={{ direction: 'rtl' }}>
           <div className="bg-gray-800 rounded-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto">

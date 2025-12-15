@@ -11,15 +11,7 @@ import {
   getWalletBalance,
   chargeWallet,
   updateSystemSettings,
-  getUserGoldAPIAccess,
-  updateUserGoldAPIAccess,
-  createGoldAPIAccessRequest,
-  listGoldAPIAccessRequests,
-  cancelGoldAPIAccessRequest,
-  assignGoldAPIAccessRequest,
   getUserActivityLogs,
-  type GoldAPIAccessInfo,
-  type GoldAPIAccessRequest,
   type UserActivityLog,
 } from '../api/client'
 import { useFeatureFlags } from '../context/FeatureFlagsContext'
@@ -58,22 +50,6 @@ export default function Profile() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { liveTradingEnabled, isLoading: featureFlagsLoading, reload: reloadFeatureFlags } = useFeatureFlags()
   const [toggleLiveTradingLoading, setToggleLiveTradingLoading] = useState(false)
-  const [goldAccess, setGoldAccess] = useState<GoldAPIAccessInfo | null>(null)
-  const [goldAccessLoading, setGoldAccessLoading] = useState(false)
-  const [goldProviderInput, setGoldProviderInput] = useState('')
-  const [goldKeyInput, setGoldKeyInput] = useState('')
-  const [goldNotesInput, setGoldNotesInput] = useState('')
-  const [updatingGoldAccess, setUpdatingGoldAccess] = useState(false)
-  const [creatingGoldRequest, setCreatingGoldRequest] = useState(false)
-  const [goldRequests, setGoldRequests] = useState<GoldAPIAccessRequest[]>([])
-  const [goldRequestsLoading, setGoldRequestsLoading] = useState(false)
-  const [assigningRequestId, setAssigningRequestId] = useState<number | null>(null)
-  const [assignProvider, setAssignProvider] = useState('')
-  const [assignApiKey, setAssignApiKey] = useState('')
-  const [assignNotes, setAssignNotes] = useState('')
-  const [assignIsActive, setAssignIsActive] = useState(true)
-  const [assignAllowMt5, setAssignAllowMt5] = useState(false)
-  const [assignSubmitting, setAssignSubmitting] = useState(false)
   const [activityLogs, setActivityLogs] = useState<UserActivityLog[]>([])
   const [activityLogsLoading, setActivityLogsLoading] = useState(false)
   const navigate = useNavigate()
@@ -108,23 +84,6 @@ export default function Profile() {
   const profileUsernameDisplay = usernameLooksLikePhone
     ? profileNameFallback
     : user?.username?.trim() || profileNameFallback
-  const GOLD_API_ASSISTANCE_PRICE = 450000
-  const goldRequestStatusLabels: Record<string, string> = {
-    pending_payment: 'در انتظار پرداخت',
-    awaiting_admin: 'در انتظار ادمین',
-    completed: 'تکمیل شده',
-    cancelled: 'لغو شده',
-  }
-  const activeGoldRequest = goldRequests.find((req) => ['pending_payment', 'awaiting_admin'].includes(req.status))
-  const hasAdminAssignedApi = Boolean(goldAccess?.assigned_by_admin && goldAccess?.has_credentials)
-  const isAdminUser = isAdmin === true || user?.is_staff || user?.is_superuser
-  const hasMt5Delegate = Boolean(goldAccess?.allow_mt5_access)
-  const goldAccessStatusText = goldAccess?.has_credentials
-    ? hasAdminAssignedApi
-      ? 'کلید API توسط ادمین ثبت شده است'
-      : 'کلید API توسط شما ثبت شده و فعال است'
-    : 'کلید API فعالی ثبت نشده است'
-  const canCreateGoldRequest = !activeGoldRequest
 
   // Load profile and wallet when component mounts or user becomes available
   useEffect(() => {
@@ -151,9 +110,9 @@ export default function Profile() {
             }
             if (isMounted) {
               try {
-                await Promise.all([loadGoldAccess(), loadGoldRequests(), loadActivityLogs()])
-              } catch (goldError) {
-                console.error('Error loading gold access data:', goldError)
+                await loadActivityLogs()
+              } catch (error) {
+                console.error('Error loading activity logs:', error)
               }
             }
           }
@@ -178,9 +137,9 @@ export default function Profile() {
                   }
                   if (isMounted) {
                     try {
-                      await Promise.all([loadGoldAccess(), loadGoldRequests(), loadActivityLogs()])
-                    } catch (goldError) {
-                      console.error('Error loading gold access after auth:', goldError)
+                      await loadActivityLogs()
+                    } catch (error) {
+                      console.error('Error loading activity logs after auth:', error)
                     }
                   }
                 }
@@ -210,7 +169,6 @@ export default function Profile() {
   useEffect(() => {
     const paymentSuccess = searchParams.get('payment_success')
     const paymentError = searchParams.get('payment_error')
-    const goldPayment = searchParams.get('gold_api_payment')
 
     if (paymentSuccess === '1') {
       showToast('پرداخت با موفقیت انجام شد! حساب شما شارژ شد.', { type: 'success', duration: 5000 })
@@ -220,7 +178,6 @@ export default function Profile() {
       setSearchParams(searchParams, { replace: true })
       // Refresh wallet balance
       loadWalletBalance()
-      loadGoldRequests()
     } else if (paymentError) {
       const errorMessages: Record<string, string> = {
         'missing_params': 'پارامترهای پرداخت نامعتبر است',
@@ -239,14 +196,6 @@ export default function Profile() {
       searchParams.delete('payment_error')
       searchParams.delete('error')
       setSearchParams(searchParams, { replace: true })
-    }
-
-    if (goldPayment === '1') {
-      showToast('پرداخت شما ثبت شد. درخواست برای ادمین ارسال گردید.', { type: 'success', duration: 6000 })
-      searchParams.delete('gold_api_payment')
-      searchParams.delete('transaction_id')
-      setSearchParams(searchParams, { replace: true })
-      loadGoldRequests()
     }
   }, [searchParams, setSearchParams, showToast])
 
@@ -382,39 +331,6 @@ export default function Profile() {
     }
   }
 
-  const loadGoldAccess = async () => {
-    try {
-      setGoldAccessLoading(true)
-      const response = await getUserGoldAPIAccess()
-      const data = response.data as GoldAPIAccessInfo
-      setGoldAccess(data)
-      setGoldProviderInput(data?.provider || '')
-      setGoldKeyInput(data?.api_key || '')
-      setGoldNotesInput(data?.notes || '')
-    } catch (error) {
-      console.error('Error loading gold API access:', error)
-      setGoldAccess(null)
-    } finally {
-      setGoldAccessLoading(false)
-    }
-  }
-
-  const loadGoldRequests = async () => {
-    try {
-      setGoldRequestsLoading(true)
-      const response = await listGoldAPIAccessRequests()
-      const payload = response.data as any
-      const items: GoldAPIAccessRequest[] = Array.isArray(payload) ? payload : payload?.results || []
-      items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-      setGoldRequests(items)
-    } catch (error) {
-      console.error('Error loading gold API requests:', error)
-      setGoldRequests([])
-    } finally {
-      setGoldRequestsLoading(false)
-    }
-  }
-
   const loadActivityLogs = async () => {
     try {
       setActivityLogsLoading(true)
@@ -428,119 +344,6 @@ export default function Profile() {
     } finally {
       setActivityLogsLoading(false)
     }
-  }
-
-  const handleUpdateGoldAccess = async () => {
-    try {
-      setUpdatingGoldAccess(true)
-      const response = await updateUserGoldAPIAccess({
-        provider: goldProviderInput.trim(),
-        api_key: goldKeyInput.trim(),
-        notes: goldNotesInput.trim(),
-      })
-      const data = response.data as GoldAPIAccessInfo
-      setGoldAccess(data)
-      showToast('تنظیمات API طلا ذخیره شد', { type: 'success' })
-      await loadGoldAccess()
-    } catch (error: any) {
-      console.error('Error updating gold API access:', error)
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.message ||
-        'خطا در ذخیره تنظیمات API طلا'
-      showToast(message, { type: 'error' })
-    } finally {
-      setUpdatingGoldAccess(false)
-    }
-  }
-
-  const handleCreateGoldRequest = async () => {
-    if (creatingGoldRequest) return
-    try {
-      setCreatingGoldRequest(true)
-      const response = await createGoldAPIAccessRequest({
-        preferred_provider: goldProviderInput.trim() || undefined,
-        user_notes: goldNotesInput.trim() || undefined,
-      })
-      const data = response.data as GoldAPIAccessRequest & { payment_url?: string }
-      showToast('درخواست ثبت شد. در حال انتقال به درگاه پرداخت...', { type: 'info' })
-      await loadGoldRequests()
-      if (data.payment_url) {
-        window.location.href = data.payment_url
-      }
-    } catch (error: any) {
-      console.error('Error creating gold API request:', error)
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.message ||
-        'خطا در ایجاد درخواست API طلا'
-      showToast(message, { type: 'error' })
-    } finally {
-      setCreatingGoldRequest(false)
-    }
-  }
-
-  const handleCancelGoldRequest = async (requestId: number) => {
-    try {
-      await cancelGoldAPIAccessRequest(requestId)
-      showToast('درخواست با موفقیت لغو شد', { type: 'success' })
-      await loadGoldRequests()
-    } catch (error: any) {
-      console.error('Error cancelling gold API request:', error)
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.message ||
-        'خطا در لغو درخواست'
-      showToast(message, { type: 'error' })
-    }
-  }
-
-  const handleAssignRequest = async (event: React.FormEvent) => {
-    event.preventDefault()
-    if (!assigningRequestId) {
-      showToast('هیچ درخواستی انتخاب نشده است', { type: 'warning' })
-      return
-    }
-    if (!assignProvider.trim() || !assignApiKey.trim()) {
-      showToast('لطفاً ارائه‌دهنده و کلید API را وارد کنید', { type: 'error' })
-      return
-    }
-    try {
-      setAssignSubmitting(true)
-      await assignGoldAPIAccessRequest(assigningRequestId, {
-        provider: assignProvider.trim(),
-        api_key: assignApiKey.trim(),
-        admin_notes: assignNotes.trim() || undefined,
-        is_active: assignIsActive,
-        allow_mt5_access: assignAllowMt5,
-      })
-      showToast('اطلاعات API برای کاربر ثبت شد', { type: 'success' })
-      setAssigningRequestId(null)
-      setAssignProvider('')
-      setAssignApiKey('')
-      setAssignNotes('')
-      setAssignIsActive(true)
-      setAssignAllowMt5(false)
-      await Promise.all([loadGoldRequests(), loadGoldAccess()])
-    } catch (error: any) {
-      console.error('Error assigning gold API request:', error)
-      const message =
-        error?.response?.data?.detail ||
-        error?.response?.data?.message ||
-        'خطا در ثبت اطلاعات'
-      showToast(message, { type: 'error' })
-    } finally {
-      setAssignSubmitting(false)
-    }
-  }
-
-  const startAssignRequest = (request: GoldAPIAccessRequest) => {
-    setAssigningRequestId(request.id)
-    setAssignProvider(request.assigned_provider || request.preferred_provider || '')
-    setAssignApiKey(request.assigned_api_key || '')
-    setAssignNotes(request.admin_notes || '')
-    setAssignIsActive(true)
-    setAssignAllowMt5(Boolean(request.user_allow_mt5_access))
   }
 
   const handleCharge = async (amount: number) => {
@@ -783,191 +586,6 @@ export default function Profile() {
           </div>
         </div>
 
-        {/* Gold API Access */}
-        <div className="bg-gray-800 rounded-lg p-6">
-          <h2 className="text-xl font-semibold text-white mb-2">دسترسی به قیمت لحظه‌ای طلا</h2>
-          <p className="text-sm text-gray-400 mb-6">
-            دریافت قیمت طلا فقط برای ادمین فعال است. برای اجرای بک‌تست‌ها لازم است کلید API شخصی خود را ثبت کنید یا از تیم پشتیبانی بخواهید این کار را برای شما انجام دهد.
-          </p>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-gray-900 rounded-lg border border-gray-700 p-5">
-              <h3 className="text-lg font-semibold text-white mb-3">تنظیمات API شخصی</h3>
-              {goldAccessLoading ? (
-                <p className="text-gray-400 text-sm">در حال بارگذاری اطلاعات...</p>
-              ) : (
-                <div className="space-y-4">
-                  <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                    <div className="text-sm text-gray-300">{goldAccessStatusText}</div>
-                    {goldAccess?.provider && (
-                      <div className="text-xs text-gray-500 mt-2">
-                        <span className="font-semibold text-gray-300">ارائه‌دهنده فعلی:</span>{' '}
-                        {goldAccess.provider}
-                      </div>
-                    )}
-                    {goldAccess?.source && (
-                      <div className="text-xs text-gray-500 mt-1">
-                        <span className="font-semibold text-gray-300">منبع ثبت:</span>{' '}
-                        {goldAccess.source === 'admin' ? 'ادمین' : 'کاربر'}
-                      </div>
-                    )}
-                    {goldAccess?.updated_at && (
-                      <div className="text-xs text-gray-500 mt-1">
-                        <span className="font-semibold text-gray-300">آخرین بروزرسانی:</span>{' '}
-                        {new Date(goldAccess.updated_at).toLocaleString('fa-IR')}
-                      </div>
-                    )}
-                    <div className="text-xs text-gray-500 mt-2 flex items-center gap-2">
-                      <span className="font-semibold text-gray-300">دسترسی متاتریدر 5:</span>
-                      <span
-                        className={`px-2 py-0.5 rounded-full ${
-                          hasMt5Delegate
-                            ? 'bg-green-900 text-green-300'
-                            : 'bg-gray-700 text-gray-300'
-                        }`}
-                      >
-                        {hasMt5Delegate ? 'فعال' : 'غیرفعال'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {hasMt5Delegate && (
-                    <div className="bg-green-900/40 border border-green-700 text-green-200 text-xs rounded-lg p-3">
-                      دسترسی دریافت قیمت از MetaTrader 5 برای شما فعال است. در صورت بروز مشکل با پشتیبانی تماس بگیرید.
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      ارائه‌دهنده API
-                    </label>
-                    <input
-                      value={goldProviderInput}
-                      onChange={(e) => setGoldProviderInput(e.target.value)}
-                      placeholder="مثال: TwelveData"
-                      className="w-full px-3 py-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      کلید API
-                    </label>
-                    <input
-                      value={goldKeyInput}
-                      onChange={(e) => setGoldKeyInput(e.target.value)}
-                      placeholder="کلید را وارد کنید یا برای حذف خالی بگذارید"
-                      className="w-full px-3 py-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      dir="ltr"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      یادداشت (اختیاری)
-                    </label>
-                    <textarea
-                      value={goldNotesInput}
-                      onChange={(e) => setGoldNotesInput(e.target.value)}
-                      placeholder="یادداشت یا توضیح برای آینده"
-                      className="w-full px-3 py-3 rounded-lg bg-gray-700 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      rows={3}
-                    />
-                  </div>
-                  <button
-                    onClick={handleUpdateGoldAccess}
-                    disabled={updatingGoldAccess}
-                    className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition text-sm font-medium"
-                  >
-                    {updatingGoldAccess ? 'در حال ذخیره...' : 'ذخیره تنظیمات'}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <div className="bg-gray-900 rounded-lg border border-gray-700 p-5">
-              <h3 className="text-lg font-semibold text-white mb-3">درخواست کمک از تیم پشتیبانی</h3>
-              <p className="text-sm text-gray-400 mb-4">
-                اگر زمان کافی برای ثبت ‌نام در سرویس‌های ارائه‌دهنده API ندارید، می‌توانید با پرداخت هزینه زیر درخواست خود را ثبت کنید تا تیم پشتیبانی یک API معتبر برای شما تهیه و در حساب شما ثبت کند.
-              </p>
-              <div className="bg-gray-800 border border-gray-700 rounded-lg p-4 mb-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-300">هزینه سرویس</span>
-                  <span className="text-lg font-semibold text-green-400">
-                    {GOLD_API_ASSISTANCE_PRICE.toLocaleString('fa-IR')} تومان
-                  </span>
-                </div>
-                <div className="mt-3 text-xs text-gray-400">
-                  <span className="font-semibold text-gray-300">راهنما:</span>{' '}
-                  <Link to="/guides/free-gold-api" className="text-blue-400 hover:text-blue-300">
-                    آموزش دریافت API رایگان
-                  </Link>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {goldRequestsLoading ? (
-                  <p className="text-gray-400 text-sm">در حال بررسی وضعیت درخواست‌ها...</p>
-                ) : activeGoldRequest ? (
-                  <div className="bg-gray-800 border border-yellow-600 rounded-lg p-4 text-sm text-gray-200">
-                    <div className="font-semibold text-yellow-400 mb-1">درخواست فعال دارید</div>
-                    <div>وضعیت: {goldRequestStatusLabels[activeGoldRequest.status] || activeGoldRequest.status_display}</div>
-                    {activeGoldRequest.status === 'pending_payment' && (
-                      <button
-                        onClick={() => handleCancelGoldRequest(activeGoldRequest.id)}
-                        className="mt-3 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-medium transition"
-                      >
-                        لغو درخواست
-                      </button>
-                    )}
-                    {activeGoldRequest.status === 'awaiting_admin' && (
-                      <p className="mt-2 text-xs text-gray-400">
-                        درخواست شما ثبت شده است. پس از ثبت API توسط ادمین، از طریق همین بخش مطلع خواهید شد.
-                      </p>
-                    )}
-                  </div>
-                ) : (
-                  <div className="text-sm text-gray-400">
-                    در حال حاضر درخواست فعالی ندارید. برای ثبت درخواست جدید روی دکمه زیر کلیک کنید.
-                  </div>
-                )}
-
-                <button
-                  onClick={handleCreateGoldRequest}
-                  disabled={!canCreateGoldRequest || creatingGoldRequest}
-                  className="w-full px-4 py-3 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white rounded-lg transition text-sm font-medium"
-                >
-                  {creatingGoldRequest ? 'در حال هدایت...' : 'ثبت درخواست و انتقال به درگاه پرداخت'}
-                </button>
-              </div>
-
-              {goldRequests.length > 0 && (
-                <div className="mt-6">
-                  <h4 className="text-sm font-semibold text-white mb-2">تاریخچه درخواست‌ها</h4>
-                  <div className="max-h-40 overflow-y-auto space-y-3 pr-1">
-                    {goldRequests.map((request) => (
-                      <div key={request.id} className="bg-gray-800 border border-gray-700 rounded-lg p-3 text-xs text-gray-300">
-                        <div className="flex justify-between items-center mb-1">
-                          <span className="font-semibold text-white">درخواست #{request.id}</span>
-                          <span className="text-yellow-300">
-                            {goldRequestStatusLabels[request.status] || request.status_display}
-                          </span>
-                        </div>
-                        <div>ثبت: {new Date(request.created_at).toLocaleString('fa-IR')}</div>
-                        {request.payment_confirmed_at && (
-                          <div>تایید پرداخت: {new Date(request.payment_confirmed_at).toLocaleString('fa-IR')}</div>
-                        )}
-                        {request.assigned_provider && (
-                          <div className="mt-1 text-green-400">
-                            ارائه‌دهنده اختصاص داده شده: {request.assigned_provider}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
         {/* Wallet and Credit */}
         <div className="bg-gray-800 rounded-lg p-6">
           <h2 className="text-xl font-semibold text-white mb-4">کیف پول و اعتبار</h2>
@@ -1057,7 +675,14 @@ export default function Profile() {
                   </div>
                 </div>
 
-                {/* Method 2: Zarinpal */}
+                {/* Method 2: Zarinpal - DISABLED */}
+                {/* 
+                برای فعال کردن مجدد زرین‌پال:
+                1. در backend/config/settings.py متغیر ZARINPAL_ENABLED را به True تغییر دهید
+                2. یا متغیر محیطی ZARINPAL_ENABLED=True را تنظیم کنید
+                3. این کامنت را حذف کنید
+                */}
+                {false && (
                 <div className="bg-gray-700 rounded-lg p-4 border-r-4 border-blue-500">
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1">
@@ -1109,6 +734,7 @@ export default function Profile() {
                     </div>
                   </div>
                 </div>
+                )}
               </div>
             </div>
           </div>
@@ -1121,193 +747,6 @@ export default function Profile() {
           </ErrorBoundary>
         </div>
 
-        {isAdminUser && (
-          <div className="bg-gray-800 rounded-lg overflow-hidden mt-6 p-6 space-y-6">
-            <div>
-              <h2 className="text-xl font-semibold text-white mb-2">مدیریت درخواست‌های API طلا</h2>
-              <p className="text-sm text-gray-400">
-                درخواست‌های کاربران برای دریافت API اختصاصی را در این بخش مشاهده و پس از تهیه کلید، آن را ثبت کنید. پس از ثبت، کاربر بلافاصله امکان استفاده خواهد داشت.
-              </p>
-            </div>
-
-            <div className="overflow-x-auto">
-              {goldRequestsLoading ? (
-                <p className="text-gray-400 text-sm">در حال بارگذاری درخواست‌ها...</p>
-              ) : goldRequests.length === 0 ? (
-                <p className="text-gray-400 text-sm">درخواستی ثبت نشده است.</p>
-              ) : (
-                <table className="min-w-full divide-y divide-gray-700 text-sm">
-                  <thead className="bg-gray-900">
-                    <tr>
-                      <th className="px-3 py-2 text-right text-gray-300 font-medium">#</th>
-                      <th className="px-3 py-2 text-right text-gray-300 font-medium">کاربر</th>
-                      <th className="px-3 py-2 text-right text-gray-300 font-medium">وضعیت</th>
-                      <th className="px-3 py-2 text-right text-gray-300 font-medium">تاریخ ثبت</th>
-                      <th className="px-3 py-2 text-right text-gray-300 font-medium">پرداخت</th>
-                      <th className="px-3 py-2 text-right text-gray-300 font-medium">اقدامات</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-700">
-                    {goldRequests.map((request) => (
-                      <tr key={request.id} className="bg-gray-800">
-                        <td className="px-3 py-2 text-gray-200">#{request.id}</td>
-                        <td className="px-3 py-2 text-gray-300">
-                          <div className="font-semibold text-white">{request.username || 'نامشخص'}</div>
-                          {request.user_phone && <div className="text-xs text-gray-400 mt-1">{request.user_phone}</div>}
-                          {request.user_email && <div className="text-xs text-gray-500 mt-1">{request.user_email}</div>}
-                        </td>
-                        <td className="px-3 py-2 text-gray-300">
-                          <div>{goldRequestStatusLabels[request.status] || request.status_display}</div>
-                          {request.preferred_provider && (
-                            <div className="text-xs text-gray-400 mt-1">ترجیح کاربر: {request.preferred_provider}</div>
-                          )}
-                          {request.assigned_provider && (
-                            <div className="text-xs text-green-400 mt-1">ثبت شده: {request.assigned_provider}</div>
-                          )}
-                          {request.user_allow_mt5_access && (
-                            <div className="inline-flex items-center gap-1 text-[11px] text-green-300 bg-green-900/30 border border-green-700 rounded-full px-2 py-0.5 mt-2">
-                              <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
-                              دسترسی MT5 فعال
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-gray-300">
-                          <div>{new Date(request.created_at).toLocaleString('fa-IR')}</div>
-                        </td>
-                        <td className="px-3 py-2 text-gray-300">
-                          {request.payment_confirmed_at ? (
-                            <div className="text-green-400">
-                              تایید شد
-                              <div className="text-xs text-gray-400">
-                                {new Date(request.payment_confirmed_at).toLocaleString('fa-IR')}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="text-yellow-400">در انتظار پرداخت</div>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">
-                          {request.status === 'awaiting_admin' ? (
-                            <button
-                              onClick={() => startAssignRequest(request)}
-                              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-lg transition"
-                            >
-                              ثبت API
-                            </button>
-                          ) : request.status === 'completed' ? (
-                            <span className="text-xs text-green-400">تکمیل شده</span>
-                          ) : (
-                            <span className="text-xs text-gray-500">-</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-
-            {assigningRequestId && (
-              <form onSubmit={handleAssignRequest} className="bg-gray-900 border border-gray-700 rounded-lg p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-white">ثبت API برای درخواست #{assigningRequestId}</h3>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAssigningRequestId(null)
-                      setAssignProvider('')
-                      setAssignApiKey('')
-                      setAssignNotes('')
-                      setAssignIsActive(true)
-                    setAssignAllowMt5(false)
-                    }}
-                    className="text-xs text-gray-400 hover:text-gray-200"
-                  >
-                    بستن
-                  </button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">ارائه‌دهنده</label>
-                    <input
-                      value={assignProvider}
-                      onChange={(e) => setAssignProvider(e.target.value)}
-                      className="w-full px-3 py-3 rounded-lg bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="مثال: TwelveData"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">کلید API</label>
-                    <input
-                      value={assignApiKey}
-                      onChange={(e) => setAssignApiKey(e.target.value)}
-                      className="w-full px-3 py-3 rounded-lg bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      dir="ltr"
-                      placeholder="کلید را وارد کنید"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">یادداشت برای کاربر</label>
-                  <textarea
-                    value={assignNotes}
-                    onChange={(e) => setAssignNotes(e.target.value)}
-                    rows={3}
-                    className="w-full px-3 py-3 rounded-lg bg-gray-800 border border-gray-600 text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="یادداشت اختیاری (برای مثال توضیح ارائه‌دهنده یا محدودیت‌ها)"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="assign-is-active"
-                    type="checkbox"
-                    checked={assignIsActive}
-                    onChange={(e) => setAssignIsActive(e.target.checked)}
-                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                  />
-                  <label htmlFor="assign-is-active" className="text-sm text-gray-300">
-                    فعال‌سازی فوری دسترسی کاربر
-                  </label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    id="assign-allow-mt5"
-                    type="checkbox"
-                    checked={assignAllowMt5}
-                    onChange={(e) => setAssignAllowMt5(e.target.checked)}
-                    className="h-4 w-4 text-blue-600 border-gray-300 rounded"
-                  />
-                  <label htmlFor="assign-allow-mt5" className="text-sm text-gray-300">
-                    فعال کردن دسترسی دریافت قیمت از MetaTrader 5
-                  </label>
-                </div>
-                <div className="flex gap-3">
-                  <button
-                    type="submit"
-                    disabled={assignSubmitting}
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-600 text-white rounded-lg text-sm font-medium transition"
-                  >
-                    {assignSubmitting ? 'در حال ثبت...' : 'ثبت اطلاعات برای کاربر'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAssigningRequestId(null)
-                      setAssignProvider('')
-                      setAssignApiKey('')
-                      setAssignNotes('')
-                      setAssignIsActive(true)
-                    setAssignAllowMt5(false)
-                    }}
-                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm font-medium transition"
-                  >
-                    انصراف
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        )}
         {/* API Usage Stats - Available for all users */}
         <div className="bg-gray-800 rounded-lg overflow-hidden mt-6">
           <ErrorBoundary fallback={<div className="p-6 text-red-400">خطا در بارگذاری آمار API</div>}>

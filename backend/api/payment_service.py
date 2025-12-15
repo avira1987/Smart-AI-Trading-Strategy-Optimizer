@@ -73,6 +73,14 @@ class ZarinpalPaymentService:
         Returns:
             Dict with 'status', 'authority', 'start_pay_url' or 'error'
         """
+        # Check if Zarinpal is enabled
+        if not getattr(settings, 'ZARINPAL_ENABLED', False):
+            logger.warning("Zarinpal payment is disabled")
+            return {
+                'status': 'error',
+                'error': 'پرداخت آنلاین زرین‌پال در حال حاضر غیرفعال است.'
+            }
+        
         merchant_id = self._get_merchant_id()
         if not merchant_id:
             logger.error("Zarinpal merchant ID not configured")
@@ -152,6 +160,14 @@ class ZarinpalPaymentService:
         Returns:
             Dict with 'status', 'ref_id' or 'error'
         """
+        # Check if Zarinpal is enabled
+        if not getattr(settings, 'ZARINPAL_ENABLED', False):
+            logger.warning("Zarinpal payment is disabled")
+            return {
+                'status': 'error',
+                'error': 'پرداخت آنلاین زرین‌پال در حال حاضر غیرفعال است.'
+            }
+        
         merchant_id = self._get_merchant_id()
         if not merchant_id:
             logger.error("Zarinpal merchant ID not configured")

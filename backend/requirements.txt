@@ -16,6 +16,10 @@ pypdf==4.3.1
 # Google Gemini
 google-generativeai==0.8.2
 
+# Google Analytics Data API
+google-analytics-data==0.19.0
+google-auth==2.35.0
+
 # MetaTrader 5 integration
 MetaTrader5==5.0.5388
 

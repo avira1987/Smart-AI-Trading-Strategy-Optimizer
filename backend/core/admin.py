@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import APIConfiguration, TradingStrategy, Job, Result, LiveTrade, AutoTradingSettings
 from .models import UserProfile, OTPCode, Device, Ticket, TicketMessage, StrategyOptimization
-from .models import Wallet, Transaction, AIRecommendation, SystemSettings, GoldPriceSubscription, UserGoldAPIAccess, GoldAPIAccessRequest
+from .models import Wallet, Transaction, AIRecommendation, SystemSettings
 from .models import APIUsageLog, UserScore, Achievement, UserAchievement
 
 
@@ -200,53 +200,10 @@ class AIRecommendationAdmin(admin.ModelAdmin):
     )
 
 
-@admin.register(GoldPriceSubscription)
-class GoldPriceSubscriptionAdmin(admin.ModelAdmin):
-    """Admin برای اشتراک قیمت طلا"""
-    list_display = ['user', 'is_active', 'start_date', 'end_date', 'monthly_price', 'created_at']
-    list_filter = ['is_active', 'created_at']
-    search_fields = ['user__username', 'user__email']
-    readonly_fields = ['created_at', 'updated_at']
-    fieldsets = (
-        ('اطلاعات کاربر', {
-            'fields': ('user',)
-        }),
-        ('وضعیت اشتراک', {
-            'fields': ('is_active', 'start_date', 'end_date', 'monthly_price')
-        }),
-        ('اطلاعات سیستم', {
-            'fields': ('created_at', 'updated_at'),
-            'classes': ('collapse',)
-        }),
-    )
-    
-    def get_readonly_fields(self, request, obj=None):
-        """برای ویرایش، created_at فقط خواندنی"""
-        return ['created_at', 'updated_at']
-
-
-@admin.register(UserGoldAPIAccess)
-class UserGoldAPIAccessAdmin(admin.ModelAdmin):
-    """Admin برای مدیریت دسترسی کاربران به API طلا"""
-    list_display = ['user', 'provider', 'source', 'assigned_by_admin', 'allow_mt5_access', 'is_active', 'updated_at']
-    list_filter = ['provider', 'source', 'assigned_by_admin', 'allow_mt5_access', 'is_active', 'updated_at']
-    search_fields = ['user__username', 'user__email', 'provider', 'api_key']
-    readonly_fields = ['created_at', 'updated_at', 'assigned_at']
-
-
-@admin.register(GoldAPIAccessRequest)
-class GoldAPIAccessRequestAdmin(admin.ModelAdmin):
-    """Admin برای مدیریت درخواست‌های API طلا"""
-    list_display = ['id', 'user', 'status', 'price_amount', 'preferred_provider', 'payment_confirmed_at', 'assigned_provider', 'assigned_at', 'created_at']
-    list_filter = ['status', 'preferred_provider', 'assigned_provider', 'created_at']
-    search_fields = ['user__username', 'user__email', 'assigned_api_key', 'admin_notes', 'user_notes']
-    readonly_fields = ['created_at', 'updated_at', 'payment_confirmed_at']
-
-
 @admin.register(SystemSettings)
 class SystemSettingsAdmin(admin.ModelAdmin):
     """Admin برای تنظیمات سیستم"""
-    list_display = ['id', 'live_trading_enabled', 'use_ai_cache', 'token_cost_per_1000', 'backtest_cost', 'strategy_processing_cost', 'registration_bonus', 'updated_at']
+    list_display = ['id', 'live_trading_enabled', 'use_ai_cache', 'backtest_cost', 'strategy_processing_cost', 'registration_bonus', 'profit_margin_multiplier', 'updated_at']
     list_filter = ['live_trading_enabled', 'use_ai_cache']
     readonly_fields = ['created_at', 'updated_at']
     
@@ -272,8 +229,8 @@ class SystemSettingsAdmin(admin.ModelAdmin):
             'description': 'کنترل استفاده از کش برای پردازش تبدیل متن انسانی به مدل هوش مصنوعی'
         }),
         ('هزینه‌های مصرف', {
-            'fields': ('token_cost_per_1000', 'backtest_cost', 'strategy_processing_cost', 'registration_bonus', 'model_costs'),
-            'description': 'مدیریت هزینه‌های مصرف توکن، بک‌تست، پردازش استراتژی، هدیه ثبت‌نام و هزینه‌های مدل‌های AI (هر کلمه به تومان)'
+            'fields': ('backtest_cost', 'strategy_processing_cost', 'registration_bonus', 'profit_margin_multiplier'),
+            'description': 'مدیریت هزینه‌های مصرف بک‌تست، پردازش استراتژی، هدیه ثبت‌نام و ضریب سود'
         }),
         ('اطلاعات سیستم', {
             'fields': ('created_at', 'updated_at'),
