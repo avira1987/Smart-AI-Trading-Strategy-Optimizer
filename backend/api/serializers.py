@@ -776,6 +776,13 @@ class JobCreateSerializer(serializers.Serializer):
         allow_empty=True,
         default=list
     )
+    temperature = serializers.FloatField(
+        required=False,
+        min_value=0.0,
+        max_value=2.0,
+        default=0.3,
+        help_text="Temperature for AI analysis (0.0-2.0). Lower = more precise, Higher = more creative"
+    )
     
     def validate(self, data):
         """Validate that symbol is required for backtest jobs"""

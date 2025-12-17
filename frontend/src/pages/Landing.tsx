@@ -85,13 +85,13 @@ export default function Landing() {
               <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
                 <Link
                   to="/login"
-                  className="px-8 py-4 bg-blue-600 hover:bg-blue-700 text-white text-lg font-semibold rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg hover:shadow-xl"
+                  className="px-8 py-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-95 text-white text-lg font-semibold rounded-lg transition-all duration-200 transform hover:scale-105 shadow-lg hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-900"
                 >
                   شروع کنید
                 </Link>
                 <Link
                   to="/about"
-                  className="px-8 py-4 bg-gray-700 hover:bg-gray-600 text-white text-lg font-semibold rounded-lg transition-all duration-200"
+                  className="px-8 py-4 bg-gray-700 hover:bg-gray-600 active:bg-gray-800 active:scale-95 text-white text-lg font-semibold rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 focus:ring-offset-gray-900"
                 >
                   بیشتر بدانید
                 </Link>
@@ -520,13 +520,6 @@ export default function Landing() {
           </div>
         </section>
       )}
-
-      {/* Footer */}
-      <footer className="py-8 px-4 sm:px-6 lg:px-8 border-t border-gray-700">
-        <div className="max-w-7xl mx-auto text-center text-gray-400">
-          <p>© 2024 سامانه ترید با هوش مصنوعی و ترید به کمک هوش مصنوعی. تمامی حقوق محفوظ است.</p>
-        </div>
-      </footer>
     </div>
     </>
   )

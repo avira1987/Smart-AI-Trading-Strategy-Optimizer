@@ -36,6 +36,7 @@ export default function StrategyTesting() {
   const [selectedIndicators, setSelectedIndicators] = useState<string[]>([])
   const [timeframe, setTimeframe] = useState('7')
   const [initialCapital, setInitialCapital] = useState('10000')
+  const [temperature, setTemperature] = useState(0.3)
   const [aiProvider, setAiProvider] = useState<string>('') // Will be set to gpt-5.1 or first available model
   const [availableModels, setAvailableModels] = useState<GapGPTModel[]>([])
   const [loadingModels, setLoadingModels] = useState(false)
@@ -446,7 +447,8 @@ export default function StrategyTesting() {
           symbol: symbol,
           initial_capital: Number(initialCapital),
           selected_indicators: selectedIndicators,
-          ai_provider: aiProvider || undefined
+          ai_provider: aiProvider || undefined,
+          temperature: temperature
         })
         
         setRunningJob(response.data.id)
@@ -674,6 +676,30 @@ export default function StrategyTesting() {
               />
             </div>
 
+            <div>
+              <label className="label-standard">
+                Temperature (دقت تحلیل)
+                <span className="text-xs text-gray-400 block mt-1 font-normal">
+                  هرچه عدد تمپرچر کوچکتر باشد هزینه، دقت و مدل سازی استراتژی برای بک تست با هوش مصنوعی بالاتر هست
+                </span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                max="2"
+                step="0.1"
+                value={temperature}
+                onChange={(e) => setTemperature(parseFloat(e.target.value) || 0.7)}
+                className="input-compact"
+                disabled={runningJob !== null}
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                پیش‌فرض: 0.3 | دقت بالا: 0.3-0.5 | خلاصه: 0.8-1.0
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div>
               <label className="label-standard">
                 نماد معاملاتی (جفت ارز) <span className="text-red-400">*</span>

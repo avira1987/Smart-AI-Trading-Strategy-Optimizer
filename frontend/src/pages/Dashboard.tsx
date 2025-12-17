@@ -394,7 +394,7 @@ export default function Dashboard() {
       {/** تست‌های اخیر - زیر استراتژی‌ها */}
       <div>
         <div className="bg-gray-800 rounded-lg p-0">
-          <button onClick={()=>setJobsOpen(s=>!s)} className="w-full px-4 py-3 flex justify-between items-center text-white text-xl font-semibold focus:outline-none border-b border-gray-700">
+          <button onClick={()=>setJobsOpen(s=>!s)} className="w-full px-4 py-3 flex justify-between items-center text-white text-xl font-semibold focus:outline-none border-b border-gray-700 hover:bg-gray-750 active:bg-gray-700 active:scale-[0.98] transition-all duration-150 focus:ring-2 focus:ring-blue-500 focus:ring-inset">
             <span>تست‌های اخیر</span>
             <svg className={`w-5 h-5 transition-transform duration-300 ${jobsOpen ? '' : 'rotate-180'}`} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7"/></svg>
           </button>

@@ -272,7 +272,7 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
         {onClose && (
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-white text-2xl font-bold"
+            className="text-gray-400 hover:text-white active:text-gray-200 active:scale-95 text-2xl font-bold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-1 rounded"
             title="بستن"
           >
             ×
@@ -287,11 +287,11 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
             setMode('single')
             setCompareResults(null)
           }}
-          className={`px-4 py-2 rounded transition-colors ${
+          className={`px-4 py-2 rounded transition-all duration-200 ${
             mode === 'single' 
-              ? 'bg-blue-600 text-white' 
-              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-          }`}
+              ? 'bg-blue-600 text-white active:bg-blue-700 active:scale-95' 
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600 active:bg-gray-800 active:scale-95'
+          } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
         >
           تبدیل با یک مدل
         </button>
@@ -300,11 +300,11 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
             setMode('compare')
             setResult(null)
           }}
-          className={`px-4 py-2 rounded transition-colors ${
+          className={`px-4 py-2 rounded transition-all duration-200 ${
             mode === 'compare' 
-              ? 'bg-blue-600 text-white' 
-              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-          }`}
+              ? 'bg-blue-600 text-white active:bg-blue-700 active:scale-95' 
+              : 'bg-gray-700 text-gray-300 hover:bg-gray-600 active:bg-gray-800 active:scale-95'
+          } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
         >
           مقایسه چند مدل
         </button>
@@ -490,7 +490,12 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
       <div className="grid grid-cols-2 gap-4">
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="block text-white font-semibold">Temperature (0.0 - 2.0)</label>
+            <label className="block text-white font-semibold">
+              Temperature (0.0 - 2.0)
+              <span className="text-xs text-gray-400 block mt-1 font-normal">
+                هرچه عدد تمپرچر کوچکتر باشد هزینه، دقت و مدل سازی استراتژی برای بک تست با هوش مصنوعی بالاتر هست
+              </span>
+            </label>
             <button
               type="button"
               onClick={(e) => {
@@ -618,7 +623,7 @@ export default function GapGPTConverter({ strategyText = '', strategyId, onConve
       <button
         onClick={handleConvert}
         disabled={loading || loadingModels || !text.trim()}
-        className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded font-semibold transition-colors"
+        className="w-full bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-95 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-3 rounded font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
       >
         {loading ? (
           <span className="flex items-center justify-center">

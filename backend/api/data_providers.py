@@ -560,6 +560,8 @@ class DataProviderManager:
         self.user = user if user and getattr(user, "is_authenticated", False) else None
         self.providers = {
             'mt5': MT5DataProvider(),
+            'financialmodelingprep': FinancialModelingPrepProvider(),
+            'twelvedata': TwelveDataProvider(),
         }
         # Load API keys from APIConfiguration if available
         self._load_api_keys_from_db()
@@ -639,16 +641,44 @@ class DataProviderManager:
         mt5_ok, _ = is_mt5_available()
         if mt5_ok:
             available.append('mt5')
+        
+        # Check Financial Modeling Prep
+        fmp_provider = self.providers.get('financialmodelingprep')
+        if fmp_provider and fmp_provider.api_key:
+            available.append('financialmodelingprep')
+        
+        # Check Twelve Data
+        td_provider = self.providers.get('twelvedata')
+        if td_provider and td_provider.api_key:
+            available.append('twelvedata')
+        
         return available
 
     def _normalize_symbol(self, symbol: str) -> str:
+        """Normalize symbol to standard format (e.g., XAU/USD)"""
         if not symbol:
             return "XAU/USD"
+        
         normalized = symbol.strip().upper().replace("-", "/")
+        
+        # Handle common gold symbol variations
         if normalized == "XAUUSD":
             normalized = "XAU/USD"
         elif normalized == "USDXAU":
             normalized = "USD/XAU"
+        elif normalized in ["GOLD", "XAU"]:
+            normalized = "XAU/USD"
+        
+        # Handle 6-character symbols without slash (e.g., EURUSD -> EUR/USD)
+        if '/' not in normalized and len(normalized) == 6:
+            normalized = f"{normalized[:3]}/{normalized[3:]}"
+        
+        # Validate against known symbols
+        valid_symbols = ['XAU/USD', 'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'USD/CHF', 'NZD/USD', 'USD/XAU']
+        if normalized not in valid_symbols:
+            logger.warning(f"Symbol '{symbol}' normalized to '{normalized}' which is not in valid list, defaulting to XAU/USD")
+            normalized = "XAU/USD"
+        
         return normalized
 
     def _format_symbol_for_mt5(self, symbol: str) -> str:
@@ -736,6 +766,32 @@ class DataProviderManager:
         }
         bars_per_day = bars_per_day_map.get(interval, 96)
         return max(200, min(5000, bars_per_day * max(1, timeframe_days)))
+    
+    def _interval_to_api_interval(self, interval: str) -> str:
+        """Convert interval to format suitable for API providers (Financial Modeling Prep, Twelve Data)"""
+        if not interval:
+            return '1day'
+        
+        interval_lower = interval.lower()
+        
+        # Map to standard intervals
+        if 'm1' in interval_lower or interval_lower == '1min':
+            return '1min'
+        elif 'm5' in interval_lower or interval_lower == '5min':
+            return '5min'
+        elif 'm15' in interval_lower or interval_lower == '15min':
+            return '15min'
+        elif 'm30' in interval_lower or interval_lower == '30min':
+            return '30min'
+        elif 'h1' in interval_lower or interval_lower == '1h' or interval_lower == '60min':
+            return '1h'
+        elif 'h4' in interval_lower or interval_lower == '4h' or interval_lower == '240min':
+            return '4h'
+        elif 'day' in interval_lower or interval_lower == '1day' or interval_lower == 'daily' or interval_lower == 'd1':
+            return '1day'
+        else:
+            # For custom intervals, default to daily
+            return '1day'
 
     def get_historical_data(
         self,
@@ -749,50 +805,101 @@ class DataProviderManager:
         return_provider: bool = False,
     ) -> Any:
         """
-        Fetch historical data exclusively from MetaTrader 5.
+        Fetch historical data with fallback to multiple providers.
         
         Logic:
-        1. Extract timeframe from strategy
-        2. If timeframe is standard MT5 (M1, M5, M15, M30, H1, H4, D1), use it directly
-        3. If timeframe is custom (e.g., 77m), use M1 candles and aggregate to target timeframe
-        4. Use aggregated data for backtest
+        1. Try MT5 first (preferred for accuracy and custom timeframes)
+        2. If MT5 fails, fallback to Financial Modeling Prep
+        3. If that fails, fallback to Twelve Data
+        4. Return empty DataFrame if all providers fail
+        
+        Note: If user parameter is provided and differs from self.user,
+        API keys will be reloaded from database for that user.
         """
         from api.mt5_client import is_standard_mt5_timeframe, fetch_mt5_candles_aggregated
         
+        # If user is provided and different from current user, reload API keys
+        if user and user != self.user:
+            old_user = self.user
+            self.user = user if getattr(user, "is_authenticated", False) else None
+            if self.user != old_user:
+                logger.info(f"Reloading API keys for user {getattr(self.user, 'id', 'None')}")
+                self._load_api_keys_from_db()
+        
         normalized_symbol = self._normalize_symbol(symbol)
         mt5_symbol = self._format_symbol_for_mt5(normalized_symbol)
-        provider = self.providers.get('mt5')
-        if provider is None:
-            raise RuntimeError("MT5 provider is not initialized")
-
-        # Check if timeframe is standard MT5 or custom
-        is_standard = is_standard_mt5_timeframe(interval)
+        data = pd.DataFrame()
+        provider_used = None
         
-        # Use original interval (not normalized) to preserve custom timeframes like "77m"
-        original_timeframe = interval
-        count = self._estimate_mt5_count(timeframe_days, interval)
+        # Calculate date range for fallback providers
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=timeframe_days)).strftime('%Y-%m-%d')
         
-        try:
-            if is_standard:
-                # For standard timeframes, use MT5 provider directly
-                logger.info(f"Using standard MT5 timeframe '{original_timeframe}' directly")
-                data = provider.get_historical_data(mt5_symbol, timeframe=original_timeframe, count=count)
-                provider_used = 'mt5'
-            else:
-                # For custom timeframes, use M1 aggregation
-                logger.info(f"Custom timeframe '{original_timeframe}' detected. Fetching M1 candles and aggregating...")
-                data, error = fetch_mt5_candles_aggregated(mt5_symbol, original_timeframe, count)
-                if error:
-                    raise RuntimeError(f"Failed to fetch aggregated data: {error}")
-                provider_used = 'mt5'
-        except Exception as mt5_error:
-            logger.error("Failed to fetch data from MT5 for %s: %s", mt5_symbol, mt5_error)
-            data = pd.DataFrame()
-            provider_used = None
-
+        # Try MT5 first (preferred provider)
+        mt5_provider = self.providers.get('mt5')
+        if mt5_provider and prefer_provider != 'financialmodelingprep' and prefer_provider != 'twelvedata':
+            try:
+                # Check if timeframe is standard MT5 or custom
+                is_standard = is_standard_mt5_timeframe(interval)
+                original_timeframe = interval
+                count = self._estimate_mt5_count(timeframe_days, interval)
+                
+                if is_standard:
+                    # For standard timeframes, use MT5 provider directly
+                    logger.info(f"Attempting to fetch data from MT5 with timeframe '{original_timeframe}'")
+                    data = mt5_provider.get_historical_data(mt5_symbol, timeframe=original_timeframe, count=count)
+                    provider_used = 'mt5'
+                else:
+                    # For custom timeframes, use M1 aggregation
+                    logger.info(f"Custom timeframe '{original_timeframe}' detected. Fetching M1 candles and aggregating...")
+                    data, error = fetch_mt5_candles_aggregated(mt5_symbol, original_timeframe, count)
+                    if error:
+                        raise RuntimeError(f"Failed to fetch aggregated data: {error}")
+                    provider_used = 'mt5'
+                
+                if data is not None and not data.empty:
+                    logger.info(f"Successfully fetched {len(data)} rows from MT5")
+                    if return_provider:
+                        return data, provider_used
+                    return data
+            except Exception as mt5_error:
+                logger.warning("MT5 failed for %s: %s. Trying fallback providers...", mt5_symbol, mt5_error)
+        
+        # Fallback to Financial Modeling Prep
+        fmp_provider = self.providers.get('financialmodelingprep')
+        if (data.empty or data is None) and fmp_provider and fmp_provider.api_key:
+            try:
+                logger.info(f"Attempting to fetch data from Financial Modeling Prep for {normalized_symbol}")
+                data = fmp_provider.get_historical_data(normalized_symbol, start_date, end_date)
+                if data is not None and not data.empty:
+                    provider_used = 'financialmodelingprep'
+                    logger.info(f"Successfully fetched {len(data)} rows from Financial Modeling Prep")
+                    if return_provider:
+                        return data, provider_used
+                    return data
+            except Exception as fmp_error:
+                logger.warning("Financial Modeling Prep failed for %s: %s", normalized_symbol, fmp_error)
+        
+        # Fallback to Twelve Data
+        td_provider = self.providers.get('twelvedata')
+        if (data.empty or data is None) and td_provider and td_provider.api_key:
+            try:
+                api_interval = self._interval_to_api_interval(interval)
+                logger.info(f"Attempting to fetch data from Twelve Data for {normalized_symbol} with interval {api_interval}")
+                data = td_provider.get_historical_data(normalized_symbol, start_date, end_date, interval=api_interval)
+                if data is not None and not data.empty:
+                    provider_used = 'twelvedata'
+                    logger.info(f"Successfully fetched {len(data)} rows from Twelve Data")
+                    if return_provider:
+                        return data, provider_used
+                    return data
+            except Exception as td_error:
+                logger.warning("Twelve Data failed for %s: %s", normalized_symbol, td_error)
+        
+        # All providers failed
         if data is None:
             data = pd.DataFrame()
-
+        
         if return_provider:
             return data, provider_used
         return data

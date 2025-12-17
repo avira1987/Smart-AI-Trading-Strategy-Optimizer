@@ -619,7 +619,7 @@ export default function Login() {
                 <button
                   type="submit"
                   disabled={loading || phoneNumber.length !== 11 || !captchaAnswer || !captchaChallenge || captchaLoading}
-                  className="w-full btn-primary py-3"
+                  className="w-full btn-primary py-3 active:scale-[0.98]"
                 >
                   {loading ? 'در حال ارسال...' : 'ارسال کد'}
                 </button>
@@ -703,7 +703,7 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => setStep('phone')}
-                  className="flex-1 btn-secondary py-3"
+                  className="flex-1 btn-secondary py-3 active:scale-[0.98]"
                   disabled={loading}
                 >
                   تغییر شماره
@@ -711,7 +711,7 @@ export default function Login() {
                 <button
                   type="submit"
                   disabled={loading || otpCode.length !== 4 || isBlocked}
-                  className="flex-1 btn-primary py-3 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex-1 btn-primary py-3 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]"
                 >
                   {loading ? 'در حال بررسی...' : isBlocked ? 'بلاک شده' : 'ورود'}
                 </button>
@@ -754,7 +754,7 @@ export default function Login() {
                 href="https://t.me/avxsupport"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition text-sm font-medium w-full justify-center"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-95 text-white rounded-lg transition-all duration-200 text-sm font-medium w-full justify-center focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                   <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.161c-.174 1.586-.927 5.442-1.31 7.22-.15.685-.445.913-.731.877-.384-.045-1.05-.206-1.63-.402-.645-.206-1.13-.32-1.828-.513-.72-.206-1.27-.319-1.97.319-.595.536-2.31 2.233-3.385 3.014-.38.319-.647.479-1.015.479-.67-.045-1.22-.492-1.89-.96-.693-.48-1.245-1.002-1.89-1.68-.65-.685-2.29-2.01-2.31-2.34-.02-.11.16-.32.445-.536 1.83-1.61 3.05-2.73 3.89-3.27.17-.11.38-.21.595-.21.32 0 .52.15.7.493 1.15 2.19 2.54 4.24 3.85 4.24.32 0 .64-.11.87-.32.35-.32.64-.7.93-1.08.6-.75 1.33-1.68 2.15-2.71.19-.24.38-.48.64-.48.15 0 .32.08.41.24.18.32.15.7.11 1.08z"/>

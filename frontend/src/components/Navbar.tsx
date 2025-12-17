@@ -77,53 +77,53 @@ export default function Navbar() {
           <div className="hidden md:flex items-center gap-4">
             <Link
               to="/"
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                 location.pathname === '/'
                   ? 'bg-gray-700 text-white'
-                  : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-              }`}
+                  : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+              } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
             >
               داشبورد
             </Link>
             <Link
               to="/testing"
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                 location.pathname === '/testing'
                   ? 'bg-gray-700 text-white'
-                  : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-              }`}
+                  : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+              } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
             >
               تست استراتژی
             </Link>
             <Link
               to="/results"
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                 location.pathname === '/results'
                   ? 'bg-gray-700 text-white'
-                  : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-              }`}
+                  : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+              } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
             >
               نتایج
             </Link>
             {liveTradingEnabled && (
               <Link
                 to="/trading"
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                   location.pathname === '/trading'
                     ? 'bg-gray-700 text-white'
-                    : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                }`}
+                    : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
               >
                 معاملات زنده
               </Link>
             )}
             <Link
               to="/marketplace"
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                 location.pathname === '/marketplace'
                   ? 'bg-gray-700 text-white'
-                  : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-              }`}
+                  : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+              } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
             >
               مارکت‌پلیس استراتژی‌ها
             </Link>
@@ -132,14 +132,14 @@ export default function Navbar() {
                 <span className="text-xs text-orange-200 whitespace-nowrap">پروفایل خود را تکمیل کنید</span>
                 <Link
                   to="/profile"
-                  className="px-2 py-1 text-xs font-semibold rounded-md bg-orange-500 text-gray-900 hover:bg-orange-400 transition"
+                  className="px-2 py-1 text-xs font-semibold rounded-md bg-orange-500 text-gray-900 hover:bg-orange-400 active:bg-orange-600 active:scale-95 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-1"
                 >
                   تکمیل
                 </Link>
                 <button
                   type="button"
                   onClick={() => snooze()}
-                  className="text-xs text-orange-300 hover:text-orange-200 transition"
+                  className="text-xs text-orange-300 hover:text-orange-200 active:text-orange-100 active:scale-95 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-1 rounded"
                 >
                   بعدا
                 </button>
@@ -150,11 +150,11 @@ export default function Navbar() {
               <div className="relative" ref={adminDropdownRef}>
                 <button
                   onClick={() => setIsAdminDropdownOpen(!isAdminDropdownOpen)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1 ${
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1 ${
                     isAdminSubmenuActive
                       ? 'bg-gray-700 text-white'
-                      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                  }`}
+                      : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                  } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
                 >
                   پنل ادمین
                   <svg
@@ -173,44 +173,44 @@ export default function Navbar() {
                       <Link
                         to="/admin/users"
                         onClick={() => setIsAdminDropdownOpen(false)}
-                        className={`block px-4 py-2 text-sm transition ${
+                        className={`block px-4 py-2 text-sm transition-all duration-200 ${
                           location.pathname === '/admin/users'
                             ? 'bg-gray-700 text-white'
-                            : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                        }`}
+                            : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                        } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset`}
                       >
                         مدیریت کاربران
                       </Link>
                       <Link
                         to="/admin/analytics"
                         onClick={() => setIsAdminDropdownOpen(false)}
-                        className={`block px-4 py-2 text-sm transition ${
+                        className={`block px-4 py-2 text-sm transition-all duration-200 ${
                           location.pathname === '/admin/analytics'
                             ? 'bg-gray-700 text-white'
-                            : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                        }`}
+                            : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                        } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset`}
                       >
                         آمار و Analytics
                       </Link>
                       <Link
                         to="/admin/security"
                         onClick={() => setIsAdminDropdownOpen(false)}
-                        className={`block px-4 py-2 text-sm transition ${
+                        className={`block px-4 py-2 text-sm transition-all duration-200 ${
                           location.pathname === '/admin/security'
                             ? 'bg-gray-700 text-white'
-                            : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                        }`}
+                            : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                        } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset`}
                       >
                         مدیریت امنیت
                       </Link>
                       <Link
                         to="/admin/settings"
                         onClick={() => setIsAdminDropdownOpen(false)}
-                        className={`block px-4 py-2 text-sm transition ${
+                        className={`block px-4 py-2 text-sm transition-all duration-200 ${
                           location.pathname === '/admin/settings'
                             ? 'bg-gray-700 text-white'
-                            : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                        }`}
+                            : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                        } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset`}
                       >
                         تنظیمات سیستم
                       </Link>
@@ -224,11 +224,11 @@ export default function Navbar() {
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setIsAboutDropdownOpen(!isAboutDropdownOpen)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-1 ${
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-1 ${
                   isAboutSubmenuActive
                     ? 'bg-gray-700 text-white'
-                    : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                }`}
+                    : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
               >
                 درباره سیستم
                 <svg
@@ -256,7 +256,7 @@ export default function Navbar() {
                         <Link
                           to="/profile"
                           onClick={() => setIsAboutDropdownOpen(false)}
-                          className="mt-3 inline-flex w-full justify-center rounded-md bg-blue-500 px-3 py-2 text-xs font-semibold text-gray-900 hover:bg-blue-400 transition"
+                          className="mt-3 inline-flex w-full justify-center rounded-md bg-blue-500 px-3 py-2 text-xs font-semibold text-gray-900 hover:bg-blue-400 active:bg-blue-600 active:scale-95 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
                         >
                           پروفایل
                         </Link>
@@ -265,11 +265,11 @@ export default function Navbar() {
                     <Link
                       to="/about"
                       onClick={() => setIsAboutDropdownOpen(false)}
-                      className={`block px-4 py-2 text-sm transition ${
+                      className={`block px-4 py-2 text-sm transition-all duration-200 ${
                         location.pathname === '/about'
                           ? 'bg-gray-700 text-white'
-                          : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                      }`}
+                          : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                      } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset`}
                     >
                       درباره سیستم
                     </Link>
@@ -277,11 +277,11 @@ export default function Navbar() {
                       <Link
                         to="/tickets"
                         onClick={() => setIsAboutDropdownOpen(false)}
-                        className={`block px-4 py-2 text-sm transition ${
+                        className={`block px-4 py-2 text-sm transition-all duration-200 ${
                           location.pathname === '/tickets'
                             ? 'bg-gray-700 text-white'
-                            : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                        }`}
+                            : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                        } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset`}
                       >
                         تیکت‌ها
                       </Link>
@@ -289,33 +289,33 @@ export default function Navbar() {
                     <Link
                       to="/blog"
                       onClick={() => setIsAboutDropdownOpen(false)}
-                      className={`block px-4 py-2 text-sm transition ${
+                      className={`block px-4 py-2 text-sm transition-all duration-200 ${
                         location.pathname.startsWith('/blog')
                           ? 'bg-gray-700 text-white'
-                          : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                      }`}
+                          : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                      } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset`}
                     >
                       بلاگ
                     </Link>
                     <Link
                       to="/tutorial"
                       onClick={() => setIsAboutDropdownOpen(false)}
-                      className={`block px-4 py-2 text-sm transition ${
+                      className={`block px-4 py-2 text-sm transition-all duration-200 ${
                         location.pathname === '/tutorial'
                           ? 'bg-gray-700 text-white'
-                          : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                      }`}
+                          : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                      } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset`}
                     >
                       آموزش
                     </Link>
                     <Link
                       to="/guides/free-gold-api"
                       onClick={() => setIsAboutDropdownOpen(false)}
-                      className={`block px-4 py-2 text-sm transition ${
+                      className={`block px-4 py-2 text-sm transition-all duration-200 ${
                         location.pathname === '/guides/free-gold-api'
                           ? 'bg-gray-700 text-white'
-                          : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                      }`}
+                          : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                      } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset`}
                     >
                       راهنمای دریافت API طلا
                     </Link>
@@ -352,7 +352,7 @@ export default function Navbar() {
           <div className="md:hidden flex items-center">
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="text-gray-300 hover:text-white focus:outline-none focus:text-white"
+              className="text-gray-300 hover:text-white active:text-gray-200 active:scale-95 focus:outline-none focus:text-white focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 rounded transition-all duration-200"
               aria-label="منو"
             >
               <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -379,7 +379,7 @@ export default function Navbar() {
                       onClick={() => {
                         setIsMobileMenuOpen(false)
                       }}
-                      className="px-3 py-1 rounded-md bg-orange-500 text-gray-900 text-xs font-semibold hover:bg-orange-400 transition"
+                      className="px-3 py-1 rounded-md bg-orange-500 text-gray-900 text-xs font-semibold hover:bg-orange-400 active:bg-orange-600 active:scale-95 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-1"
                     >
                       تکمیل
                     </Link>
@@ -390,7 +390,7 @@ export default function Navbar() {
                       snooze()
                       setIsMobileMenuOpen(false)
                     }}
-                    className="mt-2 text-xs text-orange-300 hover:text-orange-200 transition"
+                    className="mt-2 text-xs text-orange-300 hover:text-orange-200 active:text-orange-100 active:scale-95 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-1 rounded"
                   >
                     بعدا یادآوری کن
                   </button>
@@ -399,33 +399,33 @@ export default function Navbar() {
               <Link
                 to="/"
                 onClick={() => setIsMobileMenuOpen(false)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                   location.pathname === '/'
                     ? 'bg-gray-700 text-white'
-                    : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                }`}
+                    : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
               >
                 داشبورد
               </Link>
               <Link
                 to="/testing"
                 onClick={() => setIsMobileMenuOpen(false)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                   location.pathname === '/testing'
                     ? 'bg-gray-700 text-white'
-                    : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                }`}
+                    : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
               >
                 تست استراتژی
               </Link>
               <Link
                 to="/results"
                 onClick={() => setIsMobileMenuOpen(false)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                   location.pathname === '/results'
                     ? 'bg-gray-700 text-white'
-                    : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                }`}
+                    : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
               >
                 نتایج
               </Link>
@@ -433,11 +433,11 @@ export default function Navbar() {
                 <Link
                   to="/trading"
                   onClick={() => setIsMobileMenuOpen(false)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                     location.pathname === '/trading'
                       ? 'bg-gray-700 text-white'
-                      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                  }`}
+                      : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                  } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
                 >
                   معاملات زنده
                 </Link>
@@ -445,11 +445,11 @@ export default function Navbar() {
               <Link
                 to="/marketplace"
                 onClick={() => setIsMobileMenuOpen(false)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                   location.pathname === '/marketplace'
                     ? 'bg-gray-700 text-white'
-                    : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                }`}
+                    : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
+                } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1`}
               >
                 مارکت‌پلیس استراتژی‌ها
               </Link>
@@ -628,7 +628,7 @@ export default function Navbar() {
                     handleLogout()
                     setIsMobileMenuOpen(false)
                   }}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition text-right"
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95 transition-all duration-200 text-right focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
                 >
                   خروج
                 </button>
@@ -636,7 +636,7 @@ export default function Navbar() {
                 <Link
                   to="/login"
                   onClick={() => setIsMobileMenuOpen(false)}
-                  className="px-4 py-2 rounded-lg text-sm font-medium text-blue-400 hover:bg-gray-700 hover:text-blue-300 transition text-right"
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-blue-400 hover:bg-gray-700 hover:text-blue-300 active:bg-gray-800 active:text-blue-200 active:scale-95 transition-all duration-200 text-right focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
                 >
                   ورود
                 </Link>

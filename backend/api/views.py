@@ -2189,13 +2189,15 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
                 timeframe_days = 365
                 # استفاده از تایم‌فریم دقیق از استراتژی پردازش شده
                 strategy_timeframe = parsed_data.get('timeframe')
+                # Convert strategy_timeframe to interval parameter
+                interval = strategy_timeframe if strategy_timeframe else "1day"
                 historical_data, historical_provider = data_manager.get_historical_data(
                     default_symbol,
                     timeframe_days=timeframe_days,
+                    interval=interval,  # Use interval parameter instead of strategy_timeframe
                     include_latest=True,
                     user=request.user if request.user.is_authenticated else None,
                     return_provider=True,
-                    strategy_timeframe=strategy_timeframe,  # تایم‌فریم دقیق از استراتژی
                 )
 
                 if historical_data is not None and not historical_data.empty:
@@ -3195,6 +3197,7 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
         initial_capital = serializer.validated_data.get('initial_capital', 10000)
         selected_indicators = serializer.validated_data.get('selected_indicators', [])
         ai_provider = serializer.validated_data.get('ai_provider', None)
+        temperature = serializer.validated_data.get('temperature', 0.3)
         
         user = request.user
         marketplace_access = None
@@ -3301,7 +3304,8 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
                         symbol_override=symbol_override,
                         initial_capital=initial_capital,
                         selected_indicators=selected_indicators,
-                        ai_provider=ai_provider
+                        ai_provider=ai_provider,
+                        temperature=temperature
                     )
                 else:
                     logger.info(f"Starting async demo trade task for job {job.id}")
@@ -3329,7 +3333,7 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
                 def run_backtest_in_thread():
                     try:
                         logger.info(f"Starting synchronous backtest in thread for job {job.id}, strategy {strategy_id}, timeframe {timeframe_days} days, ai_provider={ai_provider}")
-                        run_backtest_task(job.id, timeframe_days=timeframe_days, symbol_override=symbol_override, initial_capital=initial_capital, selected_indicators=selected_indicators, ai_provider=ai_provider)
+                        run_backtest_task(job.id, timeframe_days=timeframe_days, symbol_override=symbol_override, initial_capital=initial_capital, selected_indicators=selected_indicators, ai_provider=ai_provider, temperature=temperature)
                         job.refresh_from_db()
                         logger.info(f"Backtest task completed in thread for job {job.id}, status: {job.status}, result_id: {job.result_id}")
                     except Exception as e:

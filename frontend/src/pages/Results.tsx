@@ -522,10 +522,20 @@ export default function Results() {
                             </div>
                           )}
                           {selectedResult.data_sources.results_summary?.sharpe_ratio !== undefined && selectedResult.data_sources.results_summary.sharpe_ratio !== null && (
-                            <div className="bg-gray-700 rounded p-4">
+                            <div className="bg-gray-700 rounded p-4 relative group">
                               <div className="text-gray-400 text-sm mb-1">نسبت شارپ</div>
                               <div className="text-lg font-semibold text-purple-400">
                                 {selectedResult.data_sources.results_summary.sharpe_ratio.toFixed(4)}
+                              </div>
+                              {/* Tooltip */}
+                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 w-64 p-3 bg-gray-900 text-white text-xs rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 border border-gray-700">
+                                <div className="text-right leading-relaxed">
+                                  هر چه نسبت شارپ بالاتر باشد، نشان‌دهنده‌ی عملکرد بهتر دارایی نسبت به ریسک است. اگر نسبت شارپ منفی باشد، به این معناست که بازده دارایی کمتر از نرخ بازده بدون ریسک است و سرمایه‌گذاری مناسبی به نظر نمی‌رسد.
+                                </div>
+                                {/* Tooltip arrow */}
+                                <div className="absolute top-full left-1/2 transform -translate-x-1/2 -mt-1">
+                                  <div className="w-3 h-3 bg-gray-900 border-r border-b border-gray-700 transform rotate-45"></div>
+                                </div>
                               </div>
                             </div>
                           )}
@@ -691,9 +701,10 @@ export default function Results() {
                       <div className="flex items-start gap-2">
                         <span className="text-yellow-400 text-xl">⚠️</span>
                         <div className="flex-1">
-                          <p className="text-yellow-200 font-semibold mb-1">توصیه مهم:</p>
                           <p className="text-yellow-100 text-sm">
-                            برای اعمال این توصیه‌ها، لطفاً به بخش استراتژی‌ها بروید و استراتژی خود را دوباره پردازش کنید.
+                            برای اعمال این توصیه‌ها، لطفاً به بخش استراتژی‌ها بروید در ابتدا کل خروجی بک تست را مطالعه کنید و قسمت نقاط ضعف
+                            و قسمت پیشنهادات بهبود نتایج را بررسی کند و فکر کنید چه چیزی به متن استراتژی اضافه کنید که استراتژی بهتری تولید شود و
+                            را استراتژی خود اضافه کنید و استراتژی خود را دوباره پردازش کنید.
                           </p>
                         </div>
                       </div>

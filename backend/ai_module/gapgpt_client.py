@@ -1027,7 +1027,8 @@ def analyze_backtest_trades_with_gapgpt(
     data_points: int = 0,
     date_range: str = None,
     user=None,
-    model_id: str = None
+    model_id: str = None,
+    temperature: float = 0.3
 ) -> Dict[str, Any]:
     """
     تحلیل نتایج بک تست با استفاده از GapGPT
@@ -1083,16 +1084,53 @@ def analyze_backtest_trades_with_gapgpt(
     if date_range:
         analysis_data["date_range"] = date_range
     
-    # ساخت prompt برای تحلیل
-    system_prompt = """شما یک تحلیلگر حرفه‌ای استراتژی معاملاتی هستید. بر اساس نتایج بک تست که دریافت می‌کنید، یک تحلیل جامع به فارسی ارائه دهید که شامل موارد زیر باشد:
+    # ساخت prompt برای تحلیل بر اساس temperature
+    # temperature پایین (0.3-0.5): تحلیل دقیق و جزئی‌نگر
+    # temperature متوسط (0.6-0.8): تحلیل متعادل
+    # temperature بالا (0.9-1.0): تحلیل خلاصه و کلی
+    
+    if temperature <= 0.5:
+        detail_level = "بسیار دقیق و جزئی"
+        instruction = """
+شما باید یک تحلیل بسیار دقیق و جامع ارائه دهید که شامل:
+1. خلاصه کلی نتایج بک تست (با جزئیات کامل اعداد و ارقام)
+2. نقاط قوت استراتژی (حداقل 5 مورد با توضیحات دقیق)
+3. نقاط ضعف استراتژی (حداقل 5 مورد با توضیحات دقیق)
+4. ارزیابی ریسک (با تحلیل عمیق از معاملات نمونه)
+5. پیشنهادات برای بهبود (حداقل 5 پیشنهاد عملی و قابل اجرا)
+6. امتیاز کیفیت (0-100) با توضیح دلیل امتیاز
+
+تحلیل باید بسیار دقیق، کاربردی و شامل مثال‌های مشخص از معاملات باشد."""
+    elif temperature <= 0.8:
+        detail_level = "متعادل و جامع"
+        instruction = """
+شما باید یک تحلیل جامع ارائه دهید که شامل:
 1. خلاصه کلی نتایج بک تست
-2. نقاط قوت استراتژی (لیست)
-3. نقاط ضعف استراتژی (لیست)
+2. نقاط قوت استراتژی (حداقل 3-4 مورد)
+3. نقاط ضعف استراتژی (حداقل 3-4 مورد)
 4. ارزیابی ریسک
-5. پیشنهادات برای بهبود (لیست)
+5. پیشنهادات برای بهبود (حداقل 3-4 پیشنهاد)
 6. امتیاز کیفیت (0-100)
 
 تحلیل باید دقیق، کاربردی و قابل فهم باشد."""
+    else:
+        detail_level = "خلاصه و کلی"
+        instruction = """
+شما باید یک تحلیل خلاصه و کاربردی ارائه دهید که شامل:
+1. خلاصه کلی نتایج بک تست
+2. نقاط قوت استراتژی (2-3 مورد اصلی)
+3. نقاط ضعف استراتژی (2-3 مورد اصلی)
+4. ارزیابی ریسک (خلاصه)
+5. پیشنهادات برای بهبود (2-3 پیشنهاد کلیدی)
+6. امتیاز کیفیت (0-100)
+
+تحلیل باید مختصر، کاربردی و قابل فهم باشد."""
+    
+    system_prompt = f"""شما یک تحلیلگر حرفه‌ای استراتژی معاملاتی هستید. بر اساس نتایج بک تست که دریافت می‌کنید، یک تحلیل {detail_level} به فارسی ارائه دهید.
+
+{instruction}
+
+⚠️ مهم: حتماً همه بخش‌های بالا را پر کنید. هیچ بخشی نباید خالی بماند."""
     
     user_prompt = f"""نتایج بک تست:
 {json.dumps(analysis_data, ensure_ascii=False, indent=2)}
@@ -1102,14 +1140,23 @@ def analyze_backtest_trades_with_gapgpt(
     try:
         model = model_id or GAPGPT_DEFAULT_MODEL
         endpoint = f"{GAPGPT_API_BASE_URL}/v1/chat/completions"
+        # تنظیم max_tokens بر اساس temperature
+        # temperature پایین = تحلیل دقیق‌تر = tokens بیشتر
+        if temperature <= 0.5:
+            max_tokens = 3000  # تحلیل دقیق‌تر نیاز به tokens بیشتر دارد
+        elif temperature <= 0.8:
+            max_tokens = 2000  # مقدار پیش‌فرض
+        else:
+            max_tokens = 1500  # تحلیل خلاصه‌تر نیاز به tokens کمتر دارد
+        
         payload = {
             "model": model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            "temperature": 0.7,
-            "max_tokens": 2000,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
         }
         
         headers = {

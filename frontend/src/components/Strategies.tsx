@@ -678,15 +678,15 @@ export default function Strategies() {
                       <div className="flex items-start gap-3">
                         <span className="text-yellow-400 text-2xl">⚠️</span>
                         <div className="flex-1">
-                          <h4 className="text-yellow-200 font-semibold mb-1">هشدار: توصیه‌های بهبود موجود است</h4>
-                          <p className="text-yellow-100 text-sm mb-3">
+                          <span className="inline-block text-yellow-200 text-xs font-medium mb-1 px-2 py-0.5 bg-yellow-800/50 rounded">هشدار: توصیه‌های بهبود موجود است</span>
+                          <p className="text-yellow-100 text-sm mb-3 mt-2">
                             نتایج بک‌تست اخیر شما شامل توصیه‌هایی برای بهبود استراتژی است. برای مشاهده جزئیات به بخش نتایج بروید و برای اعمال تغییرات، استراتژی خود را دوباره پردازش کنید.
                           </p>
                           <button
                             onClick={() => {
                               window.location.href = '/results'
                             }}
-                            className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm font-medium transition"
+                            className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 active:bg-yellow-800 active:scale-95 text-white rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-1"
                           >
                             مشاهده نتایج و توصیه‌ها
                           </button>
@@ -774,10 +774,10 @@ export default function Strategies() {
                       <button
                         onClick={() => handleSetPrimary(strategy.id, strategy.name)}
                         disabled={strategy.is_primary}
-                        className={`px-3 py-1.5 rounded-lg transition text-xs font-medium ${
+                        className={`px-3 py-1.5 rounded-lg transition-all duration-200 text-xs font-medium ${
                           strategy.is_primary
                             ? 'bg-blue-800 text-blue-200 cursor-default'
-                            : 'bg-blue-600 hover:bg-blue-700 text-white'
+                            : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-95 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1'
                         }`}
                       >
                         {strategy.is_primary ? 'استراتژی اصلی' : 'انتخاب به‌عنوان اصلی'}
@@ -785,7 +785,7 @@ export default function Strategies() {
                       {/* دکمه پردازش استراتژی با هوش مصنوعی */}
                       <button
                         onClick={() => handleOpenGapGPTModal(strategy)}
-                        className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white rounded-lg transition text-xs font-medium flex items-center gap-1"
+                        className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 active:from-purple-800 active:to-pink-800 active:scale-95 text-white rounded-lg transition-all duration-200 text-xs font-medium flex items-center gap-1 focus:outline-none focus:ring-2 focus:ring-purple-500 focus:ring-offset-1"
                         title="پردازش استراتژی با هوش مصنوعی - محتوای فایل به طور خودکار بارگذاری می‌شود"
                       >
                         <span>🔮</span>
@@ -816,17 +816,17 @@ export default function Strategies() {
                       )}
                       <button
                         onClick={() => toggleStrategy(strategy.id)}
-                        className={`px-3 py-1.5 rounded-lg transition text-xs font-medium ${
+                        className={`px-3 py-1.5 rounded-lg transition-all duration-200 text-xs font-medium ${
                           strategy.is_active
-                            ? 'bg-yellow-600 hover:bg-yellow-700 text-white'
-                            : 'bg-green-600 hover:bg-green-700 text-white'
-                        }`}
+                            ? 'bg-yellow-600 hover:bg-yellow-700 active:bg-yellow-800 active:scale-95 text-white'
+                            : 'bg-green-600 hover:bg-green-700 active:bg-green-800 active:scale-95 text-white'
+                        } focus:outline-none focus:ring-2 focus:ring-offset-1`}
                       >
                         {strategy.is_active ? 'غیرفعال' : 'فعال'}
                       </button>
                       <a
                         href="/testing"
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition text-xs font-medium inline-block"
+                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 active:scale-95 text-white rounded-lg transition-all duration-200 text-xs font-medium inline-block focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1"
                       >
                         تست
                       </a>

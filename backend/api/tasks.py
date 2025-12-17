@@ -164,7 +164,7 @@ def _normalize_timeframe(timeframe: str) -> str:
     return 'M15'
 
 @shared_task
-def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = None, initial_capital: float = 10000, selected_indicators: List[str] = None, ai_provider: str = None):
+def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = None, initial_capital: float = 10000, selected_indicators: List[str] = None, ai_provider: str = None, temperature: float = 0.3):
     """Run backtest for a job with real data"""
     import time
     import traceback
@@ -344,7 +344,9 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
         detailed_logger.info("مرحله 1: دریافت داده‌های بازار")
         detailed_logger.info("-" * 80)
         
-        data_manager = DataProviderManager()
+        # IMPORTANT: Pass user to DataProviderManager to load user-specific API keys from database
+        # This is critical for processed strategies where user has configured API keys
+        data_manager = DataProviderManager(user=user)
         available_providers = data_manager.get_available_providers()
         detailed_logger.info(f"ارائه‌دهندگان داده موجود: {available_providers}")
         
@@ -382,6 +384,37 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             return f"Backtest failed for job {job_id}: {error_msg}"
         
         symbol = (symbol_override or parsed_strategy.get('symbol'))
+        
+        # اعتبارسنجی و normalize کردن symbol
+        # این مهم است چون با temperature بالاتر، AI ممکن است symbol را به صورت نامعتبر استخراج کند
+        if not symbol or not str(symbol).strip():
+            symbol = 'XAU/USD'
+            detailed_logger.warning("⚠️ Symbol خالی یا None است، از پیش‌فرض XAU/USD استفاده می‌شود")
+            logger.warning(f"Backtest job {job_id}: Empty or None symbol, using default XAU/USD")
+        else:
+            original_symbol = str(symbol)
+            symbol = str(symbol).strip().upper()
+            
+            # تبدیل فرمت‌های مختلف به فرمت استاندارد
+            if symbol == 'XAUUSD':
+                symbol = 'XAU/USD'
+            elif symbol in ['GOLD', 'XAU']:
+                symbol = 'XAU/USD'
+            elif '/' not in symbol and len(symbol) == 6:
+                # اگر فرمت EURUSD است، به EUR/USD تبدیل کن
+                symbol = f"{symbol[:3]}/{symbol[3:]}"
+            
+            # لیست symbolهای معتبر
+            valid_symbols = ['XAU/USD', 'EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD', 'USD/CAD', 'USD/CHF', 'NZD/USD']
+            
+            # اگر symbol هنوز نامعتبر است، از پیش‌فرض استفاده کن
+            if symbol not in valid_symbols:
+                detailed_logger.warning(f"⚠️ Symbol نامعتبر '{original_symbol}' استخراج شده، از پیش‌فرض XAU/USD استفاده می‌شود")
+                logger.warning(f"Backtest job {job_id}: Invalid symbol '{original_symbol}' extracted, defaulting to XAU/USD")
+                symbol = 'XAU/USD'
+            elif original_symbol != symbol:
+                detailed_logger.info(f"✅ Symbol از '{original_symbol}' به '{symbol}' normalize شد")
+        
         days = int(timeframe_days) if timeframe_days else 365
         start_date = (timezone.now() - timezone.timedelta(days=days)).strftime('%Y-%m-%d')
         end_date = timezone.now().strftime('%Y-%m-%d')
@@ -405,13 +438,13 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             else:
                 detailed_logger.info(f"  - نوع تایم‌فریم: غیرمتداول ({strategy_timeframe}) - تجمیع از کندل‌های M1")
         
-        # دریافت داده از MT5 با تایم‌فریم دقیق استراتژی
-        # اگر تایم‌فریم استاندارد باشد (M1, M5, M15, M30, H1, H4, D1)، مستقیماً استفاده می‌شود
-        # اگر تایم‌فریم غیرمتداول باشد (مثل 77 دقیقه)، از کندل‌های M1 استفاده می‌شود و تجمیع می‌شود
+        # دریافت داده با تایم‌فریم دقیق استراتژی
+        # اولویت با MT5 است (برای دقت و تایم‌فریم‌های سفارشی)
+        # در صورت عدم دسترسی به MT5، از Financial Modeling Prep یا Twelve Data استفاده می‌شود
         if is_standard:
-            detailed_logger.info(f"در حال دریافت کندل‌های {strategy_timeframe} از MT5 (استفاده مستقیم)...")
+            detailed_logger.info(f"در حال دریافت داده با تایم‌فریم {strategy_timeframe} (اولویت: MT5)...")
         else:
-            detailed_logger.info(f"در حال دریافت کندل‌های M1 از MT5 و تجمیع به تایم‌فریم {strategy_timeframe}...")
+            detailed_logger.info(f"در حال دریافت داده با تایم‌فریم {strategy_timeframe} (اولویت: MT5 با تجمیع از M1)...")
         try:
             # تبدیل strategy_timeframe به interval برای استفاده در get_historical_data
             # این interval به صورت دقیق استفاده می‌شود (مثلاً "77m") و از M1 تجمیع می‌شود
@@ -426,14 +459,20 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             )
             
             if not data.empty:
-                detailed_logger.info(f"✅ دریافت داده انجام شد از {provider_used}: {len(data)} ردیف")
+                provider_name_map = {
+                    'mt5': 'MT5',
+                    'financialmodelingprep': 'Financial Modeling Prep',
+                    'twelvedata': 'Twelve Data'
+                }
+                provider_display = provider_name_map.get(provider_used, provider_used or 'نامشخص')
+                detailed_logger.info(f"✅ دریافت داده انجام شد از {provider_display}: {len(data)} ردیف")
                 detailed_logger.info(f"  - تایم‌فریم استفاده شده: {strategy_timeframe or 'پیش‌فرض'}")
-                if not is_standard and strategy_timeframe:
+                if not is_standard and strategy_timeframe and provider_used == 'mt5':
                     detailed_logger.info(f"  - ✅ تایم‌فریم غیرمتداول از کندل‌های M1 تجمیع شده است")
-                logger.info(f"Backtest job {job_id}: Received {len(data)} rows from {provider_used} for symbol={symbol} with timeframe={strategy_timeframe} ({'standard' if is_standard else 'aggregated from M1'})")
+                logger.info(f"Backtest job {job_id}: Received {len(data)} rows from {provider_used} for symbol={symbol} with timeframe={strategy_timeframe}")
             else:
-                detailed_logger.warning("⚠️ هیچ داده‌ای از MT5 دریافت نشد")
-                logger.warning(f"Backtest job {job_id}: No data received from MT5")
+                detailed_logger.warning("⚠️ هیچ داده‌ای از هیچ ارائه‌دهنده‌ای دریافت نشد")
+                logger.warning(f"Backtest job {job_id}: No data received from any provider")
         except Exception as data_error:
             detailed_logger.error(f"❌ خطا در دریافت داده: {str(data_error)}")
             logger.error(f"Backtest job {job_id}: Error getting data: {data_error}")
@@ -639,7 +678,8 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                     data_provider=provider_display,
                     data_points=len(data) if not data.empty else 0,
                     date_range=f"{start_date} تا {end_date}",
-                    user=user
+                    user=user,
+                    temperature=temperature
                 )
                 
                 ai_analysis = None
@@ -892,7 +932,21 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
                 final_description = original_description
                 # Skip data_sources_text here too
             else:
+                # اگر هیچ تحلیلی وجود ندارد، حداقل یک خلاصه ایجاد کنیم
                 final_description = data_sources_text.strip() if data_sources_text else ""
+                if not final_description:
+                    # Fallback: حداقل اطلاعات را نمایش دهیم
+                    final_description = f"""📊 نتایج بک‌تست برای {symbol}
+
+📈 آمار کلی:
+- تعداد کل معاملات: {result_data.get('total_trades', 0)}
+- معاملات برنده: {result_data.get('winning_trades', 0)}
+- معاملات بازنده: {result_data.get('losing_trades', 0)}
+- نرخ برد: {result_data.get('win_rate', 0.0):.2f}%
+- بازده کل: {result_data.get('total_return', 0.0):.2f}%
+- حداکثر افت سرمایه: {result_data.get('max_drawdown', 0.0):.2f}%
+
+⚠️ توجه: برای دریافت تحلیل کامل، لطفاً کلید API GapGPT را در تنظیمات پیکربندی کنید."""
             
             # Calculate total duration before creating result
             total_duration = time.time() - start_time
@@ -904,8 +958,22 @@ def run_backtest_task(job_id, timeframe_days: int = 365, symbol_override: str = 
             try:
                 data_sources_info = validate_and_clean_json(data_sources_info)
             except Exception as json_error:
-                logger.warning(f"Error validating data_sources_info: {json_error}, using empty dict")
-                data_sources_info = {}
+                logger.warning(f"Error validating data_sources_info: {json_error}, preserving minimal data")
+                # به جای خالی کردن کامل، حداقل داده‌های ضروری را نگه دارید
+                minimal_data = {
+                    'provider': data_sources_info.get('provider', 'unknown') if isinstance(data_sources_info, dict) else 'unknown',
+                    'symbol': data_sources_info.get('symbol', 'unknown') if isinstance(data_sources_info, dict) else 'unknown',
+                    'error': 'خطا در اعتبارسنجی داده‌ها'
+                }
+                # سعی کنید سایر فیلدهای مهم را هم حفظ کنیم
+                if isinstance(data_sources_info, dict):
+                    for key in ['data_points', 'start_date', 'end_date', 'strategy_timeframe']:
+                        if key in data_sources_info:
+                            try:
+                                minimal_data[key] = data_sources_info[key]
+                            except:
+                                pass
+                data_sources_info = minimal_data
             
             # Generate improvement recommendations based on backtest results
             improvement_recommendations = []

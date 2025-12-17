@@ -21,6 +21,7 @@ import NotFound from './pages/NotFound'
 import Blog from './pages/Blog'
 import BlogPost from './pages/BlogPost'
 import Navbar from './components/Navbar'
+import Footer from './components/Footer'
 import ProtectedRoute from './components/ProtectedRoute'
 import NavigationSetup from './components/NavigationSetup'
 import { SymbolProvider } from './context/SymbolContext'
@@ -86,9 +87,10 @@ function App() {
           <FeatureFlagsProvider>
             <ToastProvider>
               <SymbolProvider>
-                <div className="min-h-screen bg-gray-900">
+                <div className="min-h-screen bg-gray-900 flex flex-col">
                   <Navbar />
-                  <Routes>
+                  <main className="flex-grow">
+                    <Routes>
                     <Route path="/login" element={<Login />} />
                     <Route path="/complete-profile" element={<Navigate to="/profile" replace />} />
                     <Route
@@ -179,7 +181,9 @@ function App() {
                     <Route path="/blog/:slug" element={<BlogPost />} />
                     <Route path="/guides/free-gold-api" element={<FreeGoldAPIGuide />} />
                     <Route path="*" element={<NotFound />} />
-                  </Routes>
+                    </Routes>
+                  </main>
+                  <Footer />
                 </div>
               </SymbolProvider>
             </ToastProvider>

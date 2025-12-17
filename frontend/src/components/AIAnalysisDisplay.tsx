@@ -26,7 +26,7 @@ export default function AIAnalysisDisplay({ analysisText, resultMetrics }: AIAna
       .replace(/^[\s\-•\*]+\s*/gm, (match) => match.trim() ? match : '') // Clean up bullet points
       .trim()
     
-    const sections: Array<{ title: string; content: string; icon: string }> = []
+    let sections: Array<{ title: string; content: string; icon: string }> = []
     
     // Split by common section markers - more comprehensive matching
     const lines = cleanedText.split('\n')
@@ -105,6 +105,22 @@ export default function AIAnalysisDisplay({ analysisText, resultMetrics }: AIAna
         .join('\n')
         .replace(/\n{3,}/g, '\n\n')
         .trim()
+    })
+    
+    // Filter out weaknesses section if it's empty or has no meaningful content
+    sections = sections.filter(section => {
+      if (section.title === 'نقاط ضعف' || section.title.includes('نقاط ضعف')) {
+        const content = section.content.trim()
+        // Check if content is empty or just contains placeholder text
+        if (!content || 
+            content.length === 0 || 
+            content === 'محتوایی برای نمایش وجود ندارد.' ||
+            content.toLowerCase().includes('هیچ') ||
+            content.toLowerCase().includes('ندارد')) {
+          return false
+        }
+      }
+      return true
     })
     
     // If no sections found or all sections are empty, return the whole text as one section

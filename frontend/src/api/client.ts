@@ -589,7 +589,7 @@ export const analyzeConvertedStrategyAmbiguities = (strategyId: number) =>
 
 // Jobs
 export const getJobs = () => client.get('/jobs/')
-export const createJob = (data: { strategy: number, job_type: string, timeframe_days?: number, symbol?: string, initial_capital?: number, selected_indicators?: string[], ai_provider?: string }) => 
+export const createJob = (data: { strategy: number, job_type: string, timeframe_days?: number, symbol?: string, initial_capital?: number, selected_indicators?: string[], ai_provider?: string, temperature?: number }) => 
   client.post(
     '/jobs/',
     data,
