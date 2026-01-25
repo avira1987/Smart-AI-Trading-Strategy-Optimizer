@@ -11,6 +11,7 @@ from core.models import (
     AutoTradingSettings,
     StrategyMarketplaceListing,
     StrategyListingAccess,
+    ForwardTestReport,
 )
 from core.models import (
     UserProfile,
@@ -803,23 +804,144 @@ class LiveTradeSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = LiveTrade
-        fields = ['id', 'strategy', 'strategy_name', 'mt5_ticket', 'symbol', 'trade_type',
+        fields = ['id', 'user', 'strategy', 'strategy_name', 'mt5_ticket', 'symbol', 'trade_type',
                   'volume', 'open_price', 'current_price', 'stop_loss', 'take_profit',
                   'profit', 'swap', 'commission', 'status', 'opened_at', 'closed_at',
                   'close_price', 'close_reason']
-        read_only_fields = ['mt5_ticket', 'opened_at', 'closed_at', 'current_price', 'profit']
+        read_only_fields = ['user', 'mt5_ticket', 'opened_at', 'closed_at', 'current_price', 'profit']
 
 
 class AutoTradingSettingsSerializer(serializers.ModelSerializer):
     strategy_name = serializers.CharField(source='strategy.name', read_only=True)
+    backtest_status = serializers.SerializerMethodField()
+    latest_backtest_result = serializers.SerializerMethodField()
     
     class Meta:
         model = AutoTradingSettings
-        fields = ['id', 'strategy', 'strategy_name', 'is_enabled', 'symbol', 'volume',
+        fields = ['id', 'user', 'strategy', 'strategy_name', 'deployed_result', 'is_enabled', 'symbol', 'timeframe', 'volume',
                   'max_open_trades', 'check_interval_minutes', 'use_stop_loss',
                   'use_take_profit', 'stop_loss_pips', 'take_profit_pips',
-                  'risk_per_trade_percent', 'last_check_time', 'created_at', 'updated_at']
-        read_only_fields = ['last_check_time', 'created_at', 'updated_at']
+                  'risk_per_trade_percent', 'last_check_time', 'created_at', 'updated_at',
+                  'require_backtest_result', 'min_backtest_win_rate', 'min_backtest_return',
+                  'min_backtest_trades', 'max_backtest_drawdown', 'use_latest_backtest_only',
+                  'backtest_status', 'latest_backtest_result']
+        read_only_fields = ['user', 'last_check_time', 'created_at', 'updated_at', 'backtest_status', 'latest_backtest_result']
+    
+    def get_backtest_status(self, obj):
+        """بررسی وضعیت بک‌تست برای این تنظیمات"""
+        if not obj.require_backtest_result:
+            return {'required': False, 'passed': True, 'message': 'نیازی به بک‌تست نیست'}
+        
+        from core.models import Job, Result
+        strategy = obj.strategy
+        
+        # پیدا کردن آخرین نتیجه بک‌تست موفق
+        if obj.use_latest_backtest_only:
+            latest_job_qs = Job.objects.filter(
+                strategy=strategy,
+                job_type='backtest',
+                status='completed',
+                result__isnull=False
+            )
+            if obj.user:
+                latest_job = latest_job_qs.filter(user=obj.user).order_by('-created_at').first()
+                if not latest_job:
+                    latest_job = latest_job_qs.order_by('-created_at').first()
+            else:
+                latest_job = latest_job_qs.order_by('-created_at').first()
+            
+            if not latest_job or not latest_job.result:
+                return {
+                    'required': True,
+                    'passed': False,
+                    'message': 'هیچ نتیجه بک‌تست موفقی یافت نشد'
+                }
+            
+            result = latest_job.result
+        else:
+            # استفاده از بهترین نتیجه
+            results_qs = Result.objects.filter(
+                job__strategy=strategy,
+                job__job_type='backtest',
+                job__status='completed'
+            )
+            if obj.user:
+                results = results_qs.filter(job__user=obj.user).order_by('-total_return').first()
+                if not results:
+                    results = results_qs.order_by('-total_return').first()
+            else:
+                results = results_qs.order_by('-total_return').first()
+            
+            if not results:
+                return {
+                    'required': True,
+                    'passed': False,
+                    'message': 'هیچ نتیجه بک‌تست موفقی یافت نشد'
+                }
+            
+            result = results
+        
+        # بررسی فیلترها
+        checks = []
+        if obj.min_backtest_win_rate is not None:
+            if result.win_rate < obj.min_backtest_win_rate:
+                checks.append(f'نرخ برد ({result.win_rate:.1f}%) کمتر از حداقل ({obj.min_backtest_win_rate:.1f}%) است')
+        
+        if obj.min_backtest_return is not None:
+            if result.total_return < obj.min_backtest_return:
+                checks.append(f'بازدهی ({result.total_return:.1f}%) کمتر از حداقل ({obj.min_backtest_return:.1f}%) است')
+        
+        if obj.min_backtest_trades is not None:
+            if result.total_trades < obj.min_backtest_trades:
+                checks.append(f'تعداد معاملات ({result.total_trades}) کمتر از حداقل ({obj.min_backtest_trades}) است')
+        
+        if obj.max_backtest_drawdown is not None:
+            if abs(result.max_drawdown) > obj.max_backtest_drawdown:
+                checks.append(f'دراودان ({abs(result.max_drawdown):.1f}%) بیشتر از حداکثر ({obj.max_backtest_drawdown:.1f}%) است')
+        
+        if checks:
+            return {
+                'required': True,
+                'passed': False,
+                'message': '؛ '.join(checks)
+            }
+        
+        return {
+            'required': True,
+            'passed': True,
+            'message': 'همه شرایط بک‌تست برقرار است',
+            'result_id': result.id
+        }
+    
+    def get_latest_backtest_result(self, obj):
+        """دریافت آخرین نتیجه بک‌تست"""
+        from core.models import Job, Result
+        latest_job_qs = Job.objects.filter(
+            strategy=obj.strategy,
+            job_type='backtest',
+            status='completed',
+            result__isnull=False
+        )
+        if obj.user:
+            latest_job = latest_job_qs.filter(user=obj.user).order_by('-created_at').first()
+            if not latest_job:
+                latest_job = latest_job_qs.order_by('-created_at').first()
+        else:
+            latest_job = latest_job_qs.order_by('-created_at').first()
+            
+        if not latest_job or not latest_job.result:
+            return None
+        
+        result = latest_job.result
+        return {
+            'id': result.id,
+            'total_return': result.total_return,
+            'win_rate': result.win_rate,
+            'total_trades': result.total_trades,
+            'max_drawdown': result.max_drawdown,
+            'profit_factor': result.profit_factor,
+            'created_at': result.created_at.isoformat() if result.created_at else None
+        }
 
 
 # Authentication Serializers
@@ -1122,3 +1244,11 @@ class UserAchievementSerializer(serializers.ModelSerializer):
         model = UserAchievement
         fields = ['id', 'user', 'achievement', 'unlocked_at']
         read_only_fields = ['id', 'unlocked_at']
+
+
+class ForwardTestReportSerializer(serializers.ModelSerializer):
+    strategy_name = serializers.CharField(source='strategy.name', read_only=True)
+    
+    class Meta:
+        model = ForwardTestReport
+        fields = '__all__'

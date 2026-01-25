@@ -16,7 +16,6 @@ import AdminSecurity from './pages/AdminSecurity'
 import AdminUserManagement from './pages/AdminUserManagement'
 import AdminAnalytics from './pages/AdminAnalytics'
 import SystemSettings from './pages/SystemSettings'
-import FreeGoldAPIGuide from './pages/FreeGoldAPIGuide'
 import NotFound from './pages/NotFound'
 import Blog from './pages/Blog'
 import BlogPost from './pages/BlogPost'
@@ -179,7 +178,6 @@ function App() {
                     <Route path="/terms" element={<Terms />} />
                     <Route path="/blog" element={<Blog />} />
                     <Route path="/blog/:slug" element={<BlogPost />} />
-                    <Route path="/guides/free-gold-api" element={<FreeGoldAPIGuide />} />
                     <Route path="*" element={<NotFound />} />
                     </Routes>
                   </main>

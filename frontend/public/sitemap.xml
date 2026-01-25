@@ -48,15 +48,6 @@
     <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/terms" />
   </url>
   
-  <!-- Free Gold API Guide -->
-  <url>
-    <loc>https://myaibaz.ir/guides/free-gold-api</loc>
-    <lastmod>2024-12-21</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.7</priority>
-    <xhtml:link rel="alternate" hreflang="fa" href="https://myaibaz.ir/guides/free-gold-api" />
-  </url>
-  
   <!-- Blog Page -->
   <url>
     <loc>https://myaibaz.ir/blog</loc>

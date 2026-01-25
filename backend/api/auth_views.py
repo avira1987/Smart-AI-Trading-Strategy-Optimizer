@@ -595,12 +595,16 @@ def check_profile_completion(request):
         
         is_complete = email_valid and phone_valid
         
-        # Get preferred symbol from profile
+        # Get preferred symbol and auto trading permission from profile
         preferred_symbol = 'XAUUSD'  # default
+        can_use_auto_trading = False
         try:
             profile = getattr(user, 'profile', None)
-            if profile and hasattr(profile, 'preferred_symbol') and profile.preferred_symbol:
-                preferred_symbol = profile.preferred_symbol
+            if profile:
+                if hasattr(profile, 'preferred_symbol') and profile.preferred_symbol:
+                    preferred_symbol = profile.preferred_symbol
+                if hasattr(profile, 'can_use_auto_trading'):
+                    can_use_auto_trading = profile.can_use_auto_trading
         except Exception:
             pass
         
@@ -609,7 +613,8 @@ def check_profile_completion(request):
             'is_complete': is_complete,
             'has_valid_email': email_valid,
             'has_valid_phone': phone_valid,
-            'preferred_symbol': preferred_symbol
+            'preferred_symbol': preferred_symbol,
+            'can_use_auto_trading': can_use_auto_trading
         }, status=status.HTTP_200_OK)
         
     except Exception as e:

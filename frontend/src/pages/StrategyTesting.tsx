@@ -90,11 +90,12 @@ export default function StrategyTesting() {
       console.log('Strategies response:', response) // Debug log
       
       // Handle Django REST Framework pagination format
-      let strategiesData = []
-      if (response.data && response.data.results) {
-        strategiesData = response.data.results
-      } else if (Array.isArray(response.data)) {
-        strategiesData = response.data
+      let strategiesData: Strategy[] = []
+      const data = response.data as any
+      if (data && data.results) {
+        strategiesData = data.results
+      } else if (Array.isArray(data)) {
+        strategiesData = data
       }
       
       console.log('Strategies data:', strategiesData) // Debug log

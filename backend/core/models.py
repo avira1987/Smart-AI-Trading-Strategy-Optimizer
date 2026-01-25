@@ -442,6 +442,46 @@ class Result(models.Model):
         return f"Result for {self.job} - Return: {self.total_return:.2f}%"
 
 
+class ForwardTestReport(models.Model):
+    """گزارش راستی‌آزمایی معاملات زنده در یک دوره مشخص (Forward Test)"""
+    
+    strategy = models.ForeignKey(TradingStrategy, on_delete=models.CASCADE, related_name='forward_tests')
+    base_backtest = models.ForeignKey(Result, on_delete=models.SET_NULL, null=True, related_name='forward_tests')
+    start_date = models.DateTimeField()
+    end_date = models.DateTimeField()
+    
+    # مقایسه عملکرد واقعی با بک‌تست
+    actual_return = models.FloatField(default=0.0)
+    expected_return = models.FloatField(default=0.0, help_text="بازدهی مورد انتظار طبق بک‌تست")
+    actual_trades_count = models.IntegerField(default=0)
+    expected_trades_count = models.IntegerField(default=0)
+    
+    # راستی‌آزمایی فنی
+    compliance_score = models.FloatField(default=0.0, help_text="امتیاز تطابق با قوانین استراتژی (0-100)")
+    verification_details = models.JSONField(default=dict, blank=True, help_text="جزئیات انحرافات از استراتژی")
+    
+    # داده‌های عملکردی
+    performance_metrics = models.JSONField(default=dict, blank=True)
+    trades_log = models.JSONField(default=list, blank=True, help_text="لیست معاملاتی که در این دوره بیلد شده‌اند")
+    
+    status = models.CharField(max_length=20, choices=[
+        ('pending', 'در انتظار'),
+        ('processing', 'در حال پردازش'),
+        ('completed', 'تکمیل شده'),
+        ('failed', 'ناموفق')
+    ], default='pending')
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "گزارش راستی‌آزمایی (Forward Test)"
+        verbose_name_plural = "گزارش‌های راستی‌آزمایی"
+
+    def __str__(self):
+        return f"Forward Test for {self.strategy.name} ({self.start_date.date()} to {self.end_date.date()})"
+
+
 class DemoAccount(models.Model):
     """حساب دمو برای کاربرانی که MT5 ندارند"""
     
@@ -509,6 +549,15 @@ class DemoTrade(models.Model):
     
     account = models.ForeignKey(DemoAccount, on_delete=models.CASCADE, related_name='trades')
     strategy = models.ForeignKey(TradingStrategy, on_delete=models.SET_NULL, null=True, blank=True)
+    deployed_result = models.ForeignKey(
+        'Result', 
+        null=True, 
+        blank=True, 
+        on_delete=models.SET_NULL, 
+        related_name='demo_trades',
+        help_text="بک‌تست مرجعی که این معامله بر اساس آن باز شده است"
+    )
+    signal_data = models.JSONField(null=True, blank=True, help_text="داده‌های سیگنال و اندیکاتورها در زمان باز شدن")
     trade_type = models.CharField(max_length=10, choices=TRADE_TYPE_CHOICES)
     symbol = models.CharField(max_length=50, default='XAU/USD')
     volume = models.FloatField(help_text="حجم معامله")
@@ -623,7 +672,24 @@ class LiveTrade(models.Model):
         ('pending', 'Pending'),
     ]
     
+    user = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='live_trades',
+        null=True,
+        blank=True,
+        help_text="کاربر صاحب این معامله"
+    )
     strategy = models.ForeignKey(TradingStrategy, on_delete=models.SET_NULL, null=True, blank=True)
+    deployed_result = models.ForeignKey(
+        'Result', 
+        null=True, 
+        blank=True, 
+        on_delete=models.SET_NULL, 
+        related_name='live_trades',
+        help_text="بک‌تست مرجعی که این معامله بر اساس آن باز شده است"
+    )
+    signal_data = models.JSONField(null=True, blank=True, help_text="داده‌های سیگنال و اندیکاتورها در زمان باز شدن")
     mt5_ticket = models.BigIntegerField(unique=True, null=True, blank=True, help_text="MT5 position ticket number")
     symbol = models.CharField(max_length=50, default='XAUUSD')
     trade_type = models.CharField(max_length=10, choices=TRADE_TYPE_CHOICES)
@@ -656,28 +722,60 @@ class LiveTrade(models.Model):
 class AutoTradingSettings(models.Model):
     """Settings for automatic trading based on strategies"""
     
-    strategy = models.OneToOneField(TradingStrategy, on_delete=models.CASCADE, related_name='auto_trading_settings')
-    is_enabled = models.BooleanField(default=False, help_text="فعال/غیرفعال کردن معامله خودکار")
-    symbol = models.CharField(max_length=50, default='XAUUSD', help_text="نماد معاملاتی")
-    volume = models.FloatField(default=0.01, help_text="حجم معامله به لات")
+    user = models.ForeignKey(
+        User, 
+        on_delete=models.CASCADE, 
+        related_name='auto_trading_settings',
+        null=True,
+        blank=True,
+        help_text="کاربر استفاده‌کننده از ترید خودکار"
+    )
+    strategy = models.ForeignKey(
+        TradingStrategy, 
+        on_delete=models.CASCADE, 
+        related_name='auto_trading_settings'
+    )
+    deployed_result = models.ForeignKey(
+        'Result', 
+        null=True, 
+        blank=True, 
+        on_delete=models.SET_NULL, 
+        related_name='deployed_in_settings',
+        help_text="نتیجه بک‌تست مبنا برای ترید خودکار"
+    )
+    is_enabled = models.BooleanField(default=False, help_text="فعال/غیرغیرفعال کردن معامله خودکار")
+    symbol = models.CharField(max_length=50, default='XAUUSD', help_text="نماد معاملاتی (اگر خالی باشد از بک‌تست گرفته می‌شود)")
+    timeframe = models.CharField(max_length=20, default='M15', help_text="تایم‌فریم معاملاتی (مطابق با بک‌تست)")
+    volume = models.FloatField(default=0.01, help_text="حجم معامله به لات (اگر ریسک تنظیم شده باشد، نادیده گرفته می‌شود)")
     max_open_trades = models.IntegerField(default=3, help_text="حداکثر تعداد معاملات باز همزمان")
     check_interval_minutes = models.IntegerField(default=5, help_text="فاصله زمانی بررسی سیگنال (دقیقه)")
     use_stop_loss = models.BooleanField(default=True, help_text="استفاده از حد ضرر")
     use_take_profit = models.BooleanField(default=True, help_text="استفاده از حد سود")
-    stop_loss_pips = models.FloatField(default=50.0, help_text="حد ضرر به پیپ")
-    take_profit_pips = models.FloatField(default=100.0, help_text="حد سود به پیپ")
+    stop_loss_pips = models.FloatField(default=50.0, help_text="حد ضرر به پیپ (اگر در استراتژی نباشد)")
+    take_profit_pips = models.FloatField(default=100.0, help_text="حد سود به پیپ (اگر در استراتژی نباشد)")
     risk_per_trade_percent = models.FloatField(default=2.0, help_text="ریسک به درصد سرمایه در هر معامله")
     last_check_time = models.DateTimeField(null=True, blank=True)
+    
+    # فیلترهای بک‌تست - فقط استراتژی‌هایی با نتایج خوب را معامله می‌کند
+    require_backtest_result = models.BooleanField(default=True, help_text="فقط در صورت وجود نتیجه بک‌تست موفق معامله کند")
+    min_backtest_win_rate = models.FloatField(default=50.0, null=True, blank=True, help_text="حداقل نرخ برد بک‌تست (درصد)")
+    min_backtest_return = models.FloatField(default=0.0, null=True, blank=True, help_text="حداقل بازدهی بک‌تست (درصد)")
+    min_backtest_trades = models.IntegerField(default=10, null=True, blank=True, help_text="حداقل تعداد معاملات در بک‌تست")
+    max_backtest_drawdown = models.FloatField(default=50.0, null=True, blank=True, help_text="حداکثر دراودان مجاز بک‌تست (درصد)")
+    use_latest_backtest_only = models.BooleanField(default=True, help_text="فقط از آخرین نتیجه بک‌تست استفاده کند")
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
         verbose_name = "Auto Trading Settings"
         verbose_name_plural = "Auto Trading Settings"
+        unique_together = ['user', 'strategy']
     
     def __str__(self):
         status = "فعال" if self.is_enabled else "غیرفعال"
-        return f"{self.strategy.name} - {status}"
+        user_str = f" ({self.user.username})" if self.user else ""
+        return f"{self.strategy.name}{user_str} - {status}"
 
 
 class UserProfile(models.Model):
@@ -686,6 +784,7 @@ class UserProfile(models.Model):
     phone_number = models.CharField(max_length=15, unique=True, help_text="شماره موبایل به فرمت 09123456789")
     nickname = models.CharField(max_length=50, unique=True, null=True, blank=True, help_text="نیک‌نیم قابل نمایش در مارکت‌پلیس")
     preferred_symbol = models.CharField(max_length=50, null=True, blank=True, default='XAUUSD', help_text="نماد معاملاتی ترجیحی کاربر")
+    can_use_auto_trading = models.BooleanField(default=False, help_text="اجازه استفاده از ترید خودکار بر اساس بک‌تست (فقط توسط ادمین فعال می‌شود)")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     

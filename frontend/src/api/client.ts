@@ -288,7 +288,6 @@ client.interceptors.response.use(
                           window.location.pathname.startsWith('/blog/') ||
                           window.location.pathname === '/tutorial' ||
                           window.location.pathname === '/terms' ||
-                          window.location.pathname === '/guides/free-gold-api' ||
                           window.location.pathname === '/login'
       
       if (!isAuthCheckEndpoint && !isStrategyProcessingEndpoint && !isBacktestEndpoint && !isRedirectingToLogin && !isPublicPage) {
@@ -492,7 +491,10 @@ export const updateAPIConfiguration = (id: number, data: Partial<APIConfiguratio
 export const deleteAPIConfiguration = (id: number) => client.delete(`/apis/${id}/`)
 
 // Strategies
-export const getStrategies = () => client.get('/strategies/')
+export const getStrategies = (userId?: number) => 
+  client.get<TradingStrategy[]>('/strategies/', {
+    params: userId ? { user: userId } : {}
+  })
 export const addStrategy = async (formData: FormData) => {
   // Ensure CSRF token is available before making the request
   await ensureCsrfToken()
@@ -589,6 +591,7 @@ export const analyzeConvertedStrategyAmbiguities = (strategyId: number) =>
 
 // Jobs
 export const getJobs = () => client.get('/jobs/')
+export const getJob = (id: number) => client.get<Job>(`/jobs/${id}/`)
 export const createJob = (data: { strategy: number, job_type: string, timeframe_days?: number, symbol?: string, initial_capital?: number, selected_indicators?: string[], ai_provider?: string, temperature?: number }) => 
   client.post(
     '/jobs/',
@@ -710,8 +713,10 @@ export interface AutoTradingSettings {
   id?: number
   strategy: number
   strategy_name?: string
+  deployed_result?: number
   is_enabled: boolean
   symbol: string
+  timeframe?: string
   volume: number
   max_open_trades: number
   check_interval_minutes: number
@@ -725,9 +730,44 @@ export interface AutoTradingSettings {
   updated_at?: string
 }
 
-export const getAutoTradingSettings = (strategyId?: number) => 
+// Forward Test Reports
+export interface ForwardTestReport {
+  id: number
+  strategy: number
+  strategy_name: string
+  base_backtest: number
+  start_date: string
+  end_date: string
+  actual_return: number
+  expected_return: number
+  actual_trades_count: number
+  expected_trades_count: number
+  compliance_score: number
+  verification_details: any
+  performance_metrics: any
+  trades_log: any[]
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  created_at: string
+}
+
+export const getForwardTestReports = (strategyId?: number) =>
+  client.get<ForwardTestReport[]>('/forward-test-reports/', {
+    params: strategyId ? { strategy: strategyId } : {}
+  })
+
+export const buildForwardTestReport = (strategyId: number, startDate?: string, endDate?: string) =>
+  client.post<{status: string, message: string, report: ForwardTestReport}>('/forward-test-reports/build_report/', {
+    strategy_id: strategyId,
+    start_date: startDate,
+    end_date: endDate
+  })
+
+export const getAutoTradingSettings = (strategyId?: number, userId?: number) => 
   client.get<AutoTradingSettings[]>('/auto-trading-settings/', { 
-    params: strategyId ? { strategy: strategyId } : {} 
+    params: {
+      ...(strategyId ? { strategy: strategyId } : {}),
+      ...(userId ? { user: userId } : {})
+    }
   })
 
 export const getAutoTradingSetting = (id: number) => 
@@ -747,17 +787,39 @@ export const createOrUpdateAutoTradingSettings = (data: {
   risk_per_trade_percent?: number
 }) => client.post<{status: string, message: string, settings: AutoTradingSettings}>('/auto-trading-settings/create_or_update_for_strategy/', data)
 
+export const deleteAutoTradingSettings = (id: number) =>
+  client.delete<{status: string; message?: string}>(`/auto-trading-settings/${id}/`)
+
 export const toggleAutoTrading = (id: number) => 
   client.post<{status: string, is_enabled: boolean, message: string}>(`/auto-trading-settings/${id}/toggle_enabled/`)
 
-export const testAutoTradeSignal = (strategyId: number, symbol?: string) => 
+export const testAutoTradeSignal = (strategyId: number, symbol?: string, timeframe?: string) => 
   client.post<{status: string, signal: {signal: string, confidence: number, reason: string}}>('/auto-trading-settings/test_auto_trade/', {
     strategy_id: strategyId,
-    symbol: symbol || 'XAUUSD'
+    symbol: symbol || 'XAUUSD',
+    timeframe: timeframe || 'M15'
   })
 
 export const triggerAutoTrading = () => 
   client.post<{status: string, message: string, result: any}>('/auto-trading-settings/trigger_auto_trading/')
+
+export const enableAutoTradingFromBacktest = (strategyId: number, resultId?: number, symbol?: string) =>
+  client.post<{
+    status: string
+    message: string
+    settings: AutoTradingSettings
+    backtest_result: {
+      id: number
+      total_return: number
+      win_rate: number
+      total_trades: number
+      max_drawdown: number
+    }
+  }>('/auto-trading-settings/enable_from_backtest/', {
+    strategy_id: strategyId,
+    result_id: resultId,
+    symbol: symbol || 'XAUUSD'
+  })
 
 // Strategy Questions
 export interface StrategyQuestion {
@@ -988,6 +1050,8 @@ export interface AdminUser {
   date_joined: string
   is_staff: boolean
   is_superuser: boolean
+  can_use_auto_trading?: boolean
+  last_login?: string | null
 }
 
 export interface AdminUsersResponse {

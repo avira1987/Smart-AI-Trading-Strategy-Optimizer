@@ -26,6 +26,8 @@ from .views import (
     GapGPTViewSet,
     OpenAIViewSet,
     AdminUserManagementView,
+    ForwardTestReportViewSet,
+    AdminBacktestAllStrategiesView,
 )
 from .auth_views import SendOTPView, VerifyOTPView, check_auth, logout, get_csrf_token, check_profile_completion, update_profile, check_ip_location, get_user_activity_logs
 from .captcha_views import GetCaptchaView
@@ -66,6 +68,7 @@ router.register(r'gamification/achievements', AchievementViewSet, basename='achi
 router.register(r'gamification/user-achievements', UserAchievementViewSet, basename='user-achievement')
 router.register(r'gapgpt', GapGPTViewSet, basename='gapgpt')
 router.register(r'openai', OpenAIViewSet, basename='openai')
+router.register(r'forward-test-reports', ForwardTestReportViewSet, basename='forward-test-report')
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -100,6 +103,8 @@ urlpatterns = [
     path('admin/security-logs/', SecurityLogsView.as_view(), name='security_logs'),
     # User management (admin only)
     path('admin/users/', AdminUserManagementView.as_view(), name='admin_user_management'),
+    # Admin backtest all strategies (admin only)
+    path('admin/backtest-all-strategies/', AdminBacktestAllStrategiesView.as_view(), name='admin_backtest_all_strategies'),
     # Analytics endpoints (admin only)
     path('admin/analytics/google/stats/', GoogleAnalyticsStatsView.as_view(), name='google_analytics_stats'),
     path('admin/analytics/google/pages/', GoogleAnalyticsPagesView.as_view(), name='google_analytics_pages'),

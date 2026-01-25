@@ -1,7 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { useToast } from '../components/ToastProvider'
-import { getAdminUsers, allocateUserCredit, deleteUser, updateUser, type AdminUser } from '../api/client'
+import { 
+  getAdminUsers, 
+  allocateUserCredit, 
+  deleteUser, 
+  updateUser, 
+  type AdminUser 
+} from '../api/client'
 import Breadcrumbs from '../components/Breadcrumbs'
 
 const AUTO_REFRESH_INTERVAL_MS = 60000
@@ -28,6 +34,7 @@ export default function AdminUserManagement() {
     nickname: '',
     is_staff: false,
     is_superuser: false,
+    can_use_auto_trading: false,
   })
 
   useEffect(() => {
@@ -122,12 +129,13 @@ export default function AdminUserManagement() {
     setSelectedUser(user)
     setEditForm({
       email: user.email || '',
-      first_name: '',
-      last_name: '',
+      first_name: user.first_name || '',
+      last_name: user.last_name || '',
       phone_number: user.phone_number || '',
-      nickname: '',
+      nickname: user.nickname || '',
       is_staff: user.is_staff || false,
       is_superuser: user.is_superuser || false,
+      can_use_auto_trading: user.can_use_auto_trading || false,
     })
     setShowEditModal(true)
   }
@@ -221,6 +229,9 @@ export default function AdminUserManagement() {
             <table className="w-full" dir="rtl">
               <thead className="bg-gray-700">
                 <tr>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider w-16">
+                    ردیف
+                  </th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">
                     کاربر
                   </th>
@@ -234,6 +245,9 @@ export default function AdminUserManagement() {
                     تاریخ عضویت
                   </th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">
+                    آخرین ورود
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">
                     وضعیت
                   </th>
                   <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">
@@ -242,8 +256,11 @@ export default function AdminUserManagement() {
                 </tr>
               </thead>
               <tbody className="bg-gray-800 divide-y divide-gray-700">
-                {users.map((user) => (
+                {users.map((user, index) => (
                   <tr key={user.id} className="hover:bg-gray-750">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">
+                      {index + 1}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="text-sm font-medium text-white">{user.username}</div>
                       <div className="text-sm text-gray-400">{user.email}</div>
@@ -258,6 +275,9 @@ export default function AdminUserManagement() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
                       {formatDate(user.date_joined)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                      {user.last_login ? formatDate(user.last_login) : '-'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {user.is_superuser ? (
@@ -524,6 +544,24 @@ export default function AdminUserManagement() {
                   )}
                 </div>
               )}
+
+              <div className="border-t border-gray-700 pt-4">
+                <div className="flex items-center gap-3">
+                  <input
+                    type="checkbox"
+                    id="can_use_auto_trading"
+                    checked={editForm.can_use_auto_trading}
+                    onChange={(e) => setEditForm({ ...editForm, can_use_auto_trading: e.target.checked })}
+                    className="w-4 h-4 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                  />
+                  <label htmlFor="can_use_auto_trading" className="text-sm font-medium text-gray-300">
+                    اجازه استفاده از ترید خودکار بر اساس بک‌تست
+                  </label>
+                </div>
+                <p className="text-xs text-gray-400 mt-2 mr-7">
+                  کاربر می‌تواند ترید خودکار را بر اساس نتایج بک‌تست فعال کند
+                </p>
+              </div>
             </div>
 
             <div className="flex gap-4 mt-6">

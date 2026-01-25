@@ -749,6 +749,7 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
 
 # Windows-specific Celery configuration
 # Use 'solo' pool on Windows (prefork doesn't work on Windows)
@@ -762,7 +763,7 @@ from celery.schedules import crontab
 CELERY_BEAT_SCHEDULE = {
     'run-auto-trading': {
         'task': 'api.tasks.run_auto_trading',
-        'schedule': crontab(minute='*/5'),  # Every 5 minutes
+        'schedule': crontab(minute='*/1'),  # Every 1 minute for faster signal detection
     },
     'update-demo-trades-prices': {
         'task': 'api.tasks.update_demo_trades_prices_task',

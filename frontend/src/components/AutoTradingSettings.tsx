@@ -24,6 +24,7 @@ export default function AutoTradingSettings() {
   // Form state for new/edit settings
   const [formData, setFormData] = useState({
     symbol: 'XAUUSD',
+    timeframe: 'M15',
     volume: 0.01,
     max_open_trades: 3,
     check_interval_minutes: 5,
@@ -149,6 +150,7 @@ export default function AutoTradingSettings() {
         const setting = settingsData[0]
         setFormData({
           symbol: setting.symbol,
+          timeframe: setting.timeframe || 'M15',
           volume: setting.volume,
           max_open_trades: setting.max_open_trades,
           check_interval_minutes: setting.check_interval_minutes,
@@ -162,7 +164,8 @@ export default function AutoTradingSettings() {
       } else {
         // Reset to defaults
         setFormData({
-          symbol: 'XAUUSD',
+          symbol: selectedSymbol || 'XAUUSD',
+          timeframe: 'M15',
           volume: 0.01,
           max_open_trades: 3,
           check_interval_minutes: 5,
@@ -239,7 +242,7 @@ export default function AutoTradingSettings() {
 
     try {
       setTestingSignal(Number(selectedStrategy))
-      const response = await testAutoTradeSignal(Number(selectedStrategy), formData.symbol)
+      const response = await testAutoTradeSignal(Number(selectedStrategy), formData.symbol, formData.timeframe)
       
       if (response.data.status === 'success') {
         const signal = response.data.signal
@@ -387,6 +390,17 @@ export default function AutoTradingSettings() {
             onChange={(e) => setFormData({ ...formData, symbol: e.target.value.toUpperCase() })}
             className="input-compact"
             placeholder="XAUUSD"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-gray-300 mb-2">تایم‌فریم (مثلاً M1, M5, M15, H1)</label>
+          <input
+            type="text"
+            value={formData.timeframe}
+            onChange={(e) => setFormData({ ...formData, timeframe: e.target.value.toUpperCase() })}
+            className="input-compact"
+            placeholder="M15"
           />
         </div>
 

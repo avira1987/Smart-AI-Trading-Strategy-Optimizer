@@ -81,6 +81,7 @@ export interface ProfileCompletionResponse {
   has_valid_email: boolean
   has_valid_phone: boolean
   preferred_symbol?: string
+  can_use_auto_trading?: boolean
   message?: string
 }
 

@@ -34,7 +34,6 @@ export default function Breadcrumbs({ items }: BreadcrumbsProps) {
         'login': 'ورود',
         'blog': 'بلاگ',
         'guides': 'راهنما',
-        'free-gold-api': 'راهنمای API طلای رایگان',
         'testing': 'تست استراتژی',
         'results': 'نتایج',
         'trading': 'معاملات زنده',

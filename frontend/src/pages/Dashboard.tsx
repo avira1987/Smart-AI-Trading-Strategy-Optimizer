@@ -62,9 +62,10 @@ export default function Dashboard() {
 
       // Strategies count
       if (strategiesRes.status === 'fulfilled') {
-        const strategiesData = Array.isArray(strategiesRes.value.data) 
-          ? strategiesRes.value.data 
-          : strategiesRes.value.data?.results || []
+        const data = strategiesRes.value.data as any
+        const strategiesData = Array.isArray(data) 
+          ? data 
+          : data?.results || []
         newStats.strategiesCount = strategiesData.length
       }
 
@@ -76,9 +77,10 @@ export default function Dashboard() {
 
       // Jobs count
       if (jobsRes.status === 'fulfilled') {
-        const jobsData = Array.isArray(jobsRes.value.data)
-          ? jobsRes.value.data
-          : jobsRes.value.data?.results || []
+        const data = jobsRes.value.data as any
+        const jobsData = Array.isArray(data)
+          ? data
+          : data?.results || []
 
         if (newStats.recentJobsCount === 0) {
           const seenResults = new Set<number>()

@@ -308,17 +308,6 @@ export default function Navbar() {
                     >
                       آموزش
                     </Link>
-                    <Link
-                      to="/guides/free-gold-api"
-                      onClick={() => setIsAboutDropdownOpen(false)}
-                      className={`block px-4 py-2 text-sm transition-all duration-200 ${
-                        location.pathname === '/guides/free-gold-api'
-                          ? 'bg-gray-700 text-white'
-                          : 'text-gray-300 hover:bg-gray-700 hover:text-white active:bg-gray-800 active:scale-95'
-                      } focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-inset`}
-                    >
-                      راهنمای دریافت API طلا
-                    </Link>
                     {isAuthenticated && (
                       <div className="px-4 py-2 text-xs text-gray-400">
                         <div className="font-medium text-gray-300">برای مدیریت بیشتر به پروفایل مراجعه کنید.</div>
@@ -593,20 +582,6 @@ export default function Navbar() {
                       }`}
                     >
                       آموزش
-                    </Link>
-                    <Link
-                      to="/guides/free-gold-api"
-                      onClick={() => {
-                        setIsAboutDropdownOpen(false)
-                        setIsMobileMenuOpen(false)
-                      }}
-                      className={`block px-4 py-2 rounded-lg text-sm transition ${
-                        location.pathname === '/guides/free-gold-api'
-                          ? 'bg-gray-700 text-white'
-                          : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                      }`}
-                    >
-                      راهنمای دریافت API طلا
                     </Link>
                     {isAuthenticated && (
                       <div className="px-4 py-1 text-xs text-gray-400">

@@ -44,8 +44,16 @@ def get_user_friendly_api_error_message(error_msg: str) -> str:
 
 
 def get_user_strategy_or_404(user, **lookup):
-    """Fetch a strategy belonging to the current user (admins can access all)."""
+    """Fetch a strategy belonging to the current user (admins can access all).
+    Also allows access if the user has a valid marketplace subscription/trial."""
+    from django.db.models import Q
+    from core.models import TradingStrategy
+    
     queryset = TradingStrategy.objects.all()
     if not (user.is_staff or user.is_superuser):
-        queryset = queryset.filter(user=user)
+        queryset = queryset.filter(
+            Q(user=user) |
+            Q(marketplace_entry__accesses__user=user, 
+              marketplace_entry__accesses__status__in=['trial', 'active'])
+        ).distinct()
     return get_object_or_404(queryset, **lookup)

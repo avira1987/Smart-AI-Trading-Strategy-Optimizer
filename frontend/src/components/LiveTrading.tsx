@@ -1,164 +1,102 @@
-import { useState, useEffect, useCallback } from 'react'
-import { getStrategies, getLiveTrades, getAccountInfo, getMarketStatus, openTrade, closeTrade, syncPositions, TradingStrategy, LiveTrade, AccountInfo } from '../api/client'
+import { useState, useEffect } from 'react'
+import { getLiveTrades, getAccountInfo, closeTrade, syncPositions, getForwardTestReports, buildForwardTestReport, getAutoTradingSettings, toggleAutoTrading, deleteAutoTradingSettings, LiveTrade, AccountInfo, ForwardTestReport, AutoTradingSettings } from '../api/client'
 import { useToast } from './ToastProvider'
-import { useSymbol } from '../context/SymbolContext'
-import AutoTradingSettings from './AutoTradingSettings'
 import { useRateLimit } from '../hooks/useRateLimit'
 
 const REFRESH_INTERVAL_MS = 30000
 
 export default function LiveTrading() {
-  const [strategies, setStrategies] = useState<TradingStrategy[]>([])
   const [trades, setTrades] = useState<LiveTrade[]>([])
   const [accountInfo, setAccountInfo] = useState<AccountInfo | null>(null)
-  const [marketOpen, setMarketOpen] = useState<boolean>(false)
-  const [marketMessage, setMarketMessage] = useState<string>('')
-  const [loading, setLoading] = useState(false)
-  const [, setRefreshing] = useState(false)
+  const [reports, setReports] = useState<ForwardTestReport[]>([])
+  const [activeTab, setActiveTab] = useState<'monitoring' | 'trades' | 'reports'>('monitoring')
+  const [deployedStrategies, setDeployedStrategies] = useState<AutoTradingSettings[]>([])
+  const [loadingStrategies, setLoadingStrategies] = useState(false)
   const { showToast } = useToast()
-  const rateLimitClickOpenTrade = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'liveTrading-openTrade' })
+  
+  const normalizeArrayResponse = <T = any>(data: any): T[] => {
+    if (!data) return []
+    if (Array.isArray(data)) return data
+    if (Array.isArray(data?.results)) return data.results
+    if (Array.isArray(data?.data)) return data.data
+    if (Array.isArray(data?.data?.results)) return data.data.results
+    if (Array.isArray(data?.results?.data)) return data.results.data
+    return []
+  }
+
   const rateLimitClickCloseTrade = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'liveTrading-closeTrade' })
   const rateLimitClickSync = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'liveTrading-sync' })
-
-  // Form state
-  const [selectedStrategy, setSelectedStrategy] = useState<number | ''>('')
-  const { selectedSymbol } = useSymbol()
-  const [symbol, setSymbol] = useState('XAUUSD')
-  const [tradeType, setTradeType] = useState<'buy' | 'sell'>('buy')
-  const [volume, setVolume] = useState('0.01')
-  const [stopLoss, setStopLoss] = useState('')
-  const [takeProfit, setTakeProfit] = useState('')
+  const rateLimitClickToggleMonitoring = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'liveTrading-toggleMonitoring' })
+  const rateLimitClickDeleteMonitoring = useRateLimit({ minInterval: 2000, message: 'لطفاً صبر کنید قبل از کلیک مجدد', key: 'liveTrading-deleteMonitoring' })
 
   useEffect(() => {
     loadData()
     const interval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.hidden) {
-        return
-      }
+      if (typeof document !== 'undefined' && document.hidden) return
       refreshData()
     }, REFRESH_INTERVAL_MS)
     return () => clearInterval(interval)
   }, [])
 
-  useEffect(() => {
-    // Keep form symbol aligned with global selection if user hasn't changed it manually
-    setSymbol(selectedSymbol)
-  }, [selectedSymbol])
-
   const loadData = async () => {
-    setLoading(true)
     try {
-      await Promise.all([
-        loadStrategies(),
-        loadTrades(false), // show errors on initial load
-        loadAccountInfo(),
-        loadMarketStatus(),
-      ])
+      // Sequential calls or wrapped Promise.all to avoid one failure blocking everything
+      await loadTrades(false).catch(e => console.error('Error loading trades:', e))
+      await loadAccountInfo().catch(e => console.error('Error loading account info:', e))
+      await loadReports().catch(e => console.error('Error loading reports:', e))
+      await loadDeployedStrategies().catch(e => console.error('Error loading strategies:', e))
     } catch (error: any) {
-      showToast('خطا در بارگذاری داده‌ها: ' + (error.message || error), { type: 'error' })
+      console.error('Error in loadData:', error)
+      showToast('خطا در بارگذاری برخی داده‌ها', { type: 'error' })
+    }
+  }
+
+  const loadDeployedStrategies = async () => {
+    try {
+      setLoadingStrategies(true)
+      console.log('Fetching deployed strategies...')
+      const response = await getAutoTradingSettings()
+      console.log('Deployed strategies raw response:', response)
+      
+      const data = normalizeArrayResponse<AutoTradingSettings>(response.data)
+      console.log('Normalized deployed strategies:', data)
+      
+      setDeployedStrategies(data)
+    } catch (error: any) {
+      console.error('Error loading deployed strategies:', error)
+      showToast('خطا در بارگذاری استراتژی‌های مستقر شده', { type: 'error' })
     } finally {
-      setLoading(false)
+      setLoadingStrategies(false)
     }
   }
 
   const refreshData = async () => {
-    setRefreshing(true)
     try {
       await Promise.all([
-        loadTrades(true), // silent mode - don't show errors during refresh
+        loadTrades(true),
         loadAccountInfo(),
-        loadMarketStatus(),
+        loadDeployedStrategies(),
       ])
-    } catch (error) {
-      // Silent refresh errors
-    } finally {
-      setRefreshing(false)
-    }
-  }
-
-  const loadStrategies = async () => {
-    try {
-      const response = await getStrategies()
-      console.log('🔍 Strategies API response:', response)
-      console.log('🔍 Response data type:', typeof response.data)
-      console.log('🔍 Response data:', response.data)
-      console.log('🔍 Is array?:', Array.isArray(response.data))
-      
-      // Handle pagination format from Django REST Framework
-      let strategiesData: TradingStrategy[] = []
-      
-      // Check all possible response formats
-      if (response.data) {
-        if (Array.isArray(response.data)) {
-          // Direct array
-          strategiesData = response.data
-          console.log('✅ Found direct array format')
-        } else if (response.data.results && Array.isArray(response.data.results)) {
-          // Paginated format
-          strategiesData = response.data.results
-          console.log('✅ Found paginated format (results)')
-        } else if (Array.isArray(response.data.data)) {
-          // Nested data format
-          strategiesData = response.data.data
-          console.log('✅ Found nested data format')
-        } else {
-          console.warn('⚠️ Unknown response format:', response.data)
-        }
-      } else {
-        console.warn('⚠️ No data in response')
-      }
-      
-      console.log('📊 Parsed strategies data:', strategiesData)
-      console.log('📊 Number of strategies:', strategiesData.length)
-      if (strategiesData.length > 0) {
-        console.log('📊 First strategy:', strategiesData[0])
-      }
-      
-      // نمایش همه استراتژی‌ها (فعال و غیرفعال) برای امکان انتخاب
-      setStrategies(strategiesData)
-      if (strategiesData.length > 0 && !selectedStrategy) {
-        // ترجیحاً استراتژی فعال را انتخاب کن، در غیر این صورت اولین را
-        const activeStrategy = strategiesData.find((s: TradingStrategy) => s.is_active)
-        setSelectedStrategy(activeStrategy ? activeStrategy.id : strategiesData[0].id)
-      }
-    } catch (error: any) {
-      console.error('❌ Error loading strategies:', error)
-      console.error('❌ Error response:', error.response)
-      console.error('❌ Error message:', error.message)
-      showToast('خطا در بارگذاری استراتژی‌ها: ' + (error.response?.data?.detail || error.message || 'خطای ناشناخته'), { type: 'error' })
-    }
+    } catch (error) {}
   }
 
   const loadTrades = async (silent: boolean = false) => {
     try {
       const response = await getLiveTrades()
-      // Handle pagination format from Django REST Framework
-      let tradesData: LiveTrade[] = []
-      if (Array.isArray(response.data)) {
-        tradesData = response.data
-      } else if (response.data && 'results' in response.data && Array.isArray((response.data as any).results)) {
-        tradesData = (response.data as any).results
-      } else if (response.data && 'data' in response.data && Array.isArray((response.data as any).data)) {
-        tradesData = (response.data as any).data
-      }
-      
-      setTrades(tradesData)
+      let data = response.data as any
+      setTrades(Array.isArray(data) ? data : (data.results || []))
     } catch (error: any) {
-      console.error('Error loading trades:', error)
-      
-      // فقط در حالت non-silent پیام نمایش بده
-      if (!silent) {
-        // بررسی کن که آیا واقعاً خطا است یا فقط دیتابیس خالی است
-        if (error.response?.status === 404 || (error.response?.status === 200 && !error.response?.data)) {
-          // احتمالاً فقط خالی است، خطا نیست
-          setTrades([])
-          return
-        }
-        showToast('خطا در بارگذاری معاملات', { type: 'error' })
-      }
-      // در حالت silent هم آرایه خالی set کن تا UI خراب نشود
+      if (!silent) showToast('خطا در بارگذاری معاملات', { type: 'error' })
       setTrades([])
     }
+  }
+
+  const loadReports = async () => {
+    try {
+      const response = await getForwardTestReports()
+      let data = response.data as any
+      setReports(Array.isArray(data) ? data : (data.results || []))
+    } catch (error) {}
   }
 
   const loadAccountInfo = async () => {
@@ -167,321 +105,253 @@ export default function LiveTrading() {
       if (response.data.status === 'success') {
         setAccountInfo(response.data.account)
       }
-    } catch (error: any) {
-      // Account info may not be available
-    }
+    } catch (error) {}
   }
 
-  const loadMarketStatus = async () => {
-    try {
-      const response = await getMarketStatus()
-      if (response.data.status === 'success') {
-        setMarketOpen(response.data.market_open)
-        setMarketMessage(response.data.message)
-      }
-    } catch (error: any) {
-      setMarketOpen(false)
-      setMarketMessage('وضعیت بازار نامشخص است')
-    }
-  }
-
-  const handleOpenTrade = useCallback(
-    rateLimitClickOpenTrade(async () => {
-      if (!selectedStrategy) {
-        showToast('لطفاً یک استراتژی انتخاب کنید', { type: 'warning' })
-        return
-      }
-
-      if (!marketOpen) {
-        showToast(`بازار بسته است: ${marketMessage}`, { type: 'warning' })
-        return
-      }
-
+  const handleBuildReport = async (strategyId: number) => {
       try {
-        setLoading(true)
-        const response = await openTrade({
-          strategy_id: Number(selectedStrategy),
-          symbol,
-          trade_type: tradeType,
-          volume: parseFloat(volume),
-          stop_loss: stopLoss ? parseFloat(stopLoss) : undefined,
-          take_profit: takeProfit ? parseFloat(takeProfit) : undefined,
-        })
-
+      const response = await buildForwardTestReport(strategyId)
         if (response.data.status === 'success') {
-          showToast('معامله با موفقیت باز شد!', { type: 'success' })
-          await loadTrades(true) // silent mode after action
-          await loadAccountInfo()
-          // Reset form
-          setStopLoss('')
-          setTakeProfit('')
-        } else {
-          showToast(response.data.message || 'خطا در باز کردن معامله', { type: 'error' })
+        showToast('گزارش راستی‌آزمایی با موفقیت بیلد شد', { type: 'success' })
+        await loadReports()
+        setActiveTab('reports')
         }
       } catch (error: any) {
-        const message = error.response?.data?.message || error.message || 'خطا در باز کردن معامله'
-        showToast(message, { type: 'error' })
-      } finally {
-        setLoading(false)
+      showToast(error.response?.data?.message || 'خطا در بیلد گزارش', { type: 'error' })
       }
-    }),
-    [selectedStrategy, marketOpen, marketMessage, symbol, tradeType, volume, stopLoss, takeProfit, rateLimitClickOpenTrade, showToast, setLoading, loadTrades, loadAccountInfo, setStopLoss, setTakeProfit]
-  )
+  }
 
   const handleCloseTrade = (tradeId: number) => {
-    if (!confirm('آیا مطمئن هستید که می‌خواهید این معامله را ببندید؟')) {
-      return
-    }
-
+    if (!confirm('آیا مطمئن هستید؟')) return
     const closeTradeAction = rateLimitClickCloseTrade(async () => {
       try {
-        setLoading(true)
         const response = await closeTrade(tradeId)
-
         if (response.data.status === 'success') {
-          showToast('معامله با موفقیت بسته شد!', { type: 'success' })
-          await loadTrades(true) // silent mode after action
+          showToast('معامله بسته شد', { type: 'success' })
+          await loadTrades(true)
           await loadAccountInfo()
-        } else {
-          showToast(response.data.message || 'خطا در بستن معامله', { type: 'error' })
         }
       } catch (error: any) {
-        const message = error.response?.data?.message || error.message || 'خطا در بستن معامله'
-        showToast(message, { type: 'error' })
-      } finally {
-        setLoading(false)
+        showToast('خطا در بستن معامله', { type: 'error' })
       }
     })
-    
     closeTradeAction()
   }
 
   const handleSyncPositions = rateLimitClickSync(async () => {
     try {
-      setLoading(true)
       const response = await syncPositions()
       if (response.data.status === 'success') {
-        showToast(
-          `همگام‌سازی انجام شد: ${response.data.synced} جدید، ${response.data.updated} به‌روز، ${response.data.closed} بسته شده`,
-          { type: 'success' }
-        )
-        await loadTrades(true) // silent mode after action
+        showToast(`همگام‌سازی انجام شد`, { type: 'success' })
+        await loadTrades(true)
       }
     } catch (error: any) {
-      const message = error.response?.data?.message || error.message || 'خطا در همگام‌سازی'
-      showToast(message, { type: 'error' })
-    } finally {
-      setLoading(false)
+      showToast('خطا در همگام‌سازی', { type: 'error' })
     }
   })
 
+  const handleDeleteMonitoring = (settingId: number) => {
+    if (!confirm('آیا از حذف این استراتژی از پایش مطمئن هستید؟')) return
+
+    const deleteAction = rateLimitClickDeleteMonitoring(async () => {
+      try {
+        const response = await deleteAutoTradingSettings(settingId)
+        if (!response || response.status === 204 || response.data?.status === 'success') {
+          showToast('استراتژی از فهرست پایش حذف شد', { type: 'success' })
+          await loadDeployedStrategies()
+        } else {
+          const message =
+            response.data?.message ||
+            'خطا در حذف استراتژی از پایش'
+          showToast(message, { type: 'error' })
+        }
+      } catch (error: any) {
+        const message =
+          error?.response?.data?.message ||
+          error?.response?.data?.detail ||
+          error?.message ||
+          'خطا در حذف استراتژی از پایش'
+        showToast(message, { type: 'error' })
+      }
+    })
+
+    deleteAction()
+  }
+
+  const handleToggleMonitoring = (settingId: number) => {
+    const toggleAction = rateLimitClickToggleMonitoring(async () => {
+      try {
+        const response = await toggleAutoTrading(settingId)
+        if (response.data.status === 'success') {
+          const isEnabled = response.data.is_enabled
+          showToast(
+            isEnabled
+              ? 'پایش خودکار برای این استراتژی فعال شد'
+              : 'پایش خودکار برای این استراتژی متوقف شد',
+            { type: 'success' }
+          )
+          await loadDeployedStrategies()
+        } else {
+          showToast(response.data.message || 'خطا در تغییر وضعیت پایش استراتژی', { type: 'error' })
+        }
+      } catch (error: any) {
+        const message =
+          error?.response?.data?.message ||
+          error?.response?.data?.detail ||
+          error?.message ||
+          'خطا در تغییر وضعیت پایش استراتژی'
+        showToast(message, { type: 'error' })
+      }
+    })
+
+    toggleAction()
+  }
+
   const openTrades = trades.filter(t => t.status === 'open')
-  const closedTrades = trades.filter(t => t.status === 'closed')
-
+  
   return (
-    <div className="space-y-3">
-      {/* Auto Trading Settings */}
-      <AutoTradingSettings />
-
+    <div className="space-y-4 direction-rtl" style={{ direction: 'rtl', textAlign: 'right' }}>
       {/* Account Info */}
       {accountInfo && (
-        <div className="bg-gray-800 rounded-lg p-3">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-lg font-semibold text-white">اطلاعات حساب Litefinex</h2>
-            {accountInfo.is_demo !== undefined && (
-              <span className={`px-3 py-1 rounded text-sm font-semibold ${
-                accountInfo.is_demo 
-                  ? 'bg-yellow-600 text-white' 
-                  : 'bg-green-600 text-white'
-              }`}>
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 shadow-lg">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <span className="text-blue-500">💰</span>
+              حساب Litefinex
+            </h2>
+            <span className={`px-3 py-1 rounded-full text-xs font-bold ${accountInfo.is_demo ? 'bg-yellow-500/20 text-yellow-500' : 'bg-green-500/20 text-green-500'}`}>
                 {accountInfo.is_demo ? 'حساب دمو' : 'حساب واقعی'}
               </span>
-            )}
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            <div>
-              <div className="text-gray-400 text-xs">موجودی</div>
-              <div className="text-white text-base font-semibold">{accountInfo.balance.toFixed(2)} {accountInfo.currency}</div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="bg-gray-900/50 p-3 rounded-lg">
+              <div className="text-gray-400 text-xs mb-1">موجودی</div>
+              <div className="text-white font-bold">{accountInfo.balance.toLocaleString()} {accountInfo.currency}</div>
             </div>
-            <div>
-              <div className="text-gray-400 text-xs">سرمایه</div>
-              <div className="text-white text-base font-semibold">{accountInfo.equity.toFixed(2)} {accountInfo.currency}</div>
+            <div className="bg-gray-900/50 p-3 rounded-lg">
+              <div className="text-gray-400 text-xs mb-1">سرمایه (Equity)</div>
+              <div className="text-white font-bold">{accountInfo.equity.toLocaleString()} {accountInfo.currency}</div>
             </div>
-            <div>
-              <div className="text-gray-400 text-xs">حاشیه آزاد</div>
-              <div className="text-white text-base font-semibold">{accountInfo.free_margin.toFixed(2)} {accountInfo.currency}</div>
+            <div className="bg-gray-900/50 p-3 rounded-lg">
+              <div className="text-gray-400 text-xs mb-1">مارجین آزاد</div>
+              <div className="text-white font-bold">{accountInfo.free_margin.toLocaleString()} {accountInfo.currency}</div>
             </div>
-            <div>
-              <div className="text-gray-400 text-xs">سطح حاشیه</div>
-              <div className="text-white text-base font-semibold">{accountInfo.margin_level ? accountInfo.margin_level.toFixed(2) + '%' : 'N/A'}</div>
+            <div className="bg-gray-900/50 p-3 rounded-lg">
+              <div className="text-gray-400 text-xs mb-1">سطح مارجین</div>
+              <div className="text-white font-bold">{accountInfo.margin_level ? accountInfo.margin_level.toFixed(1) + '%' : '---'}</div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Market Status */}
-      <div className={`rounded-lg p-2 ${marketOpen ? 'bg-green-900 bg-opacity-30 border border-green-700' : 'bg-red-900 bg-opacity-30 border border-red-700'}`}>
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-white text-sm font-semibold">
-              وضعیت بازار: {marketOpen ? 'باز' : 'بسته'}
+      {/* Tabs */}
+      <div className="flex bg-gray-800 p-1 rounded-xl border border-gray-700">
+        <button onClick={() => setActiveTab('monitoring')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition ${activeTab === 'monitoring' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}>پایش استراتژی‌ها</button>
+        <button onClick={() => setActiveTab('trades')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition ${activeTab === 'trades' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}>معاملات باز ({openTrades.length})</button>
+        <button onClick={() => setActiveTab('reports')} className={`flex-1 py-2 rounded-lg font-bold text-sm transition ${activeTab === 'reports' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-white'}`}>راستی‌آزمایی و بیلد</button>
             </div>
-            <div className="text-gray-300 text-xs">{marketMessage}</div>
-          </div>
-          <button
-            onClick={handleSyncPositions}
-            disabled={loading}
-            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:opacity-50"
-          >
-            {loading ? '...' : 'همگام‌سازی'}
-          </button>
-        </div>
-      </div>
 
-      {/* Open Trade Form */}
-      <div className="bg-gray-800 rounded-lg p-3">
-        <h2 className="text-lg font-semibold text-white mb-2">باز کردن معامله جدید</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <div>
-            <label className="block text-xs font-medium text-gray-300 mb-2">استراتژی</label>
-            <select
-              value={selectedStrategy}
-              onChange={(e) => setSelectedStrategy(e.target.value ? Number(e.target.value) : '')}
-              className="select-compact"
-            >
-              <option value="">انتخاب استراتژی...</option>
-              {strategies.length === 0 ? (
-                <option value="" disabled>
-                  هیچ استراتژی یافت نشد
-                </option>
-              ) : (
-                strategies.map((strategy) => (
-                  <option key={strategy.id} value={strategy.id}>
-                    {strategy.name} {!strategy.is_active ? '(غیرفعال)' : ''}
-                  </option>
-                ))
-              )}
-            </select>
-            {strategies.length === 0 && (
-              <p className="text-xs text-yellow-400 mt-1">
-                ⚠️ هیچ استراتژی آپلود نشده است. لطفاً ابتدا استراتژی را در بخش داشبورد آپلود کنید.
-              </p>
+      {activeTab === 'monitoring' && (
+        <div className="space-y-4">
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold text-white">استراتژی‌های مستقر شده</h2>
+              <div className="flex gap-2">
+                {loadingStrategies && <div className="animate-spin h-4 w-4 border-2 border-blue-500 border-t-transparent rounded-full"></div>}
+                <button onClick={handleSyncPositions} className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-xs transition">همگام‌سازی با MT5</button>
+              </div>
+          </div>
+            {loadingStrategies && deployedStrategies.length === 0 ? (
+              <div className="text-center py-8 text-gray-500">در حال بارگذاری...</div>
+            ) : deployedStrategies.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 border border-dashed border-gray-700 rounded-lg">استراتژی فعالی یافت نشد.</div>
+            ) : (
+              <div className="space-y-3">
+                {deployedStrategies.map(s => (
+                  <div key={s.id} className="bg-gray-900/50 p-4 rounded-xl border border-gray-700 flex flex-col md:flex-row justify-between items-center gap-4">
+                    <div>
+                      <div className="text-white font-bold">{s.strategy_name}</div>
+                      <div className="flex gap-2 mt-1">
+                        <span className="text-[10px] bg-blue-500/10 text-blue-400 px-2 py-0.5 rounded">نماد: {s.symbol}</span>
+                        <span className="text-[10px] bg-purple-500/10 text-purple-400 px-2 py-0.5 rounded">تایم‌فریم: {s.timeframe}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <div className="text-left md:text-right">
+                        {s.is_enabled ? (
+                          <div className="text-green-400 text-xs font-bold animate-pulse flex items-center gap-1">
+                            <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                            در حال پایش
+                          </div>
+                        ) : (
+                          <div className="text-gray-400 text-xs font-bold flex items-center gap-1">
+                            <span className="w-2 h-2 bg-gray-500 rounded-full"></span>
+                            پایش متوقف شده
+                          </div>
+                        )}
+                        <div className="text-[10px] text-gray-500 mt-1">
+                          آخرین بررسی: {s.last_check_time ? new Date(s.last_check_time).toLocaleTimeString('fa-IR') : '---'}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleToggleMonitoring(s.id!)}
+                        className={`px-4 py-2 rounded-lg text-xs font-bold transition ${
+                          s.is_enabled
+                            ? 'bg-red-600/20 hover:bg-red-600 text-red-400 hover:text-white border border-red-600/40'
+                            : 'bg-green-600/20 hover:bg-green-600 text-green-400 hover:text-white border border-green-600/40'
+                        }`}
+                      >
+                        {s.is_enabled ? 'توقف پایش' : 'شروع پایش'}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteMonitoring(s.id!)}
+                        className="px-4 py-2 bg-red-700/20 hover:bg-red-700 text-red-400 hover:text-white border border-red-600/40 rounded-lg text-xs font-bold transition"
+                      >
+                        حذف از پایش
+                      </button>
+                      <button
+                        onClick={() => handleBuildReport(s.strategy)}
+                        className="px-4 py-2 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white border border-blue-600/30 rounded-lg text-xs font-bold transition"
+                      >
+                        بیلد گزارش عملکرد
+                      </button>
+                    </div>
+                  </div>
+                ))}
+          </div>
             )}
           </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-300 mb-2">نماد</label>
-            <input
-              type="text"
-              value={symbol}
-              onChange={(e) => setSymbol(e.target.value.toUpperCase())}
-              className="input-compact"
-              placeholder="XAUUSD"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-300 mb-2">نوع معامله</label>
-            <select
-              value={tradeType}
-              onChange={(e) => setTradeType(e.target.value as 'buy' | 'sell')}
-              className="select-compact"
-            >
-              <option value="buy">خرید (Buy)</option>
-              <option value="sell">فروش (Sell)</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-300 mb-2">حجم (لات)</label>
-            <input
-              type="number"
-              value={volume}
-              onChange={(e) => setVolume(e.target.value)}
-              step="0.01"
-              min="0.01"
-              className="input-compact"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-300 mb-2">حد ضرر - اختیاری</label>
-            <input
-              type="number"
-              value={stopLoss}
-              onChange={(e) => setStopLoss(e.target.value)}
-              step="0.01"
-              className="input-compact"
-              placeholder="خالی"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-300 mb-2">حد سود - اختیاری</label>
-            <input
-              type="number"
-              value={takeProfit}
-              onChange={(e) => setTakeProfit(e.target.value)}
-              step="0.01"
-              className="input-compact"
-              placeholder="خالی"
-            />
-          </div>
         </div>
+      )}
 
-        <button
-          onClick={handleOpenTrade}
-          disabled={loading || !marketOpen || !selectedStrategy}
-          className="mt-2 w-full md:w-auto btn-success"
-        >
-          {loading ? 'در حال باز کردن...' : 'باز کردن معامله'}
-        </button>
-      </div>
-
-      {/* Open Trades */}
-      <div className="bg-gray-800 rounded-lg p-3">
-        <h2 className="text-lg font-semibold text-white mb-2">
-          معاملات باز ({openTrades.length})
-        </h2>
+      {activeTab === 'trades' && (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden shadow-lg">
         {openTrades.length === 0 ? (
-          <p className="text-gray-400 text-sm">معامله باز وجود ندارد</p>
+            <div className="p-8 text-center text-gray-500 italic">معامله باز فعالی وجود ندارد.</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-right text-sm">
-              <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="px-2 py-1 text-gray-300 text-xs">تیکت</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">نماد</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">نوع</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">حجم</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">قیمت باز</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">قیمت فعلی</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">سود/زیان</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">عملیات</th>
+              <table className="w-full text-right">
+                <thead className="bg-gray-900/50 text-gray-400 text-xs uppercase">
+                  <tr>
+                    <th className="px-4 py-3 font-medium">نماد / نوع</th>
+                    <th className="px-4 py-3 font-medium">حجم</th>
+                    <th className="px-4 py-3 font-medium">قیمت ورود</th>
+                    <th className="px-4 py-3 font-medium">سود/زیان</th>
+                    <th className="px-4 py-3 font-medium text-center">عملیات</th>
                 </tr>
               </thead>
-              <tbody>
-                {openTrades.map((trade) => (
-                  <tr key={trade.id} className="border-b border-gray-700">
-                    <td className="px-2 py-1 text-white">{trade.mt5_ticket}</td>
-                    <td className="px-2 py-1 text-white">{trade.symbol}</td>
-                    <td className={`px-2 py-1 ${trade.trade_type === 'buy' ? 'text-green-400' : 'text-red-400'}`}>
-                      {trade.trade_type === 'buy' ? 'خرید' : 'فروش'}
+                <tbody className="divide-y divide-gray-700 text-sm">
+                  {openTrades.map((t) => (
+                    <tr key={t.id} className="hover:bg-gray-700/30 transition">
+                      <td className="px-4 py-4">
+                        <div className="text-white font-bold">{t.symbol}</div>
+                        <div className={`text-[10px] font-bold ${t.trade_type === 'buy' ? 'text-green-500' : 'text-red-500'}`}>{t.trade_type.toUpperCase()}</div>
                     </td>
-                    <td className="px-2 py-1 text-white">{trade.volume}</td>
-                    <td className="px-2 py-1 text-white">{trade.open_price.toFixed(5)}</td>
-                    <td className="px-2 py-1 text-white">{trade.current_price?.toFixed(5) || 'N/A'}</td>
-                    <td className={`px-2 py-1 font-semibold ${trade.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {trade.profit.toFixed(2)}
-                    </td>
-                    <td className="px-2 py-1">
-                      <button
-                        onClick={() => handleCloseTrade(trade.id)}
-                        disabled={loading}
-                        className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs transition disabled:opacity-50"
-                      >
-                        بستن
-                      </button>
+                      <td className="px-4 py-4 text-white font-mono">{t.volume}</td>
+                      <td className="px-4 py-4 text-gray-300 font-mono">{t.open_price.toFixed(5)}</td>
+                      <td className={`px-4 py-4 font-bold font-mono ${t.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{t.profit > 0 ? '+' : ''}{t.profit.toFixed(2)}</td>
+                      <td className="px-4 py-4 text-center">
+                        <button onClick={() => handleCloseTrade(t.id)} className="px-3 py-1 bg-red-500/10 text-red-500 rounded-lg text-xs font-bold border border-red-500/30">بستن</button>
                     </td>
                   </tr>
                 ))}
@@ -490,52 +360,61 @@ export default function LiveTrading() {
           </div>
         )}
       </div>
+      )}
 
-      {/* Closed Trades */}
-      {closedTrades.length > 0 && (
-        <div className="bg-gray-800 rounded-lg p-3">
-          <h2 className="text-lg font-semibold text-white mb-2">
-            معاملات بسته شده ({closedTrades.length})
-          </h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-right text-sm">
-              <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="px-2 py-1 text-gray-300 text-xs">تیکت</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">نماد</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">نوع</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">حجم</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">قیمت باز</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">قیمت بسته</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">سود/زیان</th>
-                  <th className="px-2 py-1 text-gray-300 text-xs">زمان بسته</th>
-                </tr>
-              </thead>
-              <tbody>
-                {closedTrades.slice(0, 10).map((trade) => (
-                  <tr key={trade.id} className="border-b border-gray-700">
-                    <td className="px-2 py-1 text-white">{trade.mt5_ticket}</td>
-                    <td className="px-2 py-1 text-white">{trade.symbol}</td>
-                    <td className={`px-2 py-1 ${trade.trade_type === 'buy' ? 'text-green-400' : 'text-red-400'}`}>
-                      {trade.trade_type === 'buy' ? 'خرید' : 'فروش'}
-                    </td>
-                    <td className="px-2 py-1 text-white">{trade.volume}</td>
-                    <td className="px-2 py-1 text-white">{trade.open_price.toFixed(5)}</td>
-                    <td className="px-2 py-1 text-white">{trade.close_price?.toFixed(5) || 'N/A'}</td>
-                    <td className={`px-2 py-1 font-semibold ${trade.profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {trade.profit.toFixed(2)}
-                    </td>
-                    <td className="px-2 py-1 text-gray-400 text-xs">
-                      {trade.closed_at ? new Date(trade.closed_at).toLocaleString('fa-IR') : 'N/A'}
-                    </td>
-                  </tr>
+      {activeTab === 'reports' && (
+        <div className="space-y-4">
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+            <h2 className="text-lg font-bold text-white mb-4">گزارشات راستی‌آزمایی (Verification Reports)</h2>
+            {reports.length === 0 ? (
+              <div className="text-center py-8 text-gray-500 border border-dashed border-gray-700 rounded-lg">هنوز گزارشی بیلد نشده است. برای بیلد گزارش، از تب پایش روی دکمه «بیلد گزارش عملکرد» کلیک کنید.</div>
+            ) : (
+              <div className="space-y-4">
+                {reports.map(r => (
+                  <div key={r.id} className="bg-gray-900 border border-gray-700 rounded-xl p-4 shadow-sm">
+                    <div className="flex justify-between items-start mb-4 border-b border-gray-800 pb-3">
+                      <div>
+                        <div className="text-white font-bold">{r.strategy_name}</div>
+                        <div className="text-[10px] text-gray-500 mt-1">دوره: {new Date(r.start_date).toLocaleDateString('fa-IR')} تا {new Date(r.end_date).toLocaleDateString('fa-IR')}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold ${r.compliance_score > 80 ? 'bg-green-500/20 text-green-500' : 'bg-yellow-500/20 text-yellow-500'}`}>امتیاز تطابق: {r.compliance_score.toFixed(0)}%</div>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="text-center p-2 bg-gray-800/50 rounded-lg">
+                        <div className="text-gray-500 text-[10px] mb-1">بازدهی واقعی</div>
+                        <div className={`font-bold ${r.actual_return >= 0 ? 'text-green-400' : 'text-red-400'}`}>{r.actual_return.toFixed(2)}</div>
+                      </div>
+                      <div className="text-center p-2 bg-gray-800/50 rounded-lg">
+                        <div className="text-gray-500 text-[10px] mb-1">بازدهی مورد انتظار</div>
+                        <div className="text-blue-400 font-bold">{r.expected_return.toFixed(2)}%</div>
+                      </div>
+                      <div className="text-center p-2 bg-gray-800/50 rounded-lg">
+                        <div className="text-gray-500 text-[10px] mb-1">معاملات واقعی</div>
+                        <div className="text-white font-bold">{r.actual_trades_count}</div>
+                      </div>
+                      <div className="text-center p-2 bg-gray-800/50 rounded-lg">
+                        <div className="text-gray-500 text-[10px] mb-1">نرخ برد واقعی</div>
+                        <div className="text-white font-bold">{r.performance_metrics?.win_rate?.toFixed(1)}%</div>
+                      </div>
+                    </div>
+                    {r.verification_details?.anomalies?.length > 0 && (
+                      <div className="mt-4 p-3 bg-red-900/10 border border-red-900/30 rounded-lg">
+                        <div className="text-red-400 text-xs font-bold mb-2 flex items-center gap-1">⚠️ انحرافات شناسایی شده:</div>
+                        <ul className="text-[10px] text-red-300/80 list-disc list-inside">
+                          {r.verification_details.anomalies.map((a: string, i: number) => <li key={i}>{a}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            )}
           </div>
         </div>
       )}
+
     </div>
   )
 }
-

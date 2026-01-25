@@ -15,7 +15,20 @@ class SecurityMiddleware(MiddlewareMixin):
     Middleware to detect and block suspicious requests
     """
     
-    # Suspicious user agents (common bot patterns)
+    # Allowed (known safe) bot user agents - e.g. search engine crawlers
+    # These should be specific to avoid accidentally allowing unknown bots.
+    ALLOWED_BOT_USER_AGENTS = [
+        r'adsbot-google',
+        r'googlebot',
+        r'bingbot',
+        r'slurp',          # Yahoo
+        r'duckduckbot',
+    ]
+    
+    # Suspicious user agents (generic bot / script patterns)
+    # NOTE: we no longer block all "bot" strings blindly; instead we:
+    #   1) allow known safe bots above
+    #   2) treat the rest as suspicious
     SUSPICIOUS_USER_AGENTS = [
         r'bot', r'crawler', r'spider', r'scraper',
         r'curl', r'wget', r'python-requests',
@@ -44,12 +57,23 @@ class SecurityMiddleware(MiddlewareMixin):
             return None
         
         # Check user agent
-        user_agent = request.META.get('HTTP_USER_AGENT', '').lower()
+        user_agent = request.META.get('HTTP_USER_AGENT', '')
+        user_agent_lower = user_agent.lower()
         
-        # Block suspicious user agents
+        # Allow known safe bots (e.g., Google, Bing) on protected paths
+        for allowed_pattern in self.ALLOWED_BOT_USER_AGENTS:
+            if re.search(allowed_pattern, user_agent_lower, re.IGNORECASE):
+                # Known search/ads bot → allow request and just log at info level
+                logger.info(
+                    f"Allowed known bot user agent: {user_agent_lower} "
+                    f"from {self._get_client_ip(request)}"
+                )
+                return None
+        
+        # Block suspicious user agents (unknown / generic bots, scrapers, tools)
         for pattern in self.SUSPICIOUS_USER_AGENTS:
-            if re.search(pattern, user_agent, re.IGNORECASE):
-                logger.warning(f"Suspicious user agent blocked: {user_agent} from {self._get_client_ip(request)}")
+            if re.search(pattern, user_agent_lower, re.IGNORECASE):
+                logger.warning(f"Suspicious user agent blocked: {user_agent_lower} from {self._get_client_ip(request)}")
                 return JsonResponse(
                     {
                         'success': False,

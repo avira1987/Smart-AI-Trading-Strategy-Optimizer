@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { getStrategies, addStrategy, deleteStrategy as apiDeleteStrategy, processStrategy, getStrategyProgress, getAPIConfigurations, setPrimaryStrategy, downloadStrategy, getStrategyFileContent, toggleStrategyActive, ensureCsrfToken, getJobs } from '../api/client'
+import { getStrategies, addStrategy, deleteStrategy as apiDeleteStrategy, processStrategy, getStrategyProgress, getAPIConfigurations, setPrimaryStrategy, downloadStrategy, getStrategyFileContent, toggleStrategyActive, ensureCsrfToken } from '../api/client'
 import { useToast } from './ToastProvider'
 import StrategyQuestions from './StrategyQuestions'
 import StrategyOptimizer from './StrategyOptimizer'
@@ -43,7 +43,6 @@ export default function Strategies() {
   const [selectedStrategyForGapGPT, setSelectedStrategyForGapGPT] = useState<TradingStrategy | null>(null)
   const [gapGPTFileContent, setGapGPTFileContent] = useState<string>('')
   const [loadingFileContent, setLoadingFileContent] = useState(false)
-  const [strategiesWithRecommendations, setStrategiesWithRecommendations] = useState<Set<number>>(new Set())
   const { showToast } = useToast()
   const expandedStrategyIdRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -61,7 +60,6 @@ export default function Strategies() {
   useEffect(() => {
     loadStrategies()
     checkAIProvider()
-    checkImprovementRecommendations()
     
     // Check AI provider status periodically with throttling
     const interval = setInterval(() => {
@@ -102,51 +100,18 @@ export default function Strategies() {
     }
   }
 
-  const checkImprovementRecommendations = async () => {
-    try {
-      const jobsResponse = await getJobs()
-      const normalizeArrayResponse = <T = any>(data: any): T[] => {
-        if (!data) return []
-        if (Array.isArray(data)) return data
-        if (Array.isArray(data?.results)) return data.results
-        if (Array.isArray(data?.data)) return data.data
-        return []
-      }
-      
-      const jobsData = normalizeArrayResponse(jobsResponse.data)
-      const strategiesWithRecs = new Set<number>()
-      
-      // Check each job's result for improvement recommendations
-      for (const job of jobsData) {
-        if (job.result && job.result.improvement_recommendations && 
-            Array.isArray(job.result.improvement_recommendations) && 
-            job.result.improvement_recommendations.length > 0) {
-          // Get strategy ID from job
-          if (job.strategy && typeof job.strategy === 'object' && job.strategy.id) {
-            strategiesWithRecs.add(job.strategy.id)
-          } else if (typeof job.strategy === 'number') {
-            strategiesWithRecs.add(job.strategy)
-          }
-        }
-      }
-      
-      setStrategiesWithRecommendations(strategiesWithRecs)
-    } catch (error) {
-      console.error('Error checking improvement recommendations:', error)
-    }
-  }
-
   const loadStrategies = async () => {
     try {
       const response = await getStrategies()
       console.log('Strategies response:', response) // Debug log
       
       // Handle Django REST Framework pagination format
-      let strategiesData = []
-      if (response.data && response.data.results) {
-        strategiesData = response.data.results
-      } else if (Array.isArray(response.data)) {
-        strategiesData = response.data
+      let strategiesData: any[] = []
+      const data = response.data as any
+      if (data && data.results) {
+        strategiesData = data.results
+      } else if (Array.isArray(data)) {
+        strategiesData = data
       }
       
       console.log('Strategies data:', strategiesData) // Debug log
@@ -672,28 +637,6 @@ export default function Strategies() {
               <div key={strategy.id} className="bg-gray-700 rounded-lg overflow-hidden">
                 {/* Header Section - Always Visible */}
                 <div className="p-4">
-                  {/* Improvement Recommendations Alert */}
-                  {strategiesWithRecommendations.has(strategy.id) && (
-                    <div className="mb-4 p-4 bg-yellow-900/30 border border-yellow-700 rounded-lg">
-                      <div className="flex items-start gap-3">
-                        <span className="text-yellow-400 text-2xl">⚠️</span>
-                        <div className="flex-1">
-                          <span className="inline-block text-yellow-200 text-xs font-medium mb-1 px-2 py-0.5 bg-yellow-800/50 rounded">هشدار: توصیه‌های بهبود موجود است</span>
-                          <p className="text-yellow-100 text-sm mb-3 mt-2">
-                            نتایج بک‌تست اخیر شما شامل توصیه‌هایی برای بهبود استراتژی است. برای مشاهده جزئیات به بخش نتایج بروید و برای اعمال تغییرات، استراتژی خود را دوباره پردازش کنید.
-                          </p>
-                          <button
-                            onClick={() => {
-                              window.location.href = '/results'
-                            }}
-                            className="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 active:bg-yellow-800 active:scale-95 text-white rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-yellow-500 focus:ring-offset-1"
-                          >
-                            مشاهده نتایج و توصیه‌ها
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                   
                   {/* Backtest Capability Warning */}
                   {strategy.processing_status === 'processed' && strategy.has_backtest_capability === false && (

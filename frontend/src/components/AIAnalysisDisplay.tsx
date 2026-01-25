@@ -71,6 +71,10 @@ export default function AIAnalysisDisplay({ analysisText, resultMetrics }: AIAna
         if (currentSection && currentSection.content.trim()) sections.push(currentSection)
         currentSection = { title: 'تحلیل شرایط خروج', content: '', icon: '🚶' }
         continue
+      } else if (isHeader(['نتیجه‌گیری', 'جمع‌بندی', '🏁 نتیجه‌گیری'])) {
+        if (currentSection && currentSection.content.trim()) sections.push(currentSection)
+        currentSection = { title: 'نتیجه‌گیری', content: '', icon: '🏁' }
+        continue
       }
       
       // Skip separator lines and formatting artifacts
@@ -107,20 +111,26 @@ export default function AIAnalysisDisplay({ analysisText, resultMetrics }: AIAna
         .trim()
     })
     
-    // Filter out weaknesses section if it's empty or has no meaningful content
+    // Filter out sections if they're empty or have no meaningful content
     sections = sections.filter(section => {
-      if (section.title === 'نقاط ضعف' || section.title.includes('نقاط ضعف')) {
-        const content = section.content.trim()
-        // Check if content is empty or just contains placeholder text
-        if (!content || 
-            content.length === 0 || 
-            content === 'محتوایی برای نمایش وجود ندارد.' ||
-            content.toLowerCase().includes('هیچ') ||
-            content.toLowerCase().includes('ندارد')) {
-          return false
-        }
+      const emptyOrPlaceholder = (content: string) => {
+        const trimmed = content.trim()
+        return !trimmed || 
+               trimmed.length === 0 || 
+               trimmed === 'محتوایی برای نمایش وجود ندارد.' ||
+               trimmed.toLowerCase().includes('هیچ') ||
+               trimmed.toLowerCase().includes('ندارد')
       }
-      return true
+
+      if (section.title === 'نقاط ضعف' || section.title.includes('نقاط ضعف')) {
+        return !emptyOrPlaceholder(section.content)
+      }
+      
+      if (section.title === 'نتیجه‌گیری' || section.title.includes('نتیجه‌گیری')) {
+        return !emptyOrPlaceholder(section.content)
+      }
+      
+      return section.content.trim().length > 0
     })
     
     // If no sections found or all sections are empty, return the whole text as one section

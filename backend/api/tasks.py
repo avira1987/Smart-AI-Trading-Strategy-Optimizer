@@ -1258,6 +1258,12 @@ def run_auto_trading():
         
         try:
             result = execute_auto_trade(settings)
+            
+            # بروزرسانی زمان آخرین بررسی، صرف‌نظر از اینکه معامله‌ای باز شده یا خیر.
+            # این باعث می‌شود در پنل کاربری زمان آخرین پایش به درستی نمایش داده شود.
+            settings.last_check_time = timezone.now()
+            settings.save(update_fields=['last_check_time'])
+            
             results.append({
                 'strategy': settings.strategy.name,
                 'result': result

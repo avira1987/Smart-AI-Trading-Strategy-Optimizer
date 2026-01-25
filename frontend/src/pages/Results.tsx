@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react'
-import { getResults, deleteResult, clearResults, getJobs, type Job, type Result as APIResult } from '../api/client'
+import { getResults, deleteResult, clearResults, getJobs, getJob, enableAutoTradingFromBacktest, type Job, type Result as APIResult } from '../api/client'
+import { checkProfileCompletion } from '../api/auth'
+import { useAuth } from '../context/AuthContext'
 import { Line } from 'react-chartjs-2'
 import AIAnalysisDisplay from '../components/AIAnalysisDisplay'
 import GamificationScore from '../components/GamificationScore'
 import Breadcrumbs from '../components/Breadcrumbs'
+import { navigateTo } from '../utils/navigation'
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -28,16 +31,30 @@ ChartJS.register(
 type Result = APIResult
 
 export default function Results() {
+  const { user } = useAuth()
   const [results, setResults] = useState<Result[]>([])
   const [selectedResult, setSelectedResult] = useState<Result | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [tradesExpanded, setTradesExpanded] = useState(false)
+  const [enablingAutoTrade, setEnablingAutoTrade] = useState(false)
+  const [canUseAutoTrading, setCanUseAutoTrading] = useState(false)
 
   useEffect(() => {
     loadResults()
+    checkAutoTradingPermission()
   }, [])
+
+  const checkAutoTradingPermission = async () => {
+    try {
+      const response = await checkProfileCompletion()
+      setCanUseAutoTrading(response.can_use_auto_trading || false)
+    } catch (error) {
+      console.error('Error checking auto trading permission:', error)
+      setCanUseAutoTrading(false)
+    }
+  }
 
   // Reset trades expanded state when selected result changes
   useEffect(() => {
@@ -297,8 +314,63 @@ export default function Results() {
                 {/* Gamification Score */}
                 <GamificationScore />
 
-                {/* Share Button */}
-                <div className="mb-6 flex justify-end">
+                {/* Action Buttons */}
+                <div className="mb-6 flex justify-end gap-3">
+                  {canUseAutoTrading || user?.is_superuser ? (
+                    <button
+                      onClick={async () => {
+                        if (!selectedResult) return
+                        
+                        const confirmDeploy = window.confirm(
+                          `🚀 آیا از استقرار (Deploy) این استراتژی اطمینان دارید؟\n\n` +
+                          `این استراتژی با پارامترهای زیر فعال خواهد شد:\n` +
+                          `• نماد: ${selectedResult.data_sources?.symbol || 'XAUUSD'}\n` +
+                          `• تایم‌فریم: ${selectedResult.data_sources?.strategy_timeframe || 'M15'}\n` +
+                          `• بازدهی بک‌تست: ${selectedResult.total_return.toFixed(2)}%\n\n` +
+                          `سیستم از این پس به صورت خودکار بازار را بر اساس این بک‌تست پایش می‌کند.`
+                        );
+                        
+                        if (!confirmDeploy) return;
+
+                        try {
+                          setEnablingAutoTrade(true)
+                          
+                          // Get job to find strategy ID
+                          const jobResponse = await getJob(selectedResult.job)
+                          const job = jobResponse.data
+                          const strategyId = job.strategy
+                          const symbol = selectedResult.data_sources?.symbol?.replace('/', '') || 'XAUUSD'
+                          
+                          const response = await enableAutoTradingFromBacktest(
+                            strategyId,
+                            selectedResult.id,
+                            symbol
+                          )
+                          
+                          if (response.data.status === 'success') {
+                            alert(`🚀 استقرار با موفقیت انجام شد!\n\nاستراتژی شما اکنون در بخش «معاملات زنده» در حال پایش بازار است.`)
+                            // Use React Router for smoother navigation
+                            navigateTo('/trading')
+                          } else {
+                            alert('خطا در استقرار استراتژی: ' + response.data.message)
+                          }
+                        } catch (error: any) {
+                          console.error('Error deploying strategy:', error)
+                          alert('خطا در استقرار استراتژی: ' + (error.response?.data?.message || error.message || 'خطای نامشخص'))
+                        } finally {
+                          setEnablingAutoTrade(false)
+                        }
+                      }}
+                      disabled={enablingAutoTrade || !selectedResult}
+                      className="btn-primary flex items-center gap-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 shadow-lg transform active:scale-95 transition"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      {enablingAutoTrade ? 'در حال استقرار...' : 'استقرار استراتژی (Deploy)'}
+                    </button>
+                  ) : null}
+                  
                   <button
                     onClick={() => {
                       const shareText = `نتایج بک‌تست من:\nبازدهی: ${selectedResult.total_return > 0 ? '+' : ''}${selectedResult.total_return.toFixed(2)}%\nنرخ برد: ${selectedResult.win_rate.toFixed(2)}%\nمعاملات: ${selectedResult.total_trades}\n\n`

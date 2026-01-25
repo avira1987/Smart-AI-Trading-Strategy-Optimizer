@@ -34,6 +34,7 @@ from core.models import (
     StrategyMarketplaceListing,
     StrategyListingAccess,
     SystemSettings,
+    ForwardTestReport,
 )
 from core.models import Wallet, Transaction, AIRecommendation
 from core.models import UserScore, Achievement, UserAchievement
@@ -69,6 +70,7 @@ from .serializers import (
     UserScoreSerializer,
     AchievementSerializer,
     UserAchievementSerializer,
+    ForwardTestReportSerializer,
 )
 from .data_providers import DataProviderManager
 from .tasks import run_backtest_task, run_demo_trade_task, run_auto_trading
@@ -845,7 +847,7 @@ class TradingStrategyViewSet(viewsets.ModelViewSet):
     """ViewSet for managing trading strategies"""
     serializer_class = TradingStrategySerializer
     permission_classes = [IsAuthenticated]
-    filterset_fields = ['name']
+    filterset_fields = ['name', 'user'] # اضافه کردن فیلتر کاربر
     search_fields = ['name', 'description']
     pagination_class = None  # Disable pagination for strategies - return all results
 
@@ -3262,8 +3264,8 @@ class JobViewSet(viewsets.ReadOnlyModelViewSet):
             # فقط برای استراتژی‌های کاربر (نه مارکت‌پلیس) بررسی می‌کنیم که آیا حداقل یک استراتژی وجود دارد
             # اما اجازه می‌دهیم هر استراتژی کاربر برای بک‌تست استفاده شود، نه فقط استراتژی اصلی
             if not marketplace_access:
-                # برای استراتژی‌های کاربر، بررسی می‌کنیم که استراتژی متعلق به کاربر باشد
-                if strategy.user != user:
+                # برای استراتژی‌های کاربر، بررسی می‌کنیم که استراتژی متعلق به کاربر باشد (به جز ادمین‌ها)
+                if not (user.is_staff or user.is_superuser) and strategy.user != user:
                     return Response(
                         {'error': 'شما به این استراتژی دسترسی ندارید.'},
                         status=status.HTTP_403_FORBIDDEN
@@ -3423,9 +3425,10 @@ class LiveTradeViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        queryset = LiveTrade.objects.select_related('strategy', 'strategy__user')
+        queryset = LiveTrade.objects.select_related('strategy', 'strategy__user', 'user')
         if not (user.is_staff or user.is_superuser):
-            queryset = queryset.filter(strategy__user=user)
+            # Show trades belonging to the user
+            queryset = queryset.filter(user=user)
         return queryset
     
     @action(detail=False, methods=['get'])
@@ -3689,17 +3692,57 @@ class AutoTradingSettingsViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         user = self.request.user
-        qs = AutoTradingSettings.objects.select_related('strategy', 'strategy__user')
-        if not (user.is_staff or user.is_superuser):
-            qs = qs.filter(strategy__user=user)
+        if not user or not user.is_authenticated:
+            return AutoTradingSettings.objects.none()
+            
+        logger.info(f"Fetching auto trading settings for user: {user.username} (ID: {user.id})")
+        
+        # Use Q objects to allow for more complex filtering if needed later
+        # For now, just ensure we get settings for this user
+        if user.is_staff or user.is_superuser:
+            # For admins, show all settings but prioritize those with a user set
+            # and avoid duplicates if the same strategy has both user=None and user=admin
+            qs = AutoTradingSettings.objects.all()
+        else:
+            # Important: Filter by user field, not strategy__user
+            qs = AutoTradingSettings.objects.filter(user=user)
+            
+        qs = qs.select_related('strategy', 'strategy__user', 'user', 'deployed_result')
+        
         strategy_id = self.request.query_params.get('strategy')
         if strategy_id:
             qs = qs.filter(strategy_id=strategy_id)
-        return qs
+            
+        # امکان فیلتر بر اساس کاربر برای ادمین
+        user_id = self.request.query_params.get('user')
+        if user_id and (user.is_staff or user.is_superuser):
+            qs = qs.filter(user_id=user_id)
+            
+        logger.info(f"Found {qs.count()} auto trading settings for user {user.username}")
+        return qs.order_by('-created_at')
     
     @action(detail=False, methods=['post'])
     def create_or_update_for_strategy(self, request):
         """Create or update auto trading settings for a strategy"""
+        from core.models import UserProfile, TradingStrategy
+        from django.db.models import Q
+        
+        # Check if user has permission to use auto trading
+        # Admins always have permission
+        try:
+            profile = request.user.profile
+            if not profile.can_use_auto_trading and not request.user.is_superuser:
+                return Response({
+                    'status': 'error',
+                    'message': 'شما اجازه استفاده از ترید خودکار را ندارید. لطفا با ادمین تماس بگیرید.'
+                }, status=status.HTTP_403_FORBIDDEN)
+        except UserProfile.DoesNotExist:
+            if not request.user.is_superuser:
+                return Response({
+                    'status': 'error',
+                    'message': 'پروفایل کاربر یافت نشد'
+                }, status=status.HTTP_404_NOT_FOUND)
+        
         strategy_id = request.data.get('strategy_id')
         if not strategy_id:
             return Response({
@@ -3707,15 +3750,24 @@ class AutoTradingSettingsViewSet(viewsets.ModelViewSet):
                 'message': 'strategy_id is required'
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        try:
-            strategy = get_user_strategy_or_404(request.user, id=strategy_id)
-        except Http404:
+        # Allow access if owner OR has marketplace access
+        strategy_qs = TradingStrategy.objects.filter(id=strategy_id)
+        if not (request.user.is_staff or request.user.is_superuser):
+            strategy_qs = strategy_qs.filter(
+                Q(user=request.user) |
+                Q(marketplace_entry__accesses__user=request.user, 
+                  marketplace_entry__accesses__status__in=['trial', 'active'])
+            ).distinct()
+            
+        strategy = strategy_qs.first()
+        if not strategy:
             return Response({
                 'status': 'error',
-                'message': 'Strategy not found'
+                'message': 'استراتژی یافت نشد یا دسترسی ندارید'
             }, status=status.HTTP_404_NOT_FOUND)
         
         settings, created = AutoTradingSettings.objects.get_or_create(
+            user=request.user,
             strategy=strategy,
             defaults={
                 'symbol': request.data.get('symbol', 'XAUUSD'),
@@ -3733,17 +3785,167 @@ class AutoTradingSettingsViewSet(viewsets.ModelViewSet):
         
         if not created:
             # Update existing
-            for field in ['symbol', 'volume', 'max_open_trades', 'check_interval_minutes',
+            for field in ['symbol', 'timeframe', 'volume', 'max_open_trades', 'check_interval_minutes',
                          'use_stop_loss', 'use_take_profit', 'stop_loss_pips',
-                         'take_profit_pips', 'risk_per_trade_percent', 'is_enabled']:
+                         'take_profit_pips', 'risk_per_trade_percent', 'is_enabled',
+                         'require_backtest_result', 'min_backtest_win_rate', 'min_backtest_return',
+                         'min_backtest_trades', 'max_backtest_drawdown', 'use_latest_backtest_only']:
                 if field in request.data:
-                    setattr(settings, field, request.data[field])
+                    value = request.data[field]
+                    # Handle None values for optional fields
+                    if value is None or value == '':
+                        if field in ['min_backtest_win_rate', 'min_backtest_return', 'min_backtest_trades', 'max_backtest_drawdown']:
+                            setattr(settings, field, None)
+                    else:
+                        setattr(settings, field, value)
             settings.save()
         
         return Response({
             'status': 'success',
             'message': 'Settings saved successfully',
             'settings': AutoTradingSettingsSerializer(settings).data
+        })
+    
+    @action(detail=False, methods=['post'])
+    def enable_from_backtest(self, request):
+        """Enable auto trading based on backtest result"""
+        from core.models import Job, Result, UserProfile, TradingStrategy
+        from django.db.models import Q
+        
+        # Check if user has permission to use auto trading
+        # Admins always have permission
+        try:
+            profile = request.user.profile
+            if not profile.can_use_auto_trading and not request.user.is_superuser:
+                return Response({
+                    'status': 'error',
+                    'message': 'شما اجازه استفاده از ترید خودکار را ندارید. لطفا با ادمین تماس بگیرید.'
+                }, status=status.HTTP_403_FORBIDDEN)
+        except UserProfile.DoesNotExist:
+            if not request.user.is_superuser:
+                return Response({
+                    'status': 'error',
+                    'message': 'پروفایل کاربر یافت نشد'
+                }, status=status.HTTP_404_NOT_FOUND)
+        
+        strategy_id = request.data.get('strategy_id')
+        result_id = request.data.get('result_id')  # Optional: specific result to use
+        symbol = request.data.get('symbol', 'XAUUSD')
+        
+        if not strategy_id:
+            return Response({
+                'status': 'error',
+                'message': 'strategy_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Allow access if owner OR has marketplace access
+        strategy_qs = TradingStrategy.objects.filter(id=strategy_id)
+        if not (request.user.is_staff or request.user.is_superuser):
+            strategy_qs = strategy_qs.filter(
+                Q(user=request.user) |
+                Q(marketplace_entry__accesses__user=request.user, 
+                  marketplace_entry__accesses__status__in=['trial', 'active'])
+            ).distinct()
+            
+        strategy = strategy_qs.first()
+        if not strategy:
+            return Response({
+                'status': 'error',
+                'message': 'استراتژی یافت نشد یا دسترسی ندارید'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Find backtest result
+        if result_id:
+            try:
+                # Any user can use their own backtest result or results linked to the strategy they have access to
+                result = Result.objects.get(
+                    id=result_id,
+                    job__strategy=strategy,
+                    job__job_type='backtest',
+                    job__status='completed'
+                )
+            except Result.DoesNotExist:
+                return Response({
+                    'status': 'error',
+                    'message': 'Backtest result not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+        else:
+            # Use latest successful backtest for this strategy that belongs to this user (if any) or any successful backtest for this strategy
+            latest_job = Job.objects.filter(
+                strategy=strategy,
+                job_type='backtest',
+                status='completed',
+                result__isnull=False
+            )
+            
+            # Prefer jobs by the current user
+            user_job = latest_job.filter(user=request.user).order_by('-created_at').first()
+            if user_job:
+                result = user_job.result
+            else:
+                # Fallback to any successful job for this strategy
+                any_job = latest_job.order_by('-created_at').first()
+                if not any_job or not any_job.result:
+                    return Response({
+                        'status': 'error',
+                        'message': 'No successful backtest result found for this strategy'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                result = any_job.result
+        
+        # Extract symbol and timeframe from backtest result if available
+        data_sources = result.data_sources or {}
+        bt_symbol = data_sources.get('symbol', symbol).replace('/', '')
+        bt_timeframe = data_sources.get('strategy_timeframe') or data_sources.get('normalized_timeframe') or 'M15'
+        
+        # Cleanup old settings without a user for this strategy to avoid confusion
+        AutoTradingSettings.objects.filter(strategy=strategy, user__isnull=True).delete()
+        
+        # Get or create settings for THIS USER and THIS STRATEGY
+        settings, created = AutoTradingSettings.objects.get_or_create(
+            user=request.user,
+            strategy=strategy,
+            defaults={
+                'deployed_result': result,
+                'symbol': bt_symbol,
+                'timeframe': bt_timeframe,
+                'is_enabled': True,
+                'require_backtest_result': True,
+                'use_latest_backtest_only': True,
+                # Set filters based on result (with some margin)
+                'min_backtest_win_rate': max(0, result.win_rate - 5) if result.win_rate > 0 else None,
+                'min_backtest_return': max(0, result.total_return - 5) if result.total_return > 0 else None,
+                'min_backtest_trades': max(5, int(result.total_trades * 0.8)) if result.total_trades > 0 else 10,
+                'max_backtest_drawdown': min(50, abs(result.max_drawdown) + 10) if result.max_drawdown < 0 else 50,
+            }
+        )
+        
+        if not created:
+            # Update existing settings
+            settings.deployed_result = result
+            settings.symbol = bt_symbol
+            settings.timeframe = bt_timeframe
+            settings.is_enabled = True
+            settings.require_backtest_result = True
+            settings.use_latest_backtest_only = True
+            settings.min_backtest_win_rate = max(0, result.win_rate - 5) if result.win_rate > 0 else None
+            settings.min_backtest_return = max(0, result.total_return - 5) if result.total_return > 0 else None
+            settings.min_backtest_trades = max(5, int(result.total_trades * 0.8)) if result.total_trades > 0 else 10
+            settings.max_backtest_drawdown = min(50, abs(result.max_drawdown) + 10) if result.max_drawdown < 0 else 50
+            settings.save()
+        
+        serializer = AutoTradingSettingsSerializer(settings)
+        
+        return Response({
+            'status': 'success',
+            'message': 'Auto trading enabled based on backtest result',
+            'settings': serializer.data,
+            'backtest_result': {
+                'id': result.id,
+                'total_return': result.total_return,
+                'win_rate': result.win_rate,
+                'total_trades': result.total_trades,
+                'max_drawdown': result.max_drawdown
+            }
         })
     
     @action(detail=True, methods=['post'])
@@ -3766,6 +3968,7 @@ class AutoTradingSettingsViewSet(viewsets.ModelViewSet):
         
         strategy_id = request.data.get('strategy_id')
         symbol = request.data.get('symbol', 'XAUUSD')
+        timeframe = request.data.get('timeframe', 'M15')
         
         if not strategy_id:
             return Response({
@@ -3781,7 +3984,7 @@ class AutoTradingSettingsViewSet(viewsets.ModelViewSet):
                 'message': 'Strategy not found'
             }, status=status.HTTP_404_NOT_FOUND)
         
-        signal_result = check_strategy_signals(strategy, symbol)
+        signal_result = check_strategy_signals(strategy, symbol, timeframe=timeframe)
         
         return Response({
             'status': 'success',
@@ -5679,14 +5882,24 @@ class AdminUserManagementView(APIView):
     
     def get(self, request):
         """Get list of users with their wallet balances"""
-        from core.models import UserProfile
+        from core.models import UserProfile, UserSession
+        from django.db.models import Max
         
         users = User.objects.all().select_related('wallet', 'profile')
         user_data = []
         
+        # Get last login times for all users in one query
+        last_logins = UserSession.objects.values('user').annotate(
+            last_login=Max('login_time')
+        )
+        
+        # Create a dictionary for quick lookup
+        last_login_dict = {item['user']: item['last_login'] for item in last_logins}
+        
         for user in users:
             wallet, _ = Wallet.objects.get_or_create(user=user)
             profile = getattr(user, 'profile', None)
+            last_login = last_login_dict.get(user.id)
             
             user_data.append({
                 'id': user.id,
@@ -5701,6 +5914,8 @@ class AdminUserManagementView(APIView):
                 'date_joined': user.date_joined,
                 'is_staff': user.is_staff,
                 'is_superuser': user.is_superuser,
+                'can_use_auto_trading': profile.can_use_auto_trading if profile else False,
+                'last_login': last_login.isoformat() if last_login else None,
             })
         
         return Response({
@@ -5863,6 +6078,10 @@ class AdminUserManagementView(APIView):
                     status=status.HTTP_403_FORBIDDEN
                 )
         
+        # Update can_use_auto_trading permission
+        if 'can_use_auto_trading' in request.data:
+            profile.can_use_auto_trading = request.data.get('can_use_auto_trading', False)
+        
         try:
             user.save()
             profile.save()
@@ -5949,5 +6168,225 @@ class AdminUserManagementView(APIView):
             logger.error(f"Error deleting user: {e}")
             return Response(
                 {'error': f'خطا در حذف کاربر: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class ForwardTestReportViewSet(viewsets.ModelViewSet):
+    """ViewSet for managing and building forward test reports"""
+    queryset = ForwardTestReport.objects.all()
+    serializer_class = ForwardTestReportSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            return ForwardTestReport.objects.all()
+        return ForwardTestReport.objects.filter(strategy__user=user)
+    
+    @action(detail=False, methods=['post'])
+    def build_report(self, request):
+        """Build a new forward test report for a strategy"""
+        from .verification import build_forward_test_report
+        
+        strategy_id = request.data.get('strategy_id')
+        start_date_str = request.data.get('start_date')
+        end_date_str = request.data.get('end_date')
+        
+        if not strategy_id:
+            return Response({'error': 'strategy_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+            
+        start_date = None
+        if start_date_str:
+            start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00'))
+            
+        end_date = None
+        if end_date_str:
+            end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00'))
+            
+        result = build_forward_test_report(strategy_id, start_date, end_date, user=request.user)
+        
+        if result['status'] == 'success':
+            report = ForwardTestReport.objects.get(id=result['report_id'])
+            return Response({
+                'status': 'success',
+                'message': 'گزارش راستی‌آزمایی با موفقیت بیلد شد',
+                'report': ForwardTestReportSerializer(report).data
+            })
+        else:
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AdminBacktestAllStrategiesView(APIView):
+    """Endpoint برای ادمین برای بک تست همه استراتژی‌ها"""
+    permission_classes = [IsAdminOrStaff]
+    
+    def post(self, request):
+        """ایجاد بک تست برای همه استراتژی‌های پردازش شده"""
+        try:
+            # دریافت پارامترهای اختیاری
+            timeframe_days = request.data.get('timeframe_days', 365)
+            symbol_override = request.data.get('symbol', None)
+            initial_capital = request.data.get('initial_capital', 10000)
+            selected_indicators = request.data.get('selected_indicators', [])
+            ai_provider = request.data.get('ai_provider', None)
+            temperature = request.data.get('temperature', 0.3)
+            
+            # تبدیل timeframe_days به عدد
+            try:
+                timeframe_days = int(timeframe_days)
+                if timeframe_days <= 0:
+                    return Response(
+                        {'error': 'timeframe_days باید بیشتر از صفر باشد'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except (ValueError, TypeError):
+                return Response(
+                    {'error': 'timeframe_days باید یک عدد معتبر باشد'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # تبدیل initial_capital به عدد
+            try:
+                initial_capital = float(initial_capital)
+                if initial_capital <= 0:
+                    return Response(
+                        {'error': 'initial_capital باید بیشتر از صفر باشد'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except (ValueError, TypeError):
+                return Response(
+                    {'error': 'initial_capital باید یک عدد معتبر باشد'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # دریافت همه استراتژی‌های پردازش شده
+            strategies = TradingStrategy.objects.filter(processing_status='processed')
+            
+            if not strategies.exists():
+                return Response(
+                    {
+                        'message': 'هیچ استراتژی پردازش شده‌ای یافت نشد',
+                        'created_jobs': [],
+                        'total_strategies': 0,
+                        'created_count': 0
+                    },
+                    status=status.HTTP_200_OK
+                )
+            
+            # بررسی در دسترس بودن Celery
+            celery_available = _is_celery_available_quick()
+            
+            created_jobs = []
+            skipped_strategies = []
+            
+            for strategy in strategies:
+                try:
+                    # ایجاد Job برای هر استراتژی
+                    job = Job.objects.create(
+                        user=strategy.user,  # استفاده از کاربر صاحب استراتژی
+                        strategy=strategy,
+                        job_type='backtest',
+                        status='pending',
+                        origin='direct'
+                    )
+                    
+                    # اجرای بک تست
+                    if celery_available:
+                        try:
+                            run_backtest_task.delay(
+                                job.id,
+                                timeframe_days=timeframe_days,
+                                symbol_override=symbol_override,
+                                initial_capital=initial_capital,
+                                selected_indicators=selected_indicators,
+                                ai_provider=ai_provider,
+                                temperature=temperature
+                            )
+                            created_jobs.append({
+                                'job_id': job.id,
+                                'strategy_id': strategy.id,
+                                'strategy_name': strategy.name,
+                                'user': strategy.user.username if strategy.user else None,
+                                'status': 'queued'
+                            })
+                            logger.info(f"Admin queued backtest job {job.id} for strategy {strategy.id} ({strategy.name})")
+                        except Exception as e:
+                            logger.error(f"Error queueing backtest job {job.id}: {e}")
+                            # اگر Celery خطا داد، job را failed کنیم
+                            job.status = 'failed'
+                            job.error_message = f'خطا در صف‌بندی: {str(e)}'
+                            job.save()
+                            skipped_strategies.append({
+                                'strategy_id': strategy.id,
+                                'strategy_name': strategy.name,
+                                'error': str(e)
+                            })
+                    else:
+                        # اجرای همزمان در thread جداگانه
+                        import threading
+                        def run_backtest_in_thread():
+                            try:
+                                logger.info(f"Admin running backtest in thread for job {job.id}, strategy {strategy.id}")
+                                run_backtest_task(
+                                    job.id,
+                                    timeframe_days=timeframe_days,
+                                    symbol_override=symbol_override,
+                                    initial_capital=initial_capital,
+                                    selected_indicators=selected_indicators,
+                                    ai_provider=ai_provider,
+                                    temperature=temperature
+                                )
+                                job.refresh_from_db()
+                                logger.info(f"Admin backtest completed in thread for job {job.id}, status: {job.status}")
+                            except Exception as e:
+                                logger.error(f"Error executing admin backtest in thread for job {job.id}: {e}", exc_info=True)
+                                job.refresh_from_db()
+                                job.status = 'failed'
+                                job.error_message = str(e)
+                                job.save()
+                        
+                        thread = threading.Thread(target=run_backtest_in_thread, daemon=True)
+                        thread.start()
+                        created_jobs.append({
+                            'job_id': job.id,
+                            'strategy_id': strategy.id,
+                            'strategy_name': strategy.name,
+                            'user': strategy.user.username if strategy.user else None,
+                            'status': 'running'
+                        })
+                        logger.info(f"Admin started backtest in thread for job {job.id}, strategy {strategy.id} ({strategy.name})")
+                        
+                except Exception as e:
+                    logger.error(f"Error creating backtest job for strategy {strategy.id}: {e}", exc_info=True)
+                    skipped_strategies.append({
+                        'strategy_id': strategy.id,
+                        'strategy_name': strategy.name,
+                        'error': str(e)
+                    })
+            
+            logger.info(f"Admin {request.user.username} created {len(created_jobs)} backtest jobs for {len(strategies)} strategies")
+            
+            return Response({
+                'message': f'بک تست برای {len(created_jobs)} استراتژی ایجاد شد',
+                'created_jobs': created_jobs,
+                'skipped_strategies': skipped_strategies,
+                'total_strategies': len(strategies),
+                'created_count': len(created_jobs),
+                'skipped_count': len(skipped_strategies),
+                'parameters': {
+                    'timeframe_days': timeframe_days,
+                    'symbol_override': symbol_override,
+                    'initial_capital': initial_capital,
+                    'selected_indicators': selected_indicators,
+                    'ai_provider': ai_provider,
+                    'temperature': temperature
+                }
+            }, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            logger.error(f"Error in AdminBacktestAllStrategiesView: {e}", exc_info=True)
+            return Response(
+                {'error': f'خطا در ایجاد بک تست: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
