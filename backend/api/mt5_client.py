@@ -1,10 +1,17 @@
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Optional, Tuple, List, Dict, Any
-import MetaTrader5 as mt5
 import logging
 
 logger = logging.getLogger(__name__)
+
+# MetaTrader5 is Windows-only - optional on Linux
+try:
+    import MetaTrader5 as mt5
+    MT5_AVAILABLE = True
+except ImportError:
+    mt5 = None
+    MT5_AVAILABLE = False
 
 
 def fetch_mt5_m1_candles(symbol: str, count: int = 500) -> pd.DataFrame:
@@ -12,8 +19,10 @@ def fetch_mt5_m1_candles(symbol: str, count: int = 500) -> pd.DataFrame:
 
     Requirements:
     - MT5 terminal installed on this machine and logged in
-    - Python package MetaTrader5 installed
+    - Python package MetaTrader5 installed (Windows only)
     """
+    if not MT5_AVAILABLE or mt5 is None:
+        return pd.DataFrame()
     initialized = False
     try:
         if not mt5.initialize():
@@ -72,13 +81,17 @@ def is_standard_mt5_timeframe(timeframe: str) -> bool:
     
     return False
 
-TIMEFRAME_MAP = {
-    'M1': mt5.TIMEFRAME_M1,
-    'M5': mt5.TIMEFRAME_M5,
-    'M15': mt5.TIMEFRAME_M15,
-    'M30': mt5.TIMEFRAME_M30,
-    'H1': mt5.TIMEFRAME_H1,
-}
+def _get_timeframe_map():
+    if not MT5_AVAILABLE or mt5 is None:
+        return {}
+    return {
+        'M1': mt5.TIMEFRAME_M1,
+        'M5': mt5.TIMEFRAME_M5,
+        'M15': mt5.TIMEFRAME_M15,
+        'M30': mt5.TIMEFRAME_M30,
+        'H1': mt5.TIMEFRAME_H1,
+    }
+TIMEFRAME_MAP = _get_timeframe_map() if MT5_AVAILABLE else {}
 
 
 def _generate_symbol_variants(symbol: str) -> List[str]:
@@ -95,6 +108,9 @@ def fetch_mt5_candles(symbol: str, timeframe: str = 'M1', count: int = 500) -> T
 
     Returns: (DataFrame, error_message)
     """
+    if not MT5_AVAILABLE or mt5 is None:
+        return pd.DataFrame(), 'MetaTrader5 is not available (Windows only)'
+    tf_map = _get_timeframe_map()
     initialized = False
     logger.info(f"[MT5] fetch_mt5_candles start symbol={symbol} tf={timeframe} count={count}")
     try:
@@ -103,7 +119,7 @@ def fetch_mt5_candles(symbol: str, timeframe: str = 'M1', count: int = 500) -> T
             return pd.DataFrame(), 'Failed to initialize MT5 terminal'
         initialized = True
 
-        tf = TIMEFRAME_MAP.get(timeframe.upper(), mt5.TIMEFRAME_M1)
+        tf = tf_map.get(timeframe.upper(), mt5.TIMEFRAME_M1)
 
         candidate = symbol.strip()
         try:
@@ -314,6 +330,8 @@ def fetch_mt5_candles_aggregated(symbol: str, target_timeframe: str, count: int 
 
 def is_mt5_available() -> Tuple[bool, Optional[str]]:
     """Quick availability check for a locally installed and logged-in MT5 terminal."""
+    if not MT5_AVAILABLE or mt5 is None:
+        return False, 'MetaTrader5 is not available (Windows only)'
     try:
         if not mt5.initialize():
             return False, 'Failed to initialize MT5 terminal'
@@ -329,6 +347,8 @@ def is_mt5_available() -> Tuple[bool, Optional[str]]:
 
 def get_mt5_account_info():
     """Get account information from MT5."""
+    if not MT5_AVAILABLE or mt5 is None:
+        return None, 'MetaTrader5 is not available (Windows only)'
     initialized = False
     try:
         if not mt5.initialize():
@@ -373,6 +393,8 @@ def get_mt5_account_info():
 
 def get_mt5_positions(symbol: str = None):
     """Get open positions from MT5."""
+    if not MT5_AVAILABLE or mt5 is None:
+        return [], 'MetaTrader5 is not available (Windows only)'
     initialized = False
     try:
         if not mt5.initialize():
@@ -421,6 +443,8 @@ def compute_volume_for_risk(symbol: str, entry_price: float, stop_loss_price: fl
 
     Returns: (volume, error) where volume is float or None if error.
     """
+    if not MT5_AVAILABLE or mt5 is None:
+        return None, 'MetaTrader5 is not available (Windows only)'
     initialized = False
     try:
         if not mt5.initialize():
@@ -500,6 +524,8 @@ def open_mt5_trade(symbol: str, trade_type: str, volume: float,
     Returns:
         (result_dict, error_message)
     """
+    if not MT5_AVAILABLE or mt5 is None:
+        return None, 'MetaTrader5 is not available (Windows only)'
     initialized = False
     try:
         if not mt5.initialize():
@@ -657,6 +683,8 @@ def close_mt5_trade(ticket: int, volume: float = None):
     Returns:
         (result_dict, error_message)
     """
+    if not MT5_AVAILABLE or mt5 is None:
+        return None, 'MetaTrader5 is not available (Windows only)'
     initialized = False
     try:
         if not mt5.initialize():
@@ -754,6 +782,8 @@ def get_symbol_for_account(base_symbol: str = 'XAUUSD') -> str:
     Returns:
         Symbol with appropriate suffix based on account type
     """
+    if not MT5_AVAILABLE or mt5 is None:
+        return base_symbol
     account_info, error = get_mt5_account_info()
     if error or not account_info:
         # If we can't determine account type, try to detect from available symbols
@@ -801,6 +831,8 @@ def _detect_symbol_from_available(base_symbol: str) -> str:
     Returns:
         Available symbol variant or base symbol if neither found
     """
+    if not MT5_AVAILABLE or mt5 is None:
+        return base_symbol
     initialized = False
     try:
         if not mt5.initialize():
@@ -853,6 +885,8 @@ def get_available_mt5_symbols() -> Tuple[List[Dict[str, Any]], Optional[str]]:
     Returns:
         (list of symbol dictionaries with 'name' and 'is_available' status, error_message)
     """
+    if not MT5_AVAILABLE or mt5 is None:
+        return [], 'MetaTrader5 is not available (Windows only)'
     initialized = False
     available_symbols = []
     
@@ -915,6 +949,8 @@ def map_user_symbol_to_server_symbol(user_symbol: str, for_backtest: bool = True
     Returns:
         Server symbol (e.g., 'XAUUSD_l' for XAUUSD in backtest mode)
     """
+    if not MT5_AVAILABLE or mt5 is None:
+        return user_symbol.strip().upper()
     user_symbol = user_symbol.strip().upper()
     
     # For backtesting with gold symbols, prefer _l (live) variant
